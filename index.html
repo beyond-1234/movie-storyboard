@@ -10,7 +10,8 @@
         body { margin: 0; background-color: #f0f2f5; font-family: "Helvetica Neue", Helvetica, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "微软雅黑", Arial, sans-serif; }
         .el-header { background-color: #304156; color: #fff; line-height: 60px; display: flex; justify-content: space-between; align-items: center; padding: 0 20px; }
         .app-title { font-size: 20px; font-weight: bold; }
-        .main-container { padding: 20px; max-width: 1400px; margin: 0 auto; }
+        /* Modified: Main container width to 80% */
+        .main-container { width: 80%; max-width: none; margin: 0 auto; padding: 20px; }
         .project-card { margin-bottom: 20px; }
         .shot-card { min-height: 600px; }
         .image-preview-list { display: flex; gap: 10px; flex-wrap: wrap; }
@@ -69,6 +70,14 @@
         .frame-placeholder { width: 100%; height: 100px; display: flex; align-items: center; justify-content: center; background: #fff; border: 1px dashed #ccc; border-radius: 4px; color: #ccc; cursor: pointer; font-size: 12px; position: relative; }
         .frame-img { width: 100%; height: 100px; object-fit: cover; border-radius: 4px; cursor: pointer; display: block; }
         .frame-delete { position: absolute; top: 2px; right: 2px; color: red; cursor: pointer; background: rgba(255,255,255,0.8); border-radius: 50%; padding: 2px; }
+
+        /* Video Play Icon Overlay */
+        .video-play-overlay {
+            position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+            background: rgba(0,0,0,0.6); color: #fff; border-radius: 50%; width: 30px; height: 30px;
+            display: flex; align-items: center; justify-content: center; cursor: pointer;
+            font-size: 16px;
+        }
 
         /* Scrollbar */
         ::-webkit-scrollbar { width: 8px; height: 8px; }
@@ -161,9 +170,13 @@
                                 <el-table-column label="画面预览" width="220" align="center">
                                     <template slot-scope="scope">
                                         <div style="display: flex; gap: 5px; justify-content: center;">
-                                            <div v-if="scope.row.start_frame" style="text-align: center;">
+                                            <div v-if="scope.row.start_frame" style="text-align: center; position: relative;">
                                                 <el-image style="width: 80px; height: 60px; border-radius: 4px" :src="scope.row.start_frame" :preview-src-list="[scope.row.start_frame]"></el-image>
                                                 <div style="font-size: 10px; color: #999;">首帧</div>
+                                                <!-- 视频播放入口 -->
+                                                <div v-if="scope.row.video_url" class="video-play-overlay" @click="playVideo(scope.row)">
+                                                    <i class="el-icon-caret-right"></i>
+                                                </div>
                                             </div>
                                             <div v-if="scope.row.end_frame" style="text-align: center;">
                                                 <el-image style="width: 80px; height: 60px; border-radius: 4px" :src="scope.row.end_frame" :preview-src-list="[scope.row.end_frame]"></el-image>
@@ -183,11 +196,23 @@
 
                                 <el-table-column prop="duration" label="时长" width="80"></el-table-column>
 
-                                <el-table-column label="操作" width="220" fixed="right">
+                                <el-table-column label="操作" width="320" fixed="right">
                                     <template slot-scope="scope">
-                                        <el-button size="mini" @click="editShot(scope.row)">编辑</el-button>
-                                        <el-button size="mini" type="success" plain @click="quickGenerateImage(scope.row)">生图</el-button>
-                                        <el-button size="mini" type="danger" @click="deleteShot(scope.row)">删除</el-button>
+                                        <el-tooltip content="编辑详情" placement="top">
+                                            <el-button size="mini" icon="el-icon-edit" circle @click="editShot(scope.row)"></el-button>
+                                        </el-tooltip>
+                                        <el-tooltip content="生成首帧" placement="top">
+                                            <el-button size="mini" type="success" icon="el-icon-picture-outline" circle plain @click="quickGenerateImage(scope.row, 'start')"></el-button>
+                                        </el-tooltip>
+                                        <el-tooltip content="生成尾帧" placement="top">
+                                            <el-button size="mini" type="success" icon="el-icon-picture" circle plain @click="quickGenerateImage(scope.row, 'end')"></el-button>
+                                        </el-tooltip>
+                                        <el-tooltip content="生成视频" placement="top">
+                                            <el-button size="mini" type="warning" icon="el-icon-video-camera" circle plain @click="quickGenerateVideo(scope.row)" :disabled="!scope.row.start_frame"></el-button>
+                                        </el-tooltip>
+                                        <el-tooltip content="删除" placement="top">
+                                            <el-button size="mini" type="danger" icon="el-icon-delete" circle plain @click="deleteShot(scope.row)"></el-button>
+                                        </el-tooltip>
                                     </template>
                                 </el-table-column>
                             </el-table>
@@ -198,6 +223,13 @@
                 <el-empty v-if="!currentProject" description="请在左上角选择或创建一个电影项目"></el-empty>
             </el-main>
         </el-container>
+
+        <!-- 视频播放弹窗 -->
+        <el-dialog :visible.sync="videoPlayerVisible" width="60%" title="视频预览">
+            <div style="text-align: center;">
+                <video v-if="playerVideoUrl" :src="playerVideoUrl" controls autoplay style="width: 100%; max-height: 500px;"></video>
+            </div>
+        </el-dialog>
 
         <!-- 各种弹窗 (项目、分镜、设置) 保持不变 -->
         <!-- 项目创建/编辑弹窗 -->
@@ -437,6 +469,10 @@
                 providers: [],
                 editingProvider: null,
 
+                // 视频播放
+                videoPlayerVisible: false,
+                playerVideoUrl: '',
+
                 // 生成选项
                 genOptions: {
                     providerId: '',
@@ -453,7 +489,7 @@
                 // 分镜表单
                 shotDialogVisible: false,
                 videoUrl: '',
-                shotForm: { id: null, movie_id: '', images: [], start_frame: '', end_frame: '', scene: '', shot_number: '', visual_description: '', audio_description: '', special_technique: '', duration: '', notes: '' },
+                shotForm: { id: null, movie_id: '', images: [], start_frame: '', end_frame: '', video_url: '', scene: '', shot_number: '', visual_description: '', audio_description: '', special_technique: '', duration: '', notes: '' },
 
                 previewVisible: false,
                 previewUrl: ''
@@ -642,33 +678,116 @@
                         this.$message.success('关键帧全部生成完毕');
                     } catch (e) { if (e.message !== '已取消') console.error(e); } finally { this.stopGlobalLoading(); }
                 },
-                async quickGenerateImage(row) {
+
+                // 列表页快速操作：生成图片
+                async quickGenerateImage(row, type) {
                     if(!row.visual_description) return this.$message.warning('无画面说明，无法生成');
-                    this.startGlobalLoading('正在快速生成预览图...', '请稍候');
+
+                    const isStart = type === 'start';
+                    this.startGlobalLoading(`正在快速生成${isStart ? '首帧' : '尾帧'}...`, '请稍候');
+
                     try {
                         const style = `${this.currentProject.worldview_background} ${this.currentProject.visual_color_system}`;
                         const prompt = `Movie Shot, ${style}, ${row.visual_description}`;
+
                         const res = await this.request('POST', '/api/generate/image', {
-                            prompt: prompt, provider_id: this.genOptions.providerId, model_name: this.genOptions.imageModelName, frame_type: 'start'
+                            prompt: prompt,
+                            provider_id: this.genOptions.providerId,
+                            model_name: this.genOptions.imageModelName,
+                            frame_type: type
                         }, { signal: this.currentAbortController.signal });
-                        row.start_frame = res.url;
-                        await this.request('PUT', `/api/projects/${this.currentProjectId}/shots/${row.id}`, { start_frame: res.url });
-                        this.$message.success('首帧生成成功');
-                    } catch (e) { if (e.message !== '已取消') console.error(e); } finally { this.stopGlobalLoading(); }
+
+                        // 更新行数据
+                        if(isStart) row.start_frame = res.url;
+                        else row.end_frame = res.url;
+
+                        // 持久化
+                        await this.request('PUT', `/api/projects/${this.currentProjectId}/shots/${row.id}`, {
+                            [isStart ? 'start_frame' : 'end_frame']: res.url
+                        });
+
+                        this.$message.success((isStart?'首帧':'尾帧') + '生成成功');
+                    } catch (e) {
+                        if (e.message !== '已取消') console.error(e);
+                    } finally {
+                        this.stopGlobalLoading();
+                    }
                 },
+
+                // 列表页快速操作：生成视频
+                async quickGenerateVideo(row) {
+                    if (!row.start_frame) return this.$message.warning('请先生成首帧作为参考');
+
+                    this.startGlobalLoading(
+                        '正在生成视频...',
+                        '视频生成耗时较长（可能需要 2-5 分钟），请耐心等待'
+                    );
+
+                    try {
+                        const res = await this.request('POST', '/api/generate/video', {
+                            prompt: row.visual_description,
+                            start_frame: row.start_frame,
+                            end_frame: row.end_frame,
+                            provider_id: this.genOptions.providerId,
+                            model_name: this.genOptions.videoModelName
+                        }, { signal: this.currentAbortController.signal });
+
+                        if (res.url) {
+                            row.video_url = res.url;
+                            // 持久化
+                            await this.request('PUT', `/api/projects/${this.currentProjectId}/shots/${row.id}`, {
+                                video_url: res.url
+                            });
+                            this.$message.success('视频生成完毕');
+                        } else {
+                            this.$message.error(res.error_msg || '视频生成失败，未返回URL');
+                        }
+                    } catch (e) {
+                        if (e.message !== '已取消') console.error(e);
+                    } finally {
+                        this.stopGlobalLoading();
+                    }
+                },
+
+                // 视频生成 (弹窗内)
                 async handleGenVideo() {
                     const refImage = this.shotForm.start_frame;
                     if (!refImage) return this.$message.warning('请先生成首帧作为参考');
-                    this.startGlobalLoading('正在生成视频...', '视频生成耗时较长（可能需要 2-5 分钟），请耐心等待，切勿关闭窗口');
+
+                    this.startGlobalLoading(
+                        '正在生成视频...',
+                        '视频生成耗时较长（可能需要 2-5 分钟），请耐心等待，切勿关闭窗口'
+                    );
                     this.videoUrl = '';
+
                     try {
                         const res = await this.request('POST', '/api/generate/video', {
-                            prompt: this.shotForm.visual_description, start_frame: this.shotForm.start_frame, end_frame: this.shotForm.end_frame,
-                            provider_id: this.genOptions.providerId, model_name: this.genOptions.videoModelName
+                            prompt: this.shotForm.visual_description,
+                            start_frame: this.shotForm.start_frame,
+                            end_frame: this.shotForm.end_frame,
+                            provider_id: this.genOptions.providerId,
+                            model_name: this.genOptions.videoModelName
                         }, { signal: this.currentAbortController.signal });
-                        if (res.url) { this.videoUrl = res.url; this.$message.success('视频生成完毕'); }
-                        else { this.$message.error(res.error_msg || '视频生成失败，未返回URL'); }
-                    } catch (e) { if (e.message !== '已取消') console.error(e); } finally { this.stopGlobalLoading(); }
+
+                        if (res.url) {
+                            this.videoUrl = res.url;
+                            this.shotForm.video_url = res.url; // Update local form
+                            this.$message.success('视频生成完毕');
+                        } else {
+                            this.$message.error(res.error_msg || '视频生成失败，未返回URL');
+                        }
+                    } catch (e) {
+                        if (e.message !== '已取消') console.error(e);
+                    } finally {
+                        this.stopGlobalLoading();
+                    }
+                },
+
+                // 播放视频
+                playVideo(row) {
+                    if(!row.video_url) return;
+                    this.playerVideoUrl = row.video_url;
+                    this.videoPlayerVisible = true;
                 },
 
                 // --- 设置逻辑 ---
@@ -753,12 +872,15 @@
                     try { this.shotList = await this.request('GET', `/api/projects/${pid}/shots`); } finally { this.loadingShots = false; }
                 },
                 openCreateShot() {
-                    this.shotForm = { movie_id: this.currentProjectId, images: [], start_frame: '', end_frame: '', scene: '', shot_number: '', visual_description: '', audio_description: '', special_technique: '', duration: '', notes: '' };
+                    this.shotForm = { movie_id: this.currentProjectId, images: [], start_frame: '', end_frame: '', video_url: '', scene: '', shot_number: '', visual_description: '', audio_description: '', special_technique: '', duration: '', notes: '' };
                     this.videoUrl = ''; this.shotDialogVisible = true;
                 },
-                editShot(row) { this.shotForm = JSON.parse(JSON.stringify(row)); this.videoUrl = ''; this.shotDialogVisible = true; },
+                editShot(row) { this.shotForm = JSON.parse(JSON.stringify(row)); this.videoUrl = row.video_url || ''; this.shotDialogVisible = true; },
                 async submitShot() {
                     if (!this.shotForm.shot_number) return this.$message.warning('镜头号不能为空');
+                    // Note: this.videoUrl might be set by handleGenVideo but we also need to map it back to shotForm if not already
+                    if (this.videoUrl) this.shotForm.video_url = this.videoUrl;
+
                     if (this.shotForm.id) {
                         const updated = await this.request('PUT', `/api/projects/${this.currentProjectId}/shots/${this.shotForm.id}`, this.shotForm);
                         const idx = this.shotList.findIndex(s => s.id === updated.id); if (idx !== -1) this.$set(this.shotList, idx, updated);

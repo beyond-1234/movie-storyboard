@@ -118,6 +118,7 @@ class StoryboardShot:
     notes: str = ""
     start_frame: str = ""
     end_frame: str = ""
+    video_url: str = "" # 新增：视频链接
     images: List[str] = field(default_factory=list)
 
     created_time: str = field(default_factory=lambda: datetime.now().isoformat())
@@ -283,7 +284,7 @@ def delete_project(project_id):
         return jsonify({"message": "删除成功"})
     return jsonify({"error": "项目不存在"}), 404
 
-# --- 剧本管理接口 (New) ---
+# --- 剧本管理接口 ---
 
 @app.route('/api/projects/<project_id>/script', methods=['GET'])
 def get_script(project_id):
@@ -306,7 +307,7 @@ def save_script(project_id):
 
     return jsonify({"success": True})
 
-# --- AI 文本与分镜分析接口 (New) ---
+# --- AI 文本与分镜分析接口 ---
 
 @app.route('/api/generate/text', methods=['POST'])
 def generate_text_api():
