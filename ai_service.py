@@ -8,7 +8,7 @@ import logging
 from http import HTTPStatus
 from urllib.parse import urlparse, unquote
 from pathlib import PurePosixPath, Path
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 
 # 配置日志
 logging.basicConfig(
@@ -21,7 +21,7 @@ logger = logging.getLogger("AIService")
 # 尝试导入 dashscope
 try:
     import dashscope
-    from dashscope import ImageSynthesis, VideoSynthesis, MultiModalConversation
+    from dashscope import ImageSynthesis, VideoSynthesis, MultiModalConversation, Generation
     logger.info("DashScope SDK imported successfully.")
 except ImportError:
     dashscope = None
@@ -53,6 +53,43 @@ def file_to_base64(file_path: str) -> Optional[str]:
     except Exception as e:
         logger.error(f"[Base64] Conversion failed for {file_path}: {e}", exc_info=True)
         return None
+
+def generate_aliyun_text(
+    messages: List[Dict[str, str]],
+    api_key: Optional[str] = None,
+    model: str = "qwen-plus"
+) -> Dict[str, Any]:
+    """
+    调用通义千问进行文本生成 (用于剧本编写和分析)
+    """
+    logger.info(f"[Text Gen] Request received. Model: {model}")
+
+    if not dashscope:
+        return {'success': False, 'error_msg': '服务器缺少 dashscope 依赖库', 'status_code': 500}
+
+    final_api_key = api_key or os.getenv("DASHSCOPE_API_KEY", "")
+    if not final_api_key:
+        return {'success': False, 'error_msg': '未配置 DASHSCOPE_API_KEY', 'status_code': 401}
+
+    try:
+        response = Generation.call(
+            api_key=final_api_key,
+            model=model,
+            messages=messages,
+            result_format='message'
+        )
+
+        if response.status_code == HTTPStatus.OK:
+            content = response.output.choices[0].message.content
+            return {'success': True, 'content': content}
+        else:
+            err_msg = f"API Error: {response.code} - {response.message}"
+            logger.error(f"[Text Gen] {err_msg}")
+            return {'success': False, 'error_msg': err_msg, 'status_code': response.status_code}
+
+    except Exception as e:
+        logger.exception(f"[Text Gen] Exception: {e}")
+        return {'success': False, 'error_msg': str(e), 'status_code': 500}
 
 def generate_aliyun_image(
     prompt: str,
@@ -206,7 +243,7 @@ def generate_aliyun_video(
             'model': model,
             'prompt': prompt,
             'prompt_extend': True,
-            'resolution': "480P" # 可选
+            # 'resolution': "720P" # 可选
         }
 
         # 处理本地文件路径：转换为 Base64 Data URI

@@ -2,6 +2,7 @@ import os
 import json
 import uuid
 import time
+import re
 from dataclasses import dataclass, field, asdict
 from datetime import datetime
 from typing import List, Optional, Dict, Any
@@ -9,7 +10,7 @@ from flask import Flask, request, jsonify, send_file
 from pathlib import Path
 
 # 引入拆分后的 AI 服务 (同步版本)
-from ai_service import generate_aliyun_image, generate_aliyun_video
+from ai_service import generate_aliyun_image, generate_aliyun_video, generate_aliyun_text
 
 # --- 配置 ---
 DATA_DIR = "projects"
@@ -63,6 +64,19 @@ def get_provider_config(provider_id):
     for p in settings.get('providers', []):
         if p.get('id') == provider_id:
             return p
+    return None
+
+def get_aliyun_api_key(provider_id=None):
+    """辅助函数：获取 Aliyun API Key"""
+    if provider_id:
+        conf = get_provider_config(provider_id)
+        if conf: return conf.get('api_key')
+
+    # 否则找第一个开启的 aliyun provider
+    settings = get_settings_data()
+    for p in settings.get('providers', []):
+        if p.get('type') == 'aliyun' and p.get('enabled'):
+            return p.get('api_key')
     return None
 
 # --- 数据模型 (Data Classes) ---
@@ -230,6 +244,10 @@ def create_project():
     shot_path = os.path.join(get_project_path(project.id), 'shot.json')
     write_json(shot_path, [])
 
+    # 初始化脚本文件
+    script_path = os.path.join(get_project_path(project.id), 'script.json')
+    write_json(script_path, [])
+
     return jsonify(project.to_dict()), 201
 
 @app.route('/api/projects/<project_id>', methods=['GET'])
@@ -264,6 +282,93 @@ def delete_project(project_id):
         shutil.rmtree(path)
         return jsonify({"message": "删除成功"})
     return jsonify({"error": "项目不存在"}), 404
+
+# --- 剧本管理接口 (New) ---
+
+@app.route('/api/projects/<project_id>/script', methods=['GET'])
+def get_script(project_id):
+    path = os.path.join(get_project_path(project_id), 'script.json')
+    script_data = read_json(path, default=[])
+    return jsonify(script_data)
+
+@app.route('/api/projects/<project_id>/script', methods=['POST'])
+def save_script(project_id):
+    data = request.json
+    path = os.path.join(get_project_path(project_id), 'script.json')
+    write_json(path, data)
+
+    # 更新项目时间
+    p_path = os.path.join(get_project_path(project_id), 'info.json')
+    p_data = read_json(p_path)
+    if p_data:
+        p_data['updated_time'] = datetime.now().isoformat()
+        write_json(p_path, p_data)
+
+    return jsonify({"success": True})
+
+# --- AI 文本与分镜分析接口 (New) ---
+
+@app.route('/api/generate/text', methods=['POST'])
+def generate_text_api():
+    """通用 AI 文本生成（用于剧本续写）"""
+    data = request.json
+    messages = data.get('messages', [])
+    model = data.get('model', 'qwen-plus')
+    provider_id = data.get('provider_id')
+
+    api_key = get_aliyun_api_key(provider_id)
+
+    result = generate_aliyun_text(messages, api_key=api_key, model=model)
+
+    if result['success']:
+        return jsonify({'content': result['content']})
+    else:
+        return jsonify({'error': result.get('error_msg', 'Unknown Error')}), result.get('status_code', 500)
+
+@app.route('/api/generate/analyze_script', methods=['POST'])
+def analyze_script():
+    """将剧本段落转化为分镜 JSON 数据"""
+    data = request.json
+    script_content = data.get('content', '')
+    provider_id = data.get('provider_id')
+    model = data.get('model', 'qwen-plus')
+
+    if not script_content:
+        return jsonify({'error': 'Empty content'}), 400
+
+    system_prompt = """
+    作为专业的电影分镜师，请分析以下剧本片段，将其转化为分镜表数据。
+    请返回一个JSON数组，数组中每个对象包含以下字段：
+    - scene: 场次 (例如 "1", "EXT. PARK")
+    - shot_number: 镜号 (例如 "1", "1A")
+    - visual_description: 画面说明 (详细描述画面内容，用于AI生图)
+    - audio_description: 声音说明 (对白、音效)
+    - duration: 时长 (例如 "3s")
+    - special_technique: 特殊技术 (例如 "推拉", "特写")
+
+    请只返回JSON字符串，不要包含markdown标记（如```json ... ```）。
+    """
+
+    messages = [
+        {'role': 'system', 'content': system_prompt},
+        {'role': 'user', 'content': f"剧本片段：\n{script_content}"}
+    ]
+
+    api_key = get_aliyun_api_key(provider_id)
+    result = generate_aliyun_text(messages, api_key=api_key, model=model)
+
+    if result['success']:
+        raw_content = result['content']
+        # 清理可能的 markdown 标记
+        cleaned_content = re.sub(r'^```json\s*|\s*```$', '', raw_content.strip(), flags=re.MULTILINE | re.DOTALL)
+        try:
+            shots_data = json.loads(cleaned_content)
+            return jsonify({'shots': shots_data})
+        except json.JSONDecodeError:
+            return jsonify({'error': 'AI returned invalid JSON', 'raw': raw_content}), 500
+    else:
+        return jsonify({'error': result.get('error_msg')}), result.get('status_code', 500)
+
 
 # --- 分镜管理接口 ---
 
