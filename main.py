@@ -3,84 +3,72 @@ import json
 import uuid
 import time
 import re
+import random
 from dataclasses import dataclass, field, asdict
 from datetime import datetime
 from typing import List, Optional, Dict, Any
 from flask import Flask, request, jsonify, send_file
 from pathlib import Path
 
-# 引入拆分后的 AI 服务 (同步版本)
-from ai_service import generate_aliyun_image, generate_aliyun_video, generate_aliyun_text
+# 引入 AI 服务
+from ai_service import generate_aliyun_image, generate_aliyun_video, generate_aliyun_text, generate_aliyun_voiceover
+# 引入 剪映导出服务 (新)
+from jianying_exporter import export_draft
 
 # --- 配置 ---
 DATA_DIR = "projects"
-STATIC_FOLDER = "."  # 当前目录作为静态文件目录
-IMG_SAVE_DIR = "static/imgs" # 图片保存子目录（相对于 STATIC_FOLDER）
-VIDEO_SAVE_DIR = "static/videos" # 视频保存子目录
-SETTINGS_FILE = "settings.json" # 全局配置文件
+STATIC_FOLDER = "."
+IMG_SAVE_DIR = "static/imgs"
+VIDEO_SAVE_DIR = "static/videos"
+AUDIO_SAVE_DIR = "static/audio"
+SETTINGS_FILE = "settings.json"
+# 导出目录
+EXPORT_DIR = "exports"
 
 app = Flask(__name__, static_url_path='', static_folder=STATIC_FOLDER)
 
 # --- 工具函数 ---
-
 def ensure_dirs():
-    if not os.path.exists(DATA_DIR):
-        os.makedirs(DATA_DIR)
+    if not os.path.exists(DATA_DIR): os.makedirs(DATA_DIR)
     Path(IMG_SAVE_DIR).mkdir(parents=True, exist_ok=True)
     Path(VIDEO_SAVE_DIR).mkdir(parents=True, exist_ok=True)
+    Path(AUDIO_SAVE_DIR).mkdir(parents=True, exist_ok=True)
+    Path(EXPORT_DIR).mkdir(parents=True, exist_ok=True)
 
-def get_project_path(project_id):
-    return os.path.join(DATA_DIR, project_id)
+def get_project_path(project_id): return os.path.join(DATA_DIR, project_id)
 
 def read_json(filepath, default=None):
-    if not os.path.exists(filepath):
-        return default if default is not None else {}
+    if not os.path.exists(filepath): return default if default is not None else {}
     try:
-        with open(filepath, 'r', encoding='utf-8') as f:
-            return json.load(f)
-    except Exception as e:
-        print(f"Error reading {filepath}: {e}")
-        return default if default is not None else {}
+        with open(filepath, 'r', encoding='utf-8') as f: return json.load(f)
+    except Exception as e: print(f"Error reading {filepath}: {e}"); return default if default is not None else {}
 
 def write_json(filepath, data):
     directory = os.path.dirname(filepath)
-    if directory:
-        os.makedirs(directory, exist_ok=True)
-        
+    if directory: os.makedirs(directory, exist_ok=True)
     def json_serial(obj):
-        if isinstance(obj, datetime):
-            return obj.isoformat()
+        if isinstance(obj, datetime): return obj.isoformat()
         raise TypeError(f"Type {type(obj)} not serializable")
-    
-    with open(filepath, 'w', encoding='utf-8') as f:
-        json.dump(data, f, default=json_serial, indent=4, ensure_ascii=False)
+    with open(filepath, 'w', encoding='utf-8') as f: json.dump(data, f, default=json_serial, indent=4, ensure_ascii=False)
 
-def get_settings_data():
-    return read_json(SETTINGS_FILE, default={'providers': []})
+def get_settings_data(): return read_json(SETTINGS_FILE, default={'providers': []})
 
 def get_provider_config(provider_id):
-    """根据ID获取供应商配置"""
     settings = get_settings_data()
     for p in settings.get('providers', []):
-        if p.get('id') == provider_id:
-            return p
+        if p.get('id') == provider_id: return p
     return None
 
 def get_aliyun_api_key(provider_id=None):
-    """辅助函数：获取 Aliyun API Key"""
     if provider_id:
         conf = get_provider_config(provider_id)
         if conf: return conf.get('api_key')
-    
-    # 否则找第一个开启的 aliyun provider
     settings = get_settings_data()
     for p in settings.get('providers', []):
-        if p.get('type') == 'aliyun' and p.get('enabled'):
-            return p.get('api_key')
+        if p.get('type') == 'aliyun' and p.get('enabled'): return p.get('api_key')
     return None
 
-# --- 数据模型 (Data Classes) ---
-
+# --- 数据模型 ---
 @dataclass
 class MovieProject:
     film_name: str
@@ -92,18 +80,16 @@ class MovieProject:
     director_emotional_intensity: int = 5
     director_expression_focus: str = ""
     visual_color_system: str = ""
+    visual_consistency_prompt: str = "" 
     id: str = field(default_factory=lambda: str(uuid.uuid4()))
     created_time: str = field(default_factory=lambda: datetime.now().isoformat())
     updated_time: str = field(default_factory=lambda: datetime.now().isoformat())
-
     @classmethod
     def from_dict(cls, data: Dict[str, Any]):
         valid_keys = cls.__dataclass_fields__.keys()
         filtered_data = {k: v for k, v in data.items() if k in valid_keys}
         return cls(**filtered_data)
-
-    def to_dict(self):
-        return asdict(self)
+    def to_dict(self): return asdict(self)
 
 @dataclass
 class StoryboardShot:
@@ -119,28 +105,25 @@ class StoryboardShot:
     start_frame: str = ""
     end_frame: str = ""
     video_url: str = "" 
+    dialogue: str = "" 
+    audio_url: str = "" 
+    start_frame_prompt: str = ""
+    end_frame_prompt: str = ""
     images: List[str] = field(default_factory=list) 
-    
     created_time: str = field(default_factory=lambda: datetime.now().isoformat())
     updated_time: str = field(default_factory=lambda: datetime.now().isoformat())
-
     @classmethod
     def from_dict(cls, data: Dict[str, Any]):
         valid_keys = cls.__dataclass_fields__.keys()
         filtered_data = {k: v for k, v in data.items() if k in valid_keys}
         return cls(**filtered_data)
+    def to_dict(self): return asdict(self)
 
-    def to_dict(self):
-        return asdict(self)
-
-# --- 路由 (Routes) ---
-
+# --- 路由 ---
 @app.route('/')
-def index():
-    return send_file('index.html')
+def index(): return send_file('index.html')
 
-# --- 系统设置接口 (CRUD) ---
-
+# ... [Settings APIs omitted] ...
 @app.route('/api/settings', methods=['GET'])
 def get_settings():
     data = get_settings_data()
@@ -148,13 +131,10 @@ def get_settings():
     response_list = []
     for p in providers:
         p_copy = p.copy()
-        if p_copy.get('api_key'):
-            p_copy['api_key'] = p_copy['api_key'][:6] + '******'
-        if 'models' not in p_copy:
-            p_copy['models'] = []
+        if p_copy.get('api_key'): p_copy['api_key'] = p_copy['api_key'][:6] + '******'
+        if 'models' not in p_copy: p_copy['models'] = []
         for m in p_copy['models']:
-            if 'type' not in m:
-                m['type'] = 'image' 
+            if 'type' not in m: m['type'] = 'image' 
         response_list.append(p_copy)
     return jsonify(response_list)
 
@@ -162,35 +142,23 @@ def get_settings():
 def save_provider():
     req_data = request.json
     settings = get_settings_data()
-    if 'providers' not in settings:
-        settings['providers'] = []
+    if 'providers' not in settings: settings['providers'] = []
     p_id = req_data.get('id')
     new_provider = {
-        'id': p_id or str(uuid.uuid4()),
-        'name': req_data.get('name', 'New Provider'),
-        'type': req_data.get('type', 'aliyun'),
-        'base_url': req_data.get('base_url', ''),
-        'models': req_data.get('models', []),
-        'enabled': req_data.get('enabled', True)
+        'id': p_id or str(uuid.uuid4()), 'name': req_data.get('name', 'New Provider'), 'type': req_data.get('type', 'aliyun'),
+        'base_url': req_data.get('base_url', ''), 'models': req_data.get('models', []), 'enabled': req_data.get('enabled', True)
     }
     input_key = req_data.get('api_key', '')
     if p_id:
         found = False
         for i, p in enumerate(settings['providers']):
             if p['id'] == p_id:
-                if '******' in input_key:
-                    new_provider['api_key'] = p.get('api_key', '')
-                else:
-                    new_provider['api_key'] = input_key
-                settings['providers'][i] = new_provider
-                found = True
-                break
-        if not found:
-            new_provider['api_key'] = input_key
-            settings['providers'].append(new_provider)
+                if '******' in input_key: new_provider['api_key'] = p.get('api_key', '')
+                else: new_provider['api_key'] = input_key
+                settings['providers'][i] = new_provider; found = True; break
+        if not found: new_provider['api_key'] = input_key; settings['providers'].append(new_provider)
     else:
-        new_provider['api_key'] = input_key
-        settings['providers'].append(new_provider)
+        new_provider['api_key'] = input_key; settings['providers'].append(new_provider)
     write_json(SETTINGS_FILE, settings)
     return jsonify({"success": True, "id": new_provider['id']})
 
@@ -199,13 +167,10 @@ def delete_provider(provider_id):
     settings = get_settings_data()
     original_len = len(settings.get('providers', []))
     settings['providers'] = [p for p in settings.get('providers', []) if p['id'] != provider_id]
-    if len(settings['providers']) < original_len:
-        write_json(SETTINGS_FILE, settings)
-        return jsonify({"success": True})
+    if len(settings['providers']) < original_len: write_json(SETTINGS_FILE, settings); return jsonify({"success": True})
     return jsonify({"error": "Provider not found"}), 404
 
-# --- 项目管理接口 ---
-
+# ... [Project APIs omitted] ...
 @app.route('/api/projects', methods=['GET'])
 def get_projects():
     ensure_dirs()
@@ -213,108 +178,59 @@ def get_projects():
     if os.path.exists(DATA_DIR):
         for pid in os.listdir(DATA_DIR):
             info_path = os.path.join(DATA_DIR, pid, 'info.json')
-            if os.path.exists(info_path):
-                data = read_json(info_path)
-                projects.append(data)
+            if os.path.exists(info_path): projects.append(read_json(info_path))
     projects.sort(key=lambda x: x.get('updated_time', ''), reverse=True)
     return jsonify(projects)
 
 @app.route('/api/projects', methods=['POST'])
 def create_project():
     data = request.json
-    if not data.get('film_name'):
-        return jsonify({"error": "项目名称必填"}), 400
+    if not data.get('film_name'): return jsonify({"error": "项目名称必填"}), 400
     project = MovieProject.from_dict(data)
-    path = os.path.join(get_project_path(project.id), 'info.json')
-    write_json(path, project.to_dict())
-    shot_path = os.path.join(get_project_path(project.id), 'shot.json')
-    write_json(shot_path, [])
-    script_path = os.path.join(get_project_path(project.id), 'script.json')
-    write_json(script_path, [])
+    write_json(os.path.join(get_project_path(project.id), 'info.json'), project.to_dict())
+    write_json(os.path.join(get_project_path(project.id), 'shot.json'), [])
+    write_json(os.path.join(get_project_path(project.id), 'script.json'), [])
     return jsonify(project.to_dict()), 201
 
 @app.route('/api/projects/<project_id>', methods=['GET'])
 def get_project(project_id):
-    path = os.path.join(get_project_path(project_id), 'info.json')
-    data = read_json(path)
-    if not data:
-        return jsonify({"error": "项目不存在"}), 404
-    return jsonify(data)
+    data = read_json(os.path.join(get_project_path(project_id), 'info.json'))
+    return jsonify(data) if data else (jsonify({"error": "Not found"}), 404)
 
 @app.route('/api/projects/<project_id>', methods=['PUT'])
 def update_project(project_id):
     path = os.path.join(get_project_path(project_id), 'info.json')
     data = read_json(path)
-    if not data:
-        return jsonify({"error": "项目不存在"}), 404
-    update_data = request.json
-    update_data['id'] = project_id
-    update_data['created_time'] = data.get('created_time')
-    update_data['updated_time'] = datetime.now().isoformat()
-    new_project = MovieProject.from_dict({**data, **update_data})
-    write_json(path, new_project.to_dict())
-    return jsonify(new_project.to_dict())
+    if not data: return jsonify({"error": "Not found"}), 404
+    new_data = {**data, **request.json, 'id': project_id, 'updated_time': datetime.now().isoformat()}
+    write_json(path, new_data)
+    return jsonify(new_data)
 
 @app.route('/api/projects/<project_id>', methods=['DELETE'])
 def delete_project(project_id):
     import shutil
-    path = get_project_path(project_id)
-    if os.path.exists(path):
-        shutil.rmtree(path)
-        return jsonify({"message": "删除成功"})
-    return jsonify({"error": "项目不存在"}), 404
+    if os.path.exists(get_project_path(project_id)): shutil.rmtree(get_project_path(project_id)); return jsonify({"message": "Deleted"})
+    return jsonify({"error": "Not found"}), 404
 
-# --- 剧本管理接口 ---
-
+# ... [Script APIs omitted] ...
 @app.route('/api/projects/<project_id>/script', methods=['GET'])
-def get_script(project_id):
-    path = os.path.join(get_project_path(project_id), 'script.json')
-    script_data = read_json(path, default=[])
-    return jsonify(script_data)
+def get_script(project_id): return jsonify(read_json(os.path.join(get_project_path(project_id), 'script.json'), default=[]))
 
 @app.route('/api/projects/<project_id>/script', methods=['POST'])
 def save_script(project_id):
-    data = request.json
-    path = os.path.join(get_project_path(project_id), 'script.json')
-    write_json(path, data)
-    p_path = os.path.join(get_project_path(project_id), 'info.json')
-    p_data = read_json(p_path)
-    if p_data:
-        p_data['updated_time'] = datetime.now().isoformat()
-        write_json(p_path, p_data)
+    write_json(os.path.join(get_project_path(project_id), 'script.json'), request.json)
     return jsonify({"success": True})
 
-# --- AI 业务逻辑接口 ---
-
+# ... [AI Text/Analyze APIs omitted] ...
 @app.route('/api/generate/script_continuation', methods=['POST'])
 def generate_script_continuation():
     data = request.json
-    context_text = data.get('context_text', '')
-    project_info = data.get('project_info', {})
     provider_id = data.get('provider_id')
-    model = data.get('model', 'qwen-plus')
-    
-    system_prompt = "你是一个专业的中文电影编剧助手。请根据项目背景和前文，续写一段剧本。\n"
-    if project_info:
-        system_prompt += f"项目名称：{project_info.get('film_name', '未命名')}\n"
-        system_prompt += f"核心冲突：{project_info.get('script_core_conflict', '未定义')}\n"
-        system_prompt += f"情感基调：{project_info.get('script_emotional_keywords', '未定义')}\n"
-        system_prompt += f"世界观：{project_info.get('worldview_background', '未定义')}\n"
-    
-    system_prompt += "\n**重要要求**：\n1. 输出内容必须**全部使用中文**。\n2. 风格要连贯，富有电影画面感。\n3. 侧重人物动作、神态和对白描写。"
-
-    messages = [
-        {'role': 'system', 'content': system_prompt},
-        {'role': 'user', 'content': f"前文剧本：\n{context_text}\n\n请续写下一段情节："}
-    ]
-    
+    system_prompt = "你是一个专业的中文电影编剧助手。请根据前文续写一段剧本。要求：全中文，画面感强。"
+    messages = [{'role': 'system', 'content': system_prompt}, {'role': 'user', 'content': f"前文：\n{data.get('context_text','')}\n\n请续写："}]
     api_key = get_aliyun_api_key(provider_id)
-    result = generate_aliyun_text(messages, api_key=api_key, model=model)
-    
-    if result['success']:
-        return jsonify({'content': result['content']})
-    else:
-        return jsonify({'error': result.get('error_msg', 'Unknown Error')}), result.get('status_code', 500)
+    result = generate_aliyun_text(messages, api_key=api_key, model='qwen-plus')
+    return jsonify({'content': result['content']}) if result['success'] else (jsonify({'error': result.get('error_msg')}), 500)
 
 @app.route('/api/generate/analyze_script', methods=['POST'])
 def analyze_script():
@@ -322,152 +238,88 @@ def analyze_script():
     script_content = data.get('content', '')
     provider_id = data.get('provider_id')
     model = data.get('model', 'qwen-plus')
-    
-    if not script_content:
-        return jsonify({'error': 'Empty content'}), 400
-
-    system_prompt = """
-    作为专业的电影分镜师，请分析以下剧本片段，将其转化为分镜表数据。
-    **输出要求**：
-    1. 返回一个纯 JSON 数组。
-    2. **必须使用中文**填写所有描述性字段。
-    3. 不要包含 Markdown 标记。
-    
-    **JSON对象结构**：
-    - scene: 场次
-    - shot_number: 镜号
-    - visual_description: 画面说明
-    - audio_description: 声音说明
-    - duration: 时长
-    - special_technique: 特殊技术
-    """
-    
-    messages = [
-        {'role': 'system', 'content': system_prompt},
-        {'role': 'user', 'content': f"剧本片段：\n{script_content}"}
-    ]
-    
+    if not script_content: return jsonify({'error': 'Empty content'}), 400
+    system_prompt = """作为专业的电影分镜师，请分析以下剧本片段，将其转化为分镜表数据。
+    **输出要求**：1. 返回一个纯 JSON 数组。2. **必须使用中文**填写所有描述性字段。3. 不要包含 Markdown 标记。
+    **JSON对象结构**：- scene: 场次 - shot_number: 镜号 - visual_description: 画面说明 - audio_description: 声音说明 - dialogue: 台词 - duration: 时长 - special_technique: 特殊技术"""
+    messages = [{'role': 'system', 'content': system_prompt}, {'role': 'user', 'content': f"剧本片段：\n{script_content}"}]
     api_key = get_aliyun_api_key(provider_id)
     result = generate_aliyun_text(messages, api_key=api_key, model=model)
-    
     if result['success']:
-        raw_content = result['content']
-        cleaned_content = re.sub(r'^```json\s*|\s*```$', '', raw_content.strip(), flags=re.MULTILINE | re.DOTALL)
         try:
-            shots_data = json.loads(cleaned_content)
-            return jsonify({'shots': shots_data})
-        except json.JSONDecodeError:
-            return jsonify({'error': 'AI returned invalid JSON', 'raw': raw_content}), 500
-    else:
-        return jsonify({'error': result.get('error_msg')}), result.get('status_code', 500)
+            cleaned = re.sub(r'^```json\s*|\s*```$', '', result['content'].strip(), flags=re.MULTILINE | re.DOTALL)
+            return jsonify({'shots': json.loads(cleaned)})
+        except: return jsonify({'error': 'Invalid JSON'}), 500
+    return jsonify({'error': result.get('error_msg')}), 500
 
-# --- 分镜管理接口 ---
-
+# ... [Shot APIs omitted] ...
 @app.route('/api/projects/<project_id>/shots', methods=['GET'])
-def get_shots(project_id):
-    path = os.path.join(get_project_path(project_id), 'shot.json')
-    shots = read_json(path, default=[])
-    # 默认按 JSON 中的顺序返回，不再强制排序，以便支持自定义排序
-    return jsonify(shots)
+def get_shots(project_id): return jsonify(read_json(os.path.join(get_project_path(project_id), 'shot.json'), default=[]))
 
 @app.route('/api/projects/<project_id>/shots', methods=['POST'])
 def create_shot(project_id):
     data = request.json
-    data['movie_id'] = project_id
-    if not data.get('shot_number'):
-        return jsonify({"error": "镜头号必填"}), 400
-    new_shot = StoryboardShot.from_dict(data)
-    path = os.path.join(get_project_path(project_id), 'shot.json')
-    shots = read_json(path, default=[])
+    shots = read_json(os.path.join(get_project_path(project_id), 'shot.json'), default=[])
+    new_shot = StoryboardShot.from_dict({**data, 'movie_id': project_id})
     shots.append(new_shot.to_dict())
-    write_json(path, shots)
-    p_path = os.path.join(get_project_path(project_id), 'info.json')
-    p_data = read_json(p_path)
-    if p_data:
-        p_data['updated_time'] = datetime.now().isoformat()
-        write_json(p_path, p_data)
+    write_json(os.path.join(get_project_path(project_id), 'shot.json'), shots)
     return jsonify(new_shot.to_dict()), 201
 
 @app.route('/api/projects/<project_id>/shots/<shot_id>', methods=['PUT'])
 def update_shot(project_id, shot_id):
     path = os.path.join(get_project_path(project_id), 'shot.json')
     shots = read_json(path, default=[])
-    found_index = -1
-    for i, shot in enumerate(shots):
-        if shot['id'] == shot_id:
-            found_index = i
-            break
-    if found_index == -1:
-        return jsonify({"error": "分镜不存在"}), 404
-    update_data = request.json
-    current_data = shots[found_index]
-    update_data['id'] = shot_id
-    update_data['movie_id'] = project_id
-    update_data['created_time'] = current_data.get('created_time')
-    update_data['updated_time'] = datetime.now().isoformat()
-    updated_shot = StoryboardShot.from_dict({**current_data, **update_data})
-    shots[found_index] = updated_shot.to_dict()
-    write_json(path, shots)
-    return jsonify(updated_shot.to_dict())
+    for i, s in enumerate(shots):
+        if s['id'] == shot_id:
+            merged_data = {**s, **request.json, 'id': shot_id, 'updated_time': datetime.now().isoformat()}
+            new_shot = StoryboardShot.from_dict(merged_data)
+            shots[i] = new_shot.to_dict()
+            write_json(path, shots)
+            return jsonify(new_shot.to_dict())
+    return jsonify({"error": "Not found"}), 404
 
 @app.route('/api/projects/<project_id>/shots/<shot_id>', methods=['DELETE'])
 def delete_shot(project_id, shot_id):
     path = os.path.join(get_project_path(project_id), 'shot.json')
     shots = read_json(path, default=[])
     new_shots = [s for s in shots if s['id'] != shot_id]
-    if len(new_shots) == len(shots):
-        return jsonify({"error": "分镜不存在"}), 404
     write_json(path, new_shots)
-    return jsonify({"message": "删除成功"})
+    return jsonify({"message": "Deleted"})
 
 @app.route('/api/projects/<project_id>/shots/batch_delete', methods=['POST'])
 def batch_delete_shots(project_id):
-    data = request.json
-    ids_to_delete = data.get('ids', [])
-    if not ids_to_delete:
-        return jsonify({"message": "No IDs provided"}), 400
-    
+    ids = request.json.get('ids', [])
     path = os.path.join(get_project_path(project_id), 'shot.json')
     shots = read_json(path, default=[])
-    
-    original_count = len(shots)
-    new_shots = [s for s in shots if s['id'] not in ids_to_delete]
-    
-    if len(new_shots) != original_count:
-        write_json(path, new_shots)
-        return jsonify({"success": True, "deleted_count": original_count - len(new_shots)})
-    return jsonify({"success": True, "deleted_count": 0})
-
-@app.route('/api/projects/<project_id>/shots/reorder', methods=['POST'])
-def reorder_shots(project_id):
-    """根据ID列表对分镜进行重新排序"""
-    data = request.json
-    ordered_ids = data.get('shot_ids', [])
-    if not ordered_ids:
-        return jsonify({"message": "No IDs provided"}), 400
-    
-    path = os.path.join(get_project_path(project_id), 'shot.json')
-    shots = read_json(path, default=[])
-    
-    # 创建ID到分镜对象的映射
-    shot_map = {s['id']: s for s in shots}
-    
-    # 按照新的ID顺序构建列表
-    new_shots = []
-    for shot_id in ordered_ids:
-        if shot_id in shot_map:
-            new_shots.append(shot_map[shot_id])
-            
-    # 确保那些未在ordered_ids中出现但存在于原列表的分镜不会丢失（追加到最后）
-    existing_ids = set(ordered_ids)
-    for s in shots:
-        if s['id'] not in existing_ids:
-            new_shots.append(s)
-            
+    new_shots = [s for s in shots if s['id'] not in ids]
     write_json(path, new_shots)
     return jsonify({"success": True})
 
-# --- 媒体生成接口 (Image/Video Generation) ---
+@app.route('/api/projects/<project_id>/shots/reorder', methods=['POST'])
+def reorder_shots(project_id):
+    ordered_ids = request.json.get('shot_ids', [])
+    path = os.path.join(get_project_path(project_id), 'shot.json')
+    shots = read_json(path, default=[])
+    shot_map = {s['id']: s for s in shots}
+    new_shots = [shot_map[sid] for sid in ordered_ids if sid in shot_map]
+    new_shots.extend([s for s in shots if s['id'] not in ordered_ids])
+    write_json(path, new_shots)
+    return jsonify({"success": True})
+
+# ... [Generate APIs omitted for brevity, keep as is] ...
+def generate_optimized_prompt(api_key, frame_type, visual_desc, style_desc, consistency_text="", start_prompt_ref=None, prev_shot_context=""):
+    consistency_instruction = f"**GLOBAL VISUAL RULES**: {consistency_text}. Maintain consistent characters and environment.\n" if consistency_text else ""
+    context_instruction = f"\n**PREVIOUS SHOT CONTEXT**: \"{prev_shot_context}\". Ensure narrative continuity." if prev_shot_context else ""
+    if frame_type == 'start':
+        sys_prompt = f"""You are an expert AI Art Prompt Engineer. Convert user's description into a high-quality English prompt. {consistency_instruction}{context_instruction} Requirements: 1. Describe subject, environment, lighting, composition, style. 2. Use English, comma-separated. 3. Emphasize cinematic quality. 4. DIRECTLY output prompt text only."""
+        user_prompt = f"Style: {style_desc}\nDescription: {visual_desc}"
+    else:
+        sys_prompt = f"""You are an expert AI Art Prompt Engineer. Generate an [End Frame] prompt based on the [Start Frame Prompt]. {consistency_instruction} Requirements: 1. **KEEP** character appearance, background, and style from Start Frame Prompt EXACTLY the same. 2. **ONLY CHANGE** action/pose based on 'End Frame Description'. 3. Use English. 4. DIRECTLY output prompt text only."""
+        user_prompt = f"Start Frame Prompt: {start_prompt_ref}\n\nEnd Frame Action: {visual_desc}"
+    messages = [{'role': 'system', 'content': sys_prompt}, {'role': 'user', 'content': user_prompt}]
+    result = generate_aliyun_text(messages, api_key=api_key, model='qwen-plus')
+    if result['success']: return result['content']
+    else: return f"Cinematic shot, {style_desc}, {visual_desc}"
 
 @app.route('/api/generate/image', methods=['POST'])
 def generate_image():
@@ -476,51 +328,53 @@ def generate_image():
     model_name = data.get('model_name', 'qwen-image-plus') 
     visual_desc = data.get('visual_description', '')
     style_desc = data.get('style_description', '') 
+    consistency_text = data.get('consistency_text', '')
     frame_type = data.get('frame_type', 'start')
-    
-    if not visual_desc:
-        return jsonify({"error": "Missing visual description"}), 400
+    shot_id = data.get('shot_id')
+    project_id = data.get('project_id')
 
-    prompt = f"电影分镜插画，{style_desc}风格。画面内容：{visual_desc}。"
-    if frame_type == 'start':
-        prompt += " 构图：分镜首帧，建立镜头，高画质，细节丰富。"
-    elif frame_type == 'end':
-        prompt += " 构图：分镜尾帧，动作结果，高画质，细节丰富。"
-
+    if not visual_desc: return jsonify({"error": "Missing visual description"}), 400
     config = get_provider_config(provider_id)
-    
     if not config or config.get('type') == 'mock':
         time.sleep(1.0)
-        safe_prompt = visual_desc[:20].replace(" ", "+")
-        label = "EndFrame" if frame_type == 'end' else "StartFrame"
-        mock_url = f"https://placehold.co/600x400/2c3e50/ffffff?text={label}:+{safe_prompt}\\n(Mock)"
-        return jsonify({"url": mock_url})
+        return jsonify({"url": f"https://placehold.co/600x400/2c3e50/ffffff?text={frame_type}+Mock"})
 
     api_key = config.get('api_key')
+    final_prompt = ""
+    shots_path = os.path.join(get_project_path(project_id), 'shot.json')
+    shots = read_json(shots_path, default=[])
+    target_shot_index = -1
+    current_shot = None
+    for i, s in enumerate(shots):
+        if s['id'] == shot_id: target_shot_index = i; current_shot = s; break
+    if not current_shot: return jsonify({"error": "Shot not found"}), 404
+    prev_shot_context = ""
+    if target_shot_index > 0: prev_shot_context = shots[target_shot_index - 1].get('visual_description', '')
+    if frame_type == 'start':
+        final_prompt = generate_optimized_prompt(api_key, 'start', visual_desc, style_desc, consistency_text, prev_shot_context=prev_shot_context)
+        current_shot['start_frame_prompt'] = final_prompt
+    else:
+        start_prompt = current_shot.get('start_frame_prompt', '')
+        if not start_prompt:
+            start_prompt = generate_optimized_prompt(api_key, 'start', visual_desc, style_desc, consistency_text)
+            current_shot['start_frame_prompt'] = start_prompt
+        final_prompt = generate_optimized_prompt(api_key, 'end', visual_desc, style_desc, consistency_text, start_prompt_ref=start_prompt)
+        current_shot['end_frame_prompt'] = final_prompt
+    shots[target_shot_index] = current_shot
+    write_json(shots_path, shots)
     provider_type = config.get('type')
-
     base_url = config.get('base_url', '')
     models = config.get('models', [])
     model_config = next((m for m in models if m['name'] == model_name), None)
     full_endpoint = base_url
-    if model_config and model_config.get('path'):
-        path = model_config.get('path')
-        if base_url.endswith('/') and path.startswith('/'):
-            full_endpoint = base_url + path[1:]
-        elif not base_url.endswith('/') and not path.startswith('/'):
-            full_endpoint = base_url + '/' + path
-        else:
-            full_endpoint = base_url + path
-    
+    if model_config and model_config.get('path'): full_endpoint = base_url.rstrip('/') + '/' + model_config.get('path').lstrip('/')
+    elif base_url: full_endpoint = base_url
     if provider_type == 'aliyun':
         save_dir = os.path.join(STATIC_FOLDER, IMG_SAVE_DIR)
         web_prefix = f"/{IMG_SAVE_DIR}"
-        result = generate_aliyun_image(prompt, save_dir, web_prefix, api_key=api_key, model=model_name, endpoint=full_endpoint)
-        if result['success']:
-            return jsonify({"url": result['url']})
-        else:
-            return jsonify({"error": result['error_msg']}), result['status_code']
-    
+        result = generate_aliyun_image(final_prompt, save_dir, web_prefix, api_key=api_key, model=model_name, endpoint=full_endpoint)
+        if result['success']: return jsonify({"url": result['url']})
+        else: return jsonify({"error": result['error_msg']}), result['status_code']
     return jsonify({"error": "Unsupported provider type"}), 400
 
 @app.route('/api/generate/video', methods=['POST'])
@@ -531,65 +385,71 @@ def generate_video():
     visual_desc = data.get('visual_description', '')
     start_frame_url = data.get('start_frame', '')
     end_frame_url = data.get('end_frame', '')
-    
-    prompt = f"电影镜头，{visual_desc}。高画质，流畅动作。"
-
+    prompt = f"Cinematic shot, {visual_desc}, high quality, smooth motion."
     config = get_provider_config(provider_id)
-
     if not config or config.get('type') == 'mock':
         time.sleep(2)
-        mock_video_url = "https://www.w3schools.com/html/mov_bbb.mp4"
-        return jsonify({"url": mock_video_url})
-
+        return jsonify({"url": "https://www.w3schools.com/html/mov_bbb.mp4"})
     api_key = config.get('api_key')
     provider_type = config.get('type')
-    
     base_url = config.get('base_url', '')
     models = config.get('models', [])
     model_config = next((m for m in models if m['name'] == model_name), None)
     full_endpoint = base_url
-    if model_config and model_config.get('path'):
-        path = model_config.get('path')
-        if base_url.endswith('/') and path.startswith('/'):
-            full_endpoint = base_url + path[1:]
-        elif not base_url.endswith('/') and not path.startswith('/'):
-            full_endpoint = base_url + '/' + path
-        else:
-            full_endpoint = base_url + path
-
+    if model_config and model_config.get('path'): full_endpoint = base_url.rstrip('/') + '/' + model_config.get('path').lstrip('/')
+    elif base_url: full_endpoint = base_url
     if provider_type == 'aliyun':
         real_start_path = None
         real_end_path = None
-        if start_frame_url and (start_frame_url.startswith('/static/') or start_frame_url.startswith('static/')):
-            clean = start_frame_url.lstrip('/')
-            real_start_path = os.path.abspath(os.path.join(STATIC_FOLDER, clean))
-        if end_frame_url and (end_frame_url.startswith('/static/') or end_frame_url.startswith('static/')):
-            clean = end_frame_url.lstrip('/')
-            real_end_path = os.path.abspath(os.path.join(STATIC_FOLDER, clean))
-        
+        if start_frame_url.startswith('/static/') or start_frame_url.startswith('static/'):
+            real_start_path = os.path.abspath(os.path.join(STATIC_FOLDER, start_frame_url.lstrip('/')))
+        if end_frame_url.startswith('/static/') or end_frame_url.startswith('static/'):
+            real_end_path = os.path.abspath(os.path.join(STATIC_FOLDER, end_frame_url.lstrip('/')))
         save_dir = os.path.join(STATIC_FOLDER, VIDEO_SAVE_DIR)
         web_prefix = f"/{VIDEO_SAVE_DIR}"
-
-        result = generate_aliyun_video(
-            prompt, 
-            save_dir,
-            web_prefix,
-            api_key=api_key, 
-            model=model_name, 
-            endpoint=full_endpoint,
-            start_img_path=real_start_path,
-            end_img_path=real_end_path
-        )
-        
-        if result['success']:
-            return jsonify({"url": result['url']})
-        else:
-            return jsonify({"error": result['error_msg']}), result['status_code']
-
+        result = generate_aliyun_video(prompt, save_dir, web_prefix, api_key=api_key, model=model_name, endpoint=full_endpoint, start_img_path=real_start_path, end_img_path=real_end_path)
+        if result['success']: return jsonify({"url": result['url']})
+        else: return jsonify({"error": result['error_msg']}), result['status_code']
     return jsonify({"error": "Unsupported provider type"}), 400
+
+@app.route('/api/generate/voiceover', methods=['POST'])
+def generate_voiceover():
+    data = request.json
+    provider_id = data.get('provider_id')
+    text = data.get('text', '')
+    voice = data.get('voice', 'Cherry')
+    model_name = data.get('model_name', 'qwen3-tts-flash') 
+    if not text: return jsonify({"error": "Missing text"}), 400
+    config = get_provider_config(provider_id)
+    if not config or config.get('type') == 'mock':
+        time.sleep(1.0)
+        return jsonify({"url": "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3"})
+    api_key = config.get('api_key')
+    provider_type = config.get('type')
+    if provider_type == 'aliyun':
+        save_dir = os.path.join(STATIC_FOLDER, AUDIO_SAVE_DIR)
+        web_prefix = f"/{AUDIO_SAVE_DIR}"
+        base_url = config.get('base_url', '')
+        result = generate_aliyun_voiceover(text, save_dir, web_prefix, api_key=api_key, voice=voice, endpoint=base_url, model=model_name)
+        if result['success']: return jsonify({"url": result['url']})
+        else: return jsonify({"error": result['error_msg']}), result.get('status_code', 500)
+    return jsonify({"error": "Unsupported provider type"}), 400
+
+# --- 剪映导出接口 ---
+
+@app.route('/api/projects/<project_id>/export/jianying', methods=['POST'])
+def export_jianying(project_id):
+    project_info = read_json(os.path.join(get_project_path(project_id), 'info.json'))
+    shots = read_json(os.path.join(get_project_path(project_id), 'shot.json'), default=[])
+    
+    result = export_draft(project_info, shots, STATIC_FOLDER, EXPORT_DIR)
+    
+    if result['success']:
+        return jsonify(result)
+    else:
+        return jsonify({"error": result['error']}), 500
 
 if __name__ == '__main__':
     ensure_dirs()
     print(f"Server started on http://127.0.0.1:5000")
-    print(f"Project data: {os.path.abspath(DATA_DIR)}")
     app.run(debug=True, port=5000)
