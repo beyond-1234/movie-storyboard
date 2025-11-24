@@ -284,21 +284,16 @@ def save_script(project_id):
         write_json(p_path, p_data)
     return jsonify({"success": True})
 
-# --- AI 业务逻辑接口 (Prompt Encapsulated Here) ---
+# --- AI 业务逻辑接口 ---
 
 @app.route('/api/generate/script_continuation', methods=['POST'])
 def generate_script_continuation():
-    """
-    剧本续写：
-    前端仅传入上下文和项目信息，后端负责构建 Prompt 并强制中文回复。
-    """
     data = request.json
     context_text = data.get('context_text', '')
     project_info = data.get('project_info', {})
     provider_id = data.get('provider_id')
     model = data.get('model', 'qwen-plus')
     
-    # 构建系统提示词，包含项目设定
     system_prompt = "你是一个专业的中文电影编剧助手。请根据项目背景和前文，续写一段剧本。\n"
     if project_info:
         system_prompt += f"项目名称：{project_info.get('film_name', '未命名')}\n"
@@ -323,10 +318,6 @@ def generate_script_continuation():
 
 @app.route('/api/generate/analyze_script', methods=['POST'])
 def analyze_script():
-    """
-    剧本转分镜：
-    后端构建 Prompt，强制 JSON 格式且值为中文。
-    """
     data = request.json
     script_content = data.get('content', '')
     provider_id = data.get('provider_id')
@@ -337,19 +328,18 @@ def analyze_script():
 
     system_prompt = """
     作为专业的电影分镜师，请分析以下剧本片段，将其转化为分镜表数据。
-    
     **输出要求**：
     1. 返回一个纯 JSON 数组。
-    2. **必须使用中文**填写所有描述性字段（如画面说明、声音说明、备注等）。
-    3. 不要包含 Markdown 标记（如 ```json）。
+    2. **必须使用中文**填写所有描述性字段。
+    3. 不要包含 Markdown 标记。
     
     **JSON对象结构**：
-    - scene: 场次 (例如 "1", "内景. 书房")
-    - shot_number: 镜号 (例如 "1", "1A")
-    - visual_description: 画面说明 (详细描述画面内容，用于AI生图，必须中文)
-    - audio_description: 声音说明 (对白、音效，必须中文)
-    - duration: 时长 (例如 "3s")
-    - special_technique: 特殊技术 (例如 "推拉", "特写", "空镜头")
+    - scene: 场次
+    - shot_number: 镜号
+    - visual_description: 画面说明
+    - audio_description: 声音说明
+    - duration: 时长
+    - special_technique: 特殊技术
     """
     
     messages = [
@@ -435,24 +425,38 @@ def delete_shot(project_id, shot_id):
     write_json(path, new_shots)
     return jsonify({"message": "删除成功"})
 
+@app.route('/api/projects/<project_id>/shots/batch_delete', methods=['POST'])
+def batch_delete_shots(project_id):
+    data = request.json
+    ids_to_delete = data.get('ids', [])
+    if not ids_to_delete:
+        return jsonify({"message": "No IDs provided"}), 400
+    
+    path = os.path.join(get_project_path(project_id), 'shot.json')
+    shots = read_json(path, default=[])
+    
+    original_count = len(shots)
+    new_shots = [s for s in shots if s['id'] not in ids_to_delete]
+    
+    if len(new_shots) != original_count:
+        write_json(path, new_shots)
+        return jsonify({"success": True, "deleted_count": original_count - len(new_shots)})
+    return jsonify({"success": True, "deleted_count": 0})
+
 # --- 媒体生成接口 (Image/Video Generation) ---
 
 @app.route('/api/generate/image', methods=['POST'])
 def generate_image():
-    """图片生成入口"""
     data = request.json
     provider_id = data.get('provider_id') 
     model_name = data.get('model_name', 'qwen-image-plus') 
-    
-    # 接收原始数据，后端组装 Prompt
     visual_desc = data.get('visual_description', '')
-    style_desc = data.get('style_description', '') # 风格
+    style_desc = data.get('style_description', '') 
     frame_type = data.get('frame_type', 'start')
     
     if not visual_desc:
         return jsonify({"error": "Missing visual description"}), 400
 
-    # 构建 Prompt (通义万相支持中文Prompt)
     prompt = f"电影分镜插画，{style_desc}风格。画面内容：{visual_desc}。"
     if frame_type == 'start':
         prompt += " 构图：分镜首帧，建立镜头，高画质，细节丰富。"
@@ -461,18 +465,16 @@ def generate_image():
 
     config = get_provider_config(provider_id)
     
-    # 兼容 Mock
     if not config or config.get('type') == 'mock':
         time.sleep(1.0)
         safe_prompt = visual_desc[:20].replace(" ", "+")
         label = "EndFrame" if frame_type == 'end' else "StartFrame"
-        mock_url = f"[https://placehold.co/600x400/2c3e50/ffffff?text=](https://placehold.co/600x400/2c3e50/ffffff?text=){label}:+{safe_prompt}\\n(Mock)"
+        mock_url = f"https://placehold.co/600x400/2c3e50/ffffff?text={label}:+{safe_prompt}\\n(Mock)"
         return jsonify({"url": mock_url})
 
     api_key = config.get('api_key')
     provider_type = config.get('type')
 
-    # Base URL 拼接
     base_url = config.get('base_url', '')
     models = config.get('models', [])
     model_config = next((m for m in models if m['name'] == model_name), None)
@@ -499,24 +501,20 @@ def generate_image():
 
 @app.route('/api/generate/video', methods=['POST'])
 def generate_video():
-    """视频生成入口 (同步调用)"""
     data = request.json
     provider_id = data.get('provider_id')
     model_name = data.get('model_name', 'wanx2.1-kf2v-plus')
-    
-    # 接收原始数据
     visual_desc = data.get('visual_description', '')
     start_frame_url = data.get('start_frame', '')
     end_frame_url = data.get('end_frame', '')
     
-    # 构建 Prompt
     prompt = f"电影镜头，{visual_desc}。高画质，流畅动作。"
 
     config = get_provider_config(provider_id)
 
     if not config or config.get('type') == 'mock':
         time.sleep(2)
-        mock_video_url = "[https://www.w3schools.com/html/mov_bbb.mp4](https://www.w3schools.com/html/mov_bbb.mp4)"
+        mock_video_url = "https://www.w3schools.com/html/mov_bbb.mp4"
         return jsonify({"url": mock_video_url})
 
     api_key = config.get('api_key')
@@ -568,6 +566,6 @@ def generate_video():
 
 if __name__ == '__main__':
     ensure_dirs()
-    print(f"Server started on [http://127.0.0.1:5000](http://127.0.0.1:5000)")
+    print(f"Server started on http://127.0.0.1:5000")
     print(f"Project data: {os.path.abspath(DATA_DIR)}")
     app.run(debug=True, port=5000)
