@@ -27,7 +27,7 @@
             position: relative;
             display: flex;
             gap: 10px;
-            cursor: move; /* Add move cursor for drag */
+            cursor: move;
         }
         .script-section-block:hover { box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
         .script-checkbox { margin-top: 5px; }
@@ -74,13 +74,11 @@
             position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
             background: rgba(0,0,0,0.6); color: #fff; border-radius: 50%; width: 30px; height: 30px;
             display: flex; align-items: center; justify-content: center; cursor: pointer; font-size: 16px;
+            z-index: 5;
         }
+        .video-play-overlay:hover { background: rgba(0,0,0,0.8); transform: translate(-50%, -50%) scale(1.1); transition: all 0.2s; }
 
-        /* Sortable ghost style */
-        .sortable-ghost {
-            opacity: 0.5;
-            background: #f0f9eb;
-        }
+        .sortable-ghost { opacity: 0.5; background: #f0f9eb; }
 
         ::-webkit-scrollbar { width: 8px; height: 8px; }
         ::-webkit-scrollbar-thumb { background: #ccc; border-radius: 4px; }
@@ -146,7 +144,6 @@
                                 </div>
                             </div>
 
-                            <!-- Script List with ref for SortableJS -->
                             <div ref="scriptListRef" class="script-list-container">
                                 <div v-for="(section, index) in scriptSections" :key="index" class="script-section-block">
                                     <div class="script-checkbox">
@@ -180,7 +177,6 @@
                                 <el-button type="primary" size="small" @click="openCreateShot">添加分镜</el-button>
                             </div>
 
-                            <!-- Added row-key for Drag Sort -->
                             <el-table 
                                 :data="shotList" 
                                 border 
@@ -197,25 +193,34 @@
                                     </template>
                                 </el-table-column>
                                 <el-table-column type="selection" width="55"></el-table-column>
-                                <el-table-column prop="scene" label="场次" width="80" align="center"></el-table-column>
-                                <el-table-column prop="shot_number" label="镜号" width="80" align="center"></el-table-column>
+                                <!-- 缩短了场次、镜号、时长列宽 -->
+                                <el-table-column prop="scene" label="场次" width="60" align="center"></el-table-column>
+                                <el-table-column prop="shot_number" label="镜号" width="60" align="center"></el-table-column>
                                 
-                                <el-table-column label="画面预览" width="220" align="center">
+                                <!-- 画面预览 (仅图片) -->
+                                <el-table-column label="画面预览" width="180" align="center">
                                     <template slot-scope="scope">
                                         <div style="display: flex; gap: 5px; justify-content: center;">
-                                            <div v-if="scope.row.start_frame" style="text-align: center; position: relative;">
-                                                <el-image style="width: 80px; height: 60px; border-radius: 4px" :src="scope.row.start_frame" :preview-src-list="[scope.row.start_frame]"></el-image>
+                                            <div v-if="scope.row.start_frame" style="text-align: center;">
+                                                <el-image style="width: 70px; height: 50px; border-radius: 4px" :src="scope.row.start_frame" :preview-src-list="[scope.row.start_frame]"></el-image>
                                                 <div style="font-size: 10px; color: #999;">首帧</div>
-                                                <div v-if="scope.row.video_url" class="video-play-overlay" @click="playVideo(scope.row)">
-                                                    <i class="el-icon-caret-right"></i>
-                                                </div>
                                             </div>
                                             <div v-if="scope.row.end_frame" style="text-align: center;">
-                                                <el-image style="width: 80px; height: 60px; border-radius: 4px" :src="scope.row.end_frame" :preview-src-list="[scope.row.end_frame]"></el-image>
+                                                <el-image style="width: 70px; height: 50px; border-radius: 4px" :src="scope.row.end_frame" :preview-src-list="[scope.row.end_frame]"></el-image>
                                                 <div style="font-size: 10px; color: #999;">尾帧</div>
                                             </div>
-                                            <div v-if="!scope.row.start_frame && !scope.row.end_frame" style="color: #ccc; font-size: 12px; line-height: 60px;">暂无画面</div>
+                                            <div v-if="!scope.row.start_frame && !scope.row.end_frame" style="color: #ccc; font-size: 12px; line-height: 50px;">暂无</div>
                                         </div>
+                                    </template>
+                                </el-table-column>
+
+                                <!-- 新增：视频预览列 -->
+                                <el-table-column label="视频预览" width="220" align="center">
+                                    <template slot-scope="scope">
+                                        <div v-if="scope.row.video_url" style="width: 100%; height: 100px; background: #000; display: flex; justify-content: center; align-items: center; border-radius: 4px; overflow: hidden;">
+                                            <video :src="scope.row.video_url" controls style="max-width: 100%; max-height: 100%;"></video>
+                                        </div>
+                                        <div v-else style="color: #ccc; font-size: 12px;">未生成</div>
                                     </template>
                                 </el-table-column>
 
@@ -226,9 +231,10 @@
                                     </template>
                                 </el-table-column>
 
-                                <el-table-column prop="duration" label="时长" width="80"></el-table-column>
+                                <el-table-column prop="duration" label="时长" width="70" align="center"></el-table-column>
 
-                                <el-table-column label="操作" width="320" fixed="right">
+                                <!-- 缩短操作列宽 -->
+                                <el-table-column label="操作" width="260" fixed="right">
                                     <template slot-scope="scope">
                                         <el-tooltip content="编辑详情" placement="top"><el-button size="mini" icon="el-icon-edit" circle @click="editShot(scope.row)"></el-button></el-tooltip>
                                         <el-tooltip content="生成首帧" placement="top"><el-button size="mini" type="success" icon="el-icon-picture-outline" circle plain @click="quickGenerateImage(scope.row, 'start')"></el-button></el-tooltip>
@@ -246,9 +252,53 @@
             </el-main>
         </el-container>
 
-        <el-dialog :visible.sync="videoPlayerVisible" width="60%" title="视频预览">
-            <div style="text-align: center;">
-                <video v-if="playerVideoUrl" :src="playerVideoUrl" controls autoplay style="width: 100%; max-height: 500px;"></video>
+        <!-- Settings Dialog -->
+        <el-dialog title="模型供应商管理" :visible.sync="settingsVisible" width="800px">
+            <div class="settings-container">
+                <div class="settings-sidebar">
+                    <div style="margin-bottom: 10px;">
+                        <el-button type="primary" size="mini" icon="el-icon-plus" style="width: 100%" @click="initNewProvider">新增供应商</el-button>
+                    </div>
+                    <div v-for="p in providers" :key="p.id" class="provider-item" :class="{active: editingProvider && editingProvider.id === p.id}" @click="selectProvider(p)">
+                        <div style="display:flex; align-items:center;">
+                            <div class="provider-item-icon" :style="{background: p.type === 'aliyun' ? '#FF6A00' : '#909399'}">{{ p.name.charAt(0).toUpperCase() }}</div>
+                            <span style="font-size: 13px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; width: 120px;">{{ p.name }}</span>
+                        </div>
+                        <i class="el-icon-arrow-right" style="font-size: 12px; color: #ccc;"></i>
+                    </div>
+                </div>
+                <div class="settings-content" v-if="editingProvider">
+                    <el-form label-position="top" size="small">
+                        <el-form-item label="供应商名称"><el-input v-model="editingProvider.name"></el-input></el-form-item>
+                        <el-row :gutter="20">
+                            <el-col :span="12">
+                                <el-form-item label="类型">
+                                    <el-select v-model="editingProvider.type" style="width: 100%">
+                                        <el-option label="Aliyun DashScope" value="aliyun"></el-option>
+                                        <el-option label="Mock Service" value="mock"></el-option>
+                                    </el-select>
+                                </el-form-item>
+                            </el-col>
+                            <el-col :span="12"><el-form-item label="启用状态"><el-switch v-model="editingProvider.enabled"></el-switch></el-form-item></el-col>
+                        </el-row>
+                        <el-form-item label="Base URL (可选)"><el-input v-model="editingProvider.base_url" placeholder="https://..."></el-input></el-form-item>
+                        <el-form-item label="API Key"><el-input v-model="editingProvider.api_key" show-password placeholder="输入 Key (若不修改请保持原样/空)"></el-input></el-form-item>
+                        <div class="model-list-header"><span style="font-weight: bold;">模型列表</span><el-button type="text" icon="el-icon-plus" @click="addModelToProvider">添加</el-button></div>
+                        <div v-if="editingProvider.models && editingProvider.models.length">
+                            <div v-for="(m, idx) in editingProvider.models" :key="idx" style="display: flex; gap: 10px; margin-bottom: 10px; align-items: center;">
+                                <el-input v-model="m.name" placeholder="模型名称" style="flex: 2"></el-input>
+                                <el-input v-model="m.path" placeholder="Path" style="flex: 2"></el-input>
+                                <el-select v-model="m.type" placeholder="类型" style="flex: 1"><el-option label="图片" value="image"></el-option><el-option label="视频" value="video"></el-option></el-select>
+                                <el-button type="danger" icon="el-icon-delete" circle plain size="mini" @click="removeModelFromProvider(idx)"></el-button>
+                            </div>
+                        </div>
+                        <div style="margin-top: 30px; text-align: right;">
+                             <el-button type="danger" plain @click="deleteCurrentProvider" v-if="editingProvider.id">删除</el-button>
+                             <el-button type="primary" @click="saveCurrentProvider">保存</el-button>
+                        </div>
+                    </el-form>
+                </div>
+                <div v-else class="settings-content" style="display:flex;align-items:center;justify-content:center;color:#999;">请选择供应商</div>
             </div>
         </el-dialog>
 
@@ -361,62 +411,11 @@
                 <el-button type="primary" @click="submitShot">保 存</el-button>
             </span>
         </el-dialog>
-
-        <!-- Settings Dialog -->
-        <el-dialog title="模型供应商管理" :visible.sync="settingsVisible" width="800px">
-            <div class="settings-container">
-                <div class="settings-sidebar">
-                    <div style="margin-bottom: 10px;">
-                        <el-button type="primary" size="mini" icon="el-icon-plus" style="width: 100%" @click="initNewProvider">新增供应商</el-button>
-                    </div>
-                    <div v-for="p in providers" :key="p.id" class="provider-item" :class="{active: editingProvider && editingProvider.id === p.id}" @click="selectProvider(p)">
-                        <div style="display:flex; align-items:center;">
-                            <div class="provider-item-icon" :style="{background: p.type === 'aliyun' ? '#FF6A00' : '#909399'}">{{ p.name.charAt(0).toUpperCase() }}</div>
-                            <span style="font-size: 13px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; width: 120px;">{{ p.name }}</span>
-                        </div>
-                        <i class="el-icon-arrow-right" style="font-size: 12px; color: #ccc;"></i>
-                    </div>
-                </div>
-                <div class="settings-content" v-if="editingProvider">
-                    <el-form label-position="top" size="small">
-                        <el-form-item label="供应商名称"><el-input v-model="editingProvider.name"></el-input></el-form-item>
-                        <el-row :gutter="20">
-                            <el-col :span="12">
-                                <el-form-item label="类型">
-                                    <el-select v-model="editingProvider.type" style="width: 100%">
-                                        <el-option label="Aliyun DashScope" value="aliyun"></el-option>
-                                        <el-option label="Mock Service" value="mock"></el-option>
-                                    </el-select>
-                                </el-form-item>
-                            </el-col>
-                            <el-col :span="12"><el-form-item label="启用状态"><el-switch v-model="editingProvider.enabled"></el-switch></el-form-item></el-col>
-                        </el-row>
-                        <el-form-item label="Base URL (可选)"><el-input v-model="editingProvider.base_url" placeholder="https://..."></el-input></el-form-item>
-                        <el-form-item label="API Key"><el-input v-model="editingProvider.api_key" show-password placeholder="输入 Key (若不修改请保持原样/空)"></el-input></el-form-item>
-                        <div class="model-list-header"><span style="font-weight: bold;">模型列表</span><el-button type="text" icon="el-icon-plus" @click="addModelToProvider">添加</el-button></div>
-                        <div v-if="editingProvider.models && editingProvider.models.length">
-                            <div v-for="(m, idx) in editingProvider.models" :key="idx" style="display: flex; gap: 10px; margin-bottom: 10px; align-items: center;">
-                                <el-input v-model="m.name" placeholder="模型名称" style="flex: 2"></el-input>
-                                <el-input v-model="m.path" placeholder="Path" style="flex: 2"></el-input>
-                                <el-select v-model="m.type" placeholder="类型" style="flex: 1"><el-option label="图片" value="image"></el-option><el-option label="视频" value="video"></el-option></el-select>
-                                <el-button type="danger" icon="el-icon-delete" circle plain size="mini" @click="removeModelFromProvider(idx)"></el-button>
-                            </div>
-                        </div>
-                        <div style="margin-top: 30px; text-align: right;">
-                             <el-button type="danger" plain @click="deleteCurrentProvider" v-if="editingProvider.id">删除</el-button>
-                             <el-button type="primary" @click="saveCurrentProvider">保存</el-button>
-                        </div>
-                    </el-form>
-                </div>
-                <div v-else class="settings-content" style="display:flex;align-items:center;justify-content:center;color:#999;">请选择供应商</div>
-            </div>
-        </el-dialog>
     </div>
 
     <script src="https://unpkg.com/vue@2.6.14/dist/vue.min.js"></script>
     <script src="https://unpkg.com/element-ui/lib/index.js"></script>
     <script src="https://unpkg.com/axios/dist/axios.min.js"></script>
-    <!-- SortableJS for Drag and Drop -->
     <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.0/Sortable.min.js"></script>
 
     <script>
@@ -433,7 +432,7 @@
                 projectDialogVisible: false, projectDialogTitle: '新建项目', activeProjectTab: 'basic', projectForm: {},
                 shotDialogVisible: false, videoUrl: '', shotForm: {},
                 previewVisible: false, previewUrl: '',
-                scriptSortable: null, shotSortable: null // Sortable instances
+                scriptSortable: null, shotSortable: null 
             },
             computed: {
                 currentProviderModels() { const p = this.providers.find(x => x.id === this.genOptions.providerId); return (p && p.models) ? p.models : []; },
@@ -451,7 +450,6 @@
                 stopGlobalLoading() { this.globalLoading = false; this.currentAbortController = null; },
                 cancelGeneration() { if (this.currentAbortController) this.currentAbortController.abort(); this.stopGlobalLoading(); },
 
-                // Script Logic
                 toggleAllScripts(val) { this.scriptSections.forEach(s => this.$set(s, '_checked', val)); },
                 deleteSelectedScripts() {
                     this.$confirm('确定删除选中的段落吗？', '提示', { type: 'warning' }).then(() => {
@@ -466,7 +464,6 @@
                     });
                 },
                 
-                // Shot Logic
                 handleShotSelectionChange(val) { this.multipleShotSelection = val; },
                 async deleteSelectedShots() {
                     this.$confirm(`确定删除选中的 ${this.multipleShotSelection.length} 个分镜吗？`, '提示', { type: 'warning' }).then(async () => {
@@ -487,7 +484,6 @@
 
                 handleTabClick(tab) { if (tab.name === 'script') this.fetchScript(); else if (tab.name === 'shots') this.fetchShots(this.currentProjectId); },
                 
-                // Initializing SortableJS
                 initScriptSortable() {
                     const el = this.$refs.scriptListRef;
                     if (!el) return;
@@ -495,23 +491,18 @@
                     
                     this.scriptSortable = Sortable.create(el, {
                         animation: 150,
-                        handle: '.script-section-block', // drag entire block or specific handle
+                        handle: '.script-section-block', 
                         onEnd: (evt) => {
                             const { oldIndex, newIndex } = evt;
                             if (oldIndex === newIndex) return;
-                            
-                            // Move item in array
                             const item = this.scriptSections.splice(oldIndex, 1)[0];
                             this.scriptSections.splice(newIndex, 0, item);
-                            
-                            // Save new order
                             this.saveScript();
                         }
                     });
                 },
                 
                 initShotSortable() {
-                    // Access the table body element
                     const table = this.$refs.shotTable;
                     if (!table) return;
                     const el = table.$el.querySelector('.el-table__body-wrapper tbody');
@@ -520,16 +511,12 @@
 
                     this.shotSortable = Sortable.create(el, {
                         animation: 150,
-                        handle: '.el-icon-rank', // Only drag using the rank icon
+                        handle: '.el-icon-rank',
                         onEnd: async (evt) => {
                             const { oldIndex, newIndex } = evt;
                             if (oldIndex === newIndex) return;
-
-                            // Move item in local array
                             const item = this.shotList.splice(oldIndex, 1)[0];
                             this.shotList.splice(newIndex, 0, item);
-                            
-                            // Sync order to backend
                             const orderedIds = this.shotList.map(s => s.id);
                             await this.request('POST', `/api/projects/${this.currentProjectId}/shots/reorder`, { shot_ids: orderedIds });
                         }
@@ -541,7 +528,7 @@
                     try { 
                         const res = await this.request('GET', `/api/projects/${this.currentProjectId}/script`); 
                         this.scriptSections = res.length ? res : [{ content: '' }];
-                        this.$nextTick(() => this.initScriptSortable()); // Init Sortable after DOM update
+                        this.$nextTick(() => this.initScriptSortable()); 
                     } catch (e) {} 
                 },
                 async saveScript() { if (!this.currentProjectId) return; const cleanData = this.scriptSections.map(({_checked, ...rest}) => rest); await this.request('POST', `/api/projects/${this.currentProjectId}/script`, cleanData); },
