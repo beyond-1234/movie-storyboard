@@ -6,7 +6,6 @@
     <title>电影分镜管理系统</title>
     <link rel="stylesheet" href="https://unpkg.com/element-ui/lib/theme-chalk/index.css">
     <style>
-        /* ... Styles ... */
         body { margin: 0; background-color: #f0f2f5; font-family: "Helvetica Neue", Helvetica, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "微软雅黑", Arial, sans-serif; }
         .el-header { background-color: #304156; color: #fff; line-height: 60px; display: flex; justify-content: space-between; align-items: center; padding: 0 20px; }
         .app-title { font-size: 20px; font-weight: bold; }
@@ -22,16 +21,28 @@
         .dialog-footer { text-align: right; }
         
         .script-list-container { min-height: 200px; }
-        .script-section-block { background: #fff; border-left: 4px solid #409EFF; padding: 15px; margin-bottom: 15px; border-radius: 0 4px 4px 0; box-shadow: 0 1px 4px rgba(0,0,0,0.05); position: relative; display: flex; gap: 10px; cursor: move; }
+        .script-section-block { 
+            background: #fff; border-left: 4px solid #409EFF; padding: 15px; margin-bottom: 15px; border-radius: 0 4px 4px 0; box-shadow: 0 1px 4px rgba(0,0,0,0.05); 
+            position: relative; display: flex; gap: 10px; cursor: move; 
+        }
         .script-section-block:hover { box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
         .script-checkbox { margin-top: 5px; }
         .script-content-wrapper { flex: 1; }
-        .script-toolbar { display: flex; justify-content: flex-end; gap: 10px; margin-top: 10px; opacity: 0.6; transition: opacity 0.3s; }
+        .script-toolbar { 
+            display: flex; justify-content: flex-end; gap: 10px; margin-top: 10px; opacity: 0.6; transition: opacity 0.3s; 
+        }
         .script-section-block:hover .script-toolbar { opacity: 1; }
         .script-index { position: absolute; left: -25px; top: 0; color: #ccc; font-weight: bold; font-size: 12px; }
         
-        .global-loading-mask { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0, 0, 0, 0.8); z-index: 9999; display: flex; justify-content: center; align-items: center; }
-        .loading-dialog-box { background: #fff; width: 360px; padding: 30px; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.3); text-align: center; }
+        .global-loading-mask { 
+            position: fixed; top: 0; left: 0; right: 0; bottom: 0; 
+            background: rgba(0, 0, 0, 0.8); 
+            z-index: 9999; 
+            display: flex; justify-content: center; align-items: center; 
+        }
+        .loading-dialog-box { 
+            background: #fff; width: 360px; padding: 30px; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.3); text-align: center; 
+        }
         .loading-spinner { font-size: 40px; color: #409EFF; margin-bottom: 20px; }
         .loading-text { font-size: 16px; color: #303133; margin-bottom: 10px; font-weight: bold; }
         .loading-subtext { font-size: 13px; color: #909399; margin-bottom: 30px; }
@@ -53,7 +64,12 @@
         .frame-img { width: 100%; height: 100px; object-fit: cover; border-radius: 4px; cursor: pointer; display: block; }
         .frame-delete { position: absolute; top: 2px; right: 2px; color: red; cursor: pointer; background: rgba(255,255,255,0.8); border-radius: 50%; padding: 2px; }
         
-        .video-play-overlay { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); background: rgba(0,0,0,0.6); color: #fff; border-radius: 50%; width: 30px; height: 30px; display: flex; align-items: center; justify-content: center; cursor: pointer; font-size: 16px; z-index: 5; }
+        .video-play-overlay { 
+            position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); 
+            background: rgba(0,0,0,0.6); color: #fff; border-radius: 50%; width: 30px; height: 30px; 
+            display: flex; align-items: center; justify-content: center; cursor: pointer; font-size: 16px; 
+            z-index: 5; 
+        }
         .video-play-overlay:hover { background: rgba(0,0,0,0.8); transform: translate(-50%, -50%) scale(1.1); transition: all 0.2s; }
         
         .sortable-ghost { opacity: 0.5; background: #f0f9eb; }
@@ -65,6 +81,9 @@
         .config-row { display: flex; align-items: center; margin-bottom: 12px; border-bottom: 1px dashed #eee; padding-bottom: 8px; }
         .config-label { width: 60px; font-size: 13px; color: #606266; font-weight: bold; }
         .config-selects { flex: 1; display: flex; gap: 10px; }
+        
+        /* Flex helper for header actions */
+        .header-actions { float: right; display: flex; align-items: center; height: 100%; gap: 15px; }
     </style>
 </head>
 <body>
@@ -76,8 +95,8 @@
                 <div class="loading-text">{{ loadingTitle }}</div>
                 <div class="loading-subtext">{{ loadingSubText }}</div>
                 <div class="loading-actions">
-                    <el-button type="danger" plain round size="medium" @click="cancelGeneration">放弃生成</el-button>
-                    <el-button type="primary" round size="medium" disabled>请耐心等待</el-button>
+                    <el-button type="danger" plain round size="medium" icon="el-icon-close" @click="cancelGeneration">放弃生成</el-button>
+                    <el-button type="primary" round size="medium" icon="el-icon-loading" disabled>请耐心等待</el-button>
                 </div>
             </div>
         </div>
@@ -98,15 +117,14 @@
             <el-main class="main-container">
                 <!-- Project Info -->
                 <el-card class="project-card" v-if="currentProject">
-                    <div slot="header" class="clearfix">
+                    <div slot="header" class="clearfix" style="line-height: 32px;">
                         <span style="font-weight: bold; font-size: 18px;">{{ currentProject.film_name }}</span>
                         <el-tag size="small" type="success" style="margin-left: 10px">核心冲突: {{ currentProject.script_core_conflict || '无' }}</el-tag>
-                        <div style="float: right;">
-                            <!-- 新增：导出剪映按钮 -->
-                            <el-button style="float: right; padding: 3px 0; color: #E6A23C; margin-right: 15px;" type="text" icon="el-icon-film" @click="exportJianyingDraft">导出剪映草稿</el-button>
-                            
-                            <el-button style="float: right; padding: 3px 0; color: #f56c6c; margin-right: 15px" type="text" @click="deleteProject">删除项目</el-button>
-                            <el-button style="float: right; padding: 3px 0; margin-right: 15px" type="text" @click="openEditProject">编辑详情</el-button>
+                        <!-- 修复对齐问题的按钮组 -->
+                        <div class="header-actions">
+                            <el-button type="text" icon="el-icon-film" style="color: #E6A23C;" @click="exportJianyingDraft">导出剪映草稿</el-button>
+                            <el-button type="text" icon="el-icon-edit" @click="openEditProject">编辑详情</el-button>
+                            <el-button type="text" icon="el-icon-delete" style="color: #f56c6c;" @click="deleteProject">删除项目</el-button>
                         </div>
                     </div>
                     <el-descriptions :column="4" border size="small">
@@ -124,15 +142,24 @@
 
                 <div v-if="currentProject" style="background: #fff; border-radius: 4px; padding: 20px; box-shadow: 0 2px 12px 0 rgba(0,0,0,0.1);">
                     <el-tabs v-model="activeTab" @tab-click="handleTabClick">
-                        <!-- Script Tab (Same) -->
+                        <!-- Script Tab -->
                         <el-tab-pane label="剧本创作" name="script">
                             <div style="margin-bottom: 15px; display: flex; justify-content: space-between; align-items: center; background: #f5f7fa; padding: 10px; border-radius: 4px;">
-                                <div><el-checkbox v-model="allScriptsSelected" @change="toggleAllScripts">全选当前页</el-checkbox><span style="margin-left: 10px; color: #666; font-size: 13px;">已选 {{ selectedScriptCount }} 项</span></div>
-                                <div><el-button type="danger" size="small" icon="el-icon-delete" plain :disabled="selectedScriptCount === 0" @click="deleteSelectedScripts">批量删除</el-button><el-button type="danger" size="small" icon="el-icon-delete-solid" @click="deleteAllScripts">清空全部</el-button></div>
+                                <div>
+                                    <el-checkbox v-model="allScriptsSelected" @change="toggleAllScripts">全选当前页</el-checkbox>
+                                    <span style="margin-left: 10px; color: #666; font-size: 13px;">已选 {{ selectedScriptCount }} 项</span>
+                                </div>
+                                <div>
+                                    <el-button type="danger" size="small" icon="el-icon-delete" plain :disabled="selectedScriptCount === 0" @click="deleteSelectedScripts">批量删除</el-button>
+                                    <el-button type="danger" size="small" icon="el-icon-delete-solid" @click="deleteAllScripts">清空全部</el-button>
+                                </div>
                             </div>
+
                             <div ref="scriptListRef" class="script-list-container">
                                 <div v-for="(section, index) in scriptSections" :key="index" class="script-section-block">
-                                    <div class="script-checkbox"><el-checkbox v-model="section._checked"></el-checkbox></div>
+                                    <div class="script-checkbox">
+                                        <el-checkbox v-model="section._checked"></el-checkbox>
+                                    </div>
                                     <div class="script-content-wrapper">
                                         <div class="script-index">#{{ index + 1 }}</div>
                                         <el-input type="textarea" :autosize="{ minRows: 3, maxRows: 10}" placeholder="请输入剧本内容..." v-model="section.content" @change="saveScript"></el-input>
@@ -145,45 +172,78 @@
                                     </div>
                                 </div>
                             </div>
-                            <div style="margin-top: 20px;"><el-button type="primary" icon="el-icon-plus" style="width: 100%" @click="addScriptSection">添加新段落</el-button></div>
+                            
+                            <div style="margin-top: 20px;">
+                                <el-button type="primary" icon="el-icon-plus" style="width: 100%" @click="addScriptSection">添加新段落</el-button>
+                            </div>
                         </el-tab-pane>
 
-                        <!-- Shot Tab (Same) -->
+                        <!-- Shot Tab -->
                         <el-tab-pane label="分镜列表" name="shots">
                             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
-                                <div><span style="margin-right: 20px;">共 {{ shotList.length }} 个分镜</span><el-button type="danger" size="small" icon="el-icon-delete" plain :disabled="multipleShotSelection.length === 0" @click="deleteSelectedShots">批量删除</el-button><el-button type="danger" size="small" icon="el-icon-delete-solid" @click="deleteAllShots">清空全部</el-button></div>
+                                <div>
+                                    <span style="margin-right: 20px;">共 {{ shotList.length }} 个分镜</span>
+                                    <el-button type="danger" size="small" icon="el-icon-delete" plain :disabled="multipleShotSelection.length === 0" @click="deleteSelectedShots">批量删除</el-button>
+                                    <el-button type="danger" size="small" icon="el-icon-delete-solid" @click="deleteAllShots">清空全部</el-button>
+                                </div>
                                 <div>
                                     <el-dropdown split-button type="success" size="small" @command="openBatchDialog" @click="openBatchDialog('start_frame')">
                                         <i class="el-icon-magic-stick"></i> 批量生成首帧
                                         <el-dropdown-menu slot="dropdown">
-                                            <el-dropdown-item command="start_frame">批量生成首帧</el-dropdown-item>
-                                            <el-dropdown-item command="end_frame">批量生成尾帧</el-dropdown-item>
-                                            <el-dropdown-item command="video" divided>批量生成视频</el-dropdown-item>
+                                            <el-dropdown-item command="start_frame" icon="el-icon-picture-outline">批量生成首帧</el-dropdown-item>
+                                            <el-dropdown-item command="end_frame" icon="el-icon-picture">批量生成尾帧</el-dropdown-item>
+                                            <el-dropdown-item command="video" divided icon="el-icon-video-camera">批量生成视频</el-dropdown-item>
                                         </el-dropdown-menu>
                                     </el-dropdown>
-                                    <el-button type="primary" size="small" @click="openCreateShot" style="margin-left: 10px;">添加分镜</el-button>
+                                    <el-button type="primary" size="small" icon="el-icon-plus" @click="openCreateShot" style="margin-left: 10px;">添加分镜</el-button>
                                 </div>
                             </div>
-                            <el-table :data="shotList" border stripe style="width: 100%" v-loading="loadingShots" @selection-change="handleShotSelectionChange" row-key="id" ref="shotTable">
-                                <el-table-column width="40"><template slot-scope="scope"><i class="el-icon-rank" style="cursor: move; color: #909399;"></i></template></el-table-column>
+
+                            <el-table 
+                                :data="shotList" 
+                                border 
+                                stripe 
+                                style="width: 100%" 
+                                v-loading="loadingShots" 
+                                @selection-change="handleShotSelectionChange"
+                                row-key="id"
+                                ref="shotTable"
+                            >
+                                <el-table-column width="40">
+                                    <template slot-scope="scope">
+                                        <i class="el-icon-rank" style="cursor: move; color: #909399;"></i>
+                                    </template>
+                                </el-table-column>
                                 <el-table-column type="selection" width="55"></el-table-column>
                                 <el-table-column prop="scene" label="场次" width="60" align="center"></el-table-column>
                                 <el-table-column prop="shot_number" label="镜号" width="60" align="center"></el-table-column>
+                                
                                 <el-table-column label="画面预览" width="180" align="center">
                                     <template slot-scope="scope">
                                         <div style="display: flex; gap: 5px; justify-content: center;">
-                                            <div v-if="scope.row.start_frame" style="text-align: center;"><el-image style="width: 70px; height: 50px; border-radius: 4px" :src="scope.row.start_frame" :preview-src-list="[scope.row.start_frame]"></el-image><div style="font-size: 10px; color: #999;">首帧</div></div>
-                                            <div v-if="scope.row.end_frame" style="text-align: center;"><el-image style="width: 70px; height: 50px; border-radius: 4px" :src="scope.row.end_frame" :preview-src-list="[scope.row.end_frame]"></el-image><div style="font-size: 10px; color: #999;">尾帧</div></div>
+                                            <div v-if="scope.row.start_frame" style="text-align: center; position: relative;">
+                                                <el-image style="width: 70px; height: 50px; border-radius: 4px" :src="scope.row.start_frame" :preview-src-list="[scope.row.start_frame]"></el-image>
+                                                <div style="font-size: 10px; color: #999;">首帧</div>
+                                                <!-- 移除了视频播放覆盖层 -->
+                                            </div>
+                                            <div v-if="scope.row.end_frame" style="text-align: center;">
+                                                <el-image style="width: 70px; height: 50px; border-radius: 4px" :src="scope.row.end_frame" :preview-src-list="[scope.row.end_frame]"></el-image>
+                                                <div style="font-size: 10px; color: #999;">尾帧</div>
+                                            </div>
                                             <div v-if="!scope.row.start_frame && !scope.row.end_frame" style="color: #ccc; font-size: 12px; line-height: 50px;">暂无</div>
                                         </div>
                                     </template>
                                 </el-table-column>
+
                                 <el-table-column label="视频预览" width="220" align="center">
                                     <template slot-scope="scope">
-                                        <div v-if="scope.row.video_url" style="width: 100%; height: 100px; background: #000; display: flex; justify-content: center; align-items: center; border-radius: 4px; overflow: hidden;"><video :src="scope.row.video_url" controls style="max-width: 100%; max-height: 100%;"></video></div>
+                                        <div v-if="scope.row.video_url" style="width: 100%; height: 100px; background: #000; display: flex; justify-content: center; align-items: center; border-radius: 4px; overflow: hidden;">
+                                            <video :src="scope.row.video_url" controls style="max-width: 100%; max-height: 100%;"></video>
+                                        </div>
                                         <div v-else style="color: #ccc; font-size: 12px;">未生成</div>
                                     </template>
                                 </el-table-column>
+
                                 <el-table-column label="分镜描述">
                                     <template slot-scope="scope">
                                         <div><strong>画面:</strong> {{ scope.row.visual_description }}</div>
@@ -191,7 +251,9 @@
                                         <div style="margin-top: 5px; color: #666;"><strong>声音:</strong> {{ scope.row.audio_description }}</div>
                                     </template>
                                 </el-table-column>
+
                                 <el-table-column prop="duration" label="时长" width="70" align="center"></el-table-column>
+
                                 <el-table-column label="操作" width="260" fixed="right">
                                     <template slot-scope="scope">
                                         <el-tooltip content="编辑详情" placement="top"><el-button size="mini" icon="el-icon-edit" circle @click="editShot(scope.row)"></el-button></el-tooltip>
@@ -213,7 +275,7 @@
             <div style="text-align: center;"><video v-if="playerVideoUrl" :src="playerVideoUrl" controls autoplay style="width: 100%; max-height: 500px;"></video></div>
         </el-dialog>
 
-        <!-- Batch Dialog (Same) -->
+        <!-- Batch Dialog -->
         <el-dialog title="批量生成设置" :visible.sync="batchDialogVisible" width="400px">
             <el-form label-position="top">
                 <el-form-item label="生成类型">
@@ -229,10 +291,13 @@
                     </el-radio-group>
                 </el-form-item>
             </el-form>
-            <div slot="footer"><el-button @click="batchDialogVisible = false">取 消</el-button><el-button type="primary" @click="startBatchGeneration">开始生成</el-button></div>
+            <div slot="footer">
+                <el-button icon="el-icon-close" @click="batchDialogVisible = false">取 消</el-button>
+                <el-button type="primary" icon="el-icon-video-play" @click="startBatchGeneration">开始生成</el-button>
+            </div>
         </el-dialog>
 
-        <!-- Project Dialog (Same) -->
+        <!-- Project Dialog -->
         <el-dialog :title="projectDialogTitle" :visible.sync="projectDialogVisible" width="60%">
             <el-form :model="projectForm" label-width="100px" ref="projectForm">
                 <el-tabs v-model="activeProjectTab">
@@ -254,10 +319,13 @@
                     </el-tab-pane>
                 </el-tabs>
             </el-form>
-            <span slot="footer" class="dialog-footer"><el-button @click="projectDialogVisible = false">取 消</el-button><el-button type="primary" @click="submitProject">确 定</el-button></span>
+            <span slot="footer" class="dialog-footer">
+                <el-button icon="el-icon-close" @click="projectDialogVisible = false">取 消</el-button>
+                <el-button type="primary" icon="el-icon-check" @click="submitProject">确 定</el-button>
+            </span>
         </el-dialog>
 
-        <!-- Shot Dialog (Same) -->
+        <!-- Shot Dialog -->
         <el-dialog :title="shotForm.id ? '编辑分镜' : '新建分镜'" :visible.sync="shotDialogVisible" width="70%" top="5vh" :close-on-click-modal="false">
             <div style="display: flex; gap: 20px;">
                 <div style="flex: 1;">
@@ -283,7 +351,6 @@
                 <div style="flex: 1; border-left: 1px solid #eee; padding-left: 20px;">
                     <div style="margin-bottom: 10px; font-weight: bold;">媒体生成配置</div>
                     <div style="margin-bottom: 10px;">
-                         <!-- Independent Config Rows -->
                          <div class="config-row">
                             <div class="config-label">图片</div>
                             <div class="config-selects">
@@ -322,7 +389,7 @@
                     <div style="margin-bottom: 20px; border-top: 1px dashed #eee; padding-top: 10px;">
                         <div style="display: flex; justify-content: space-between; margin-bottom: 5px;">
                             <span style="font-weight: bold; font-size: 14px;">关键帧生成</span>
-                            <el-button type="primary" size="mini" plain @click="handleGenAllImages">一键生成全部</el-button>
+                            <el-button type="primary" size="mini" plain icon="el-icon-magic-stick" @click="handleGenAllImages">一键生成全部</el-button>
                         </div>
                         <div class="frames-grid">
                             <div class="frame-box">
@@ -338,16 +405,19 @@
                         </div>
                     </div>
                     <div style="position: relative;">
-                        <div style="display: flex; justify-content: space-between; margin-bottom: 5px;"><span>动态预览</span><el-button type="warning" size="mini" @click="handleGenVideo" :disabled="!shotForm.start_frame">生成视频</el-button></div>
+                        <div style="display: flex; justify-content: space-between; margin-bottom: 5px;"><span>动态预览</span><el-button type="warning" size="mini" icon="el-icon-video-camera-solid" @click="handleGenVideo" :disabled="!shotForm.start_frame">生成视频</el-button></div>
                         <div v-if="videoUrl" class="media-generated-box"><video :src="videoUrl" controls class="video-preview"></video><div style="margin-top: 5px;"><a :href="videoUrl" target="_blank" download style="font-size: 12px;">下载视频</a></div></div>
                         <div v-else style="background: #f9fafc; height: 100px; display: flex; align-items: center; justify-content: center; color: #ccc; font-size: 12px;">{{ shotForm.start_frame ? '点击生成视频' : '请先生成首帧' }}</div>
                     </div>
                 </div>
             </div>
-            <span slot="footer" class="dialog-footer"><el-button @click="shotDialogVisible = false">取 消</el-button><el-button type="primary" @click="submitShot">保 存</el-button></span>
+            <span slot="footer" class="dialog-footer">
+                <el-button icon="el-icon-close" @click="shotDialogVisible = false">取 消</el-button>
+                <el-button type="primary" icon="el-icon-check" @click="submitShot">保 存</el-button>
+            </span>
         </el-dialog>
 
-        <!-- Settings Dialog (Same) -->
+        <!-- Settings Dialog -->
         <el-dialog title="模型供应商管理" :visible.sync="settingsVisible" width="800px">
             <div class="settings-container">
                 <div class="settings-sidebar">
@@ -380,8 +450,8 @@
                             </div>
                         </div>
                         <div style="margin-top: 30px; text-align: right;">
-                             <el-button type="danger" plain @click="deleteCurrentProvider" v-if="editingProvider.id">删除</el-button>
-                             <el-button type="primary" @click="saveCurrentProvider">保存</el-button>
+                             <el-button type="danger" plain icon="el-icon-delete" @click="deleteCurrentProvider" v-if="editingProvider.id">删除</el-button>
+                             <el-button type="primary" icon="el-icon-check" @click="saveCurrentProvider">保存</el-button>
                         </div>
                     </el-form>
                 </div>

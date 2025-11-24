@@ -45,8 +45,6 @@ def copy_asset(source_path, dest_folder, prefix=""):
         
     dest_path = os.path.join(dest_folder, new_filename)
     
-    # 如果文件已存在，直接返回路径（避免重复复制），或者覆盖
-    # 这里选择覆盖或跳过均可，为了简单直接复制
     try:
         shutil.copy2(source_path, dest_path)
         return dest_path
@@ -83,11 +81,9 @@ def export_draft(project_info, shots, static_folder, export_dir):
         script = draft_folder.create_draft(film_name, 1920, 1080, allow_replace=True)
         
         # 获取草稿的实际物理路径，用于存放素材
-        # pyJianYingDraft 创建的目录名通常就是 film_name
         draft_sys_path = os.path.join(export_dir, film_name)
         
-        # 在草稿内部创建一个 media 文件夹，专门存放拷贝过来的素材
-        # 结构: exports/MyProject/media/xxx.mp4
+        # 在草稿内部创建一个 media 文件夹
         assets_target_dir = os.path.join(draft_sys_path, "media")
         
         # 3. 添加轨道
@@ -101,7 +97,7 @@ def export_draft(project_info, shots, static_folder, export_dir):
             duration_str = f"{duration_sec:.3f}s"
             target_trange = trange(start_time_str, duration_str)
             
-            # 文件名前缀，方便在文件夹中识别顺序 (e.g., "001_scene1_")
+            # 文件名前缀
             file_prefix = f"{idx+1:03d}_shot"
 
             # --- 视频轨道 (优先视频 > 首帧) ---
@@ -120,8 +116,7 @@ def export_draft(project_info, shots, static_folder, export_dir):
                     media_source_path = abs_path
             
             if media_source_path:
-                # 核心修改：复制文件到草稿目录
-                # 复制后的路径用于添加到剪映脚本
+                # 复制文件到草稿目录
                 copied_media_path = copy_asset(media_source_path, assets_target_dir, prefix=file_prefix)
                 
                 if copied_media_path:
@@ -132,13 +127,13 @@ def export_draft(project_info, shots, static_folder, export_dir):
             if shot.get('audio_url'):
                 rel_audio = shot.get('audio_url').lstrip('/')
                 abs_audio = os.path.abspath(os.path.join(static_folder, rel_audio))
-                
-                # 核心修改：复制音频文件
-                copied_audio_path = copy_asset(abs_audio, assets_target_dir, prefix=file_prefix)
-                
-                if copied_audio_path:
-                    audio_seg = draft.AudioSegment(copied_audio_path, target_trange)
-                    script.add_segment(audio_seg)
+                if os.path.exists(abs_audio):
+                    # 复制音频文件
+                    copied_audio_path = copy_asset(abs_audio, assets_target_dir, prefix=file_prefix)
+                    
+                    if copied_audio_path:
+                        audio_seg = draft.AudioSegment(copied_audio_path, target_trange)
+                        script.add_segment(audio_seg)
             
             # --- 文本轨道 ---
             text_content = shot.get('dialogue') or shot.get('visual_description')
@@ -155,7 +150,7 @@ def export_draft(project_info, shots, static_folder, export_dir):
         
         return {
             "success": True, 
-            "message": f"剪映草稿生成成功，所有素材已打包至 {draft_sys_path}", 
+            "message": f"剪映草稿生成成功，素材已打包至 {draft_sys_path}", 
             "path": draft_sys_path
         }
 

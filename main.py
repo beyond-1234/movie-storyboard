@@ -12,7 +12,7 @@ from pathlib import Path
 
 # 引入 AI 服务
 from ai_service import generate_aliyun_image, generate_aliyun_video, generate_aliyun_text, generate_aliyun_voiceover
-# 引入 剪映导出服务 (新)
+# 引入 剪映导出服务
 from jianying_exporter import export_draft
 
 # --- 配置 ---
@@ -22,7 +22,6 @@ IMG_SAVE_DIR = "static/imgs"
 VIDEO_SAVE_DIR = "static/videos"
 AUDIO_SAVE_DIR = "static/audio"
 SETTINGS_FILE = "settings.json"
-# 导出目录
 EXPORT_DIR = "exports"
 
 app = Flask(__name__, static_url_path='', static_folder=STATIC_FOLDER)
@@ -123,7 +122,7 @@ class StoryboardShot:
 @app.route('/')
 def index(): return send_file('index.html')
 
-# ... [Settings APIs omitted] ...
+# ... [Settings APIs] ...
 @app.route('/api/settings', methods=['GET'])
 def get_settings():
     data = get_settings_data()
@@ -170,7 +169,7 @@ def delete_provider(provider_id):
     if len(settings['providers']) < original_len: write_json(SETTINGS_FILE, settings); return jsonify({"success": True})
     return jsonify({"error": "Provider not found"}), 404
 
-# ... [Project APIs omitted] ...
+# ... [Project APIs] ...
 @app.route('/api/projects', methods=['GET'])
 def get_projects():
     ensure_dirs()
@@ -212,7 +211,7 @@ def delete_project(project_id):
     if os.path.exists(get_project_path(project_id)): shutil.rmtree(get_project_path(project_id)); return jsonify({"message": "Deleted"})
     return jsonify({"error": "Not found"}), 404
 
-# ... [Script APIs omitted] ...
+# ... [Script APIs] ...
 @app.route('/api/projects/<project_id>/script', methods=['GET'])
 def get_script(project_id): return jsonify(read_json(os.path.join(get_project_path(project_id), 'script.json'), default=[]))
 
@@ -221,7 +220,7 @@ def save_script(project_id):
     write_json(os.path.join(get_project_path(project_id), 'script.json'), request.json)
     return jsonify({"success": True})
 
-# ... [AI Text/Analyze APIs omitted] ...
+# ... [AI APIs] ...
 @app.route('/api/generate/script_continuation', methods=['POST'])
 def generate_script_continuation():
     data = request.json
@@ -252,7 +251,7 @@ def analyze_script():
         except: return jsonify({'error': 'Invalid JSON'}), 500
     return jsonify({'error': result.get('error_msg')}), 500
 
-# ... [Shot APIs omitted] ...
+# ... [Shot APIs] ...
 @app.route('/api/projects/<project_id>/shots', methods=['GET'])
 def get_shots(project_id): return jsonify(read_json(os.path.join(get_project_path(project_id), 'shot.json'), default=[]))
 
@@ -306,7 +305,8 @@ def reorder_shots(project_id):
     write_json(path, new_shots)
     return jsonify({"success": True})
 
-# ... [Generate APIs omitted for brevity, keep as is] ...
+# --- Generate APIs ---
+
 def generate_optimized_prompt(api_key, frame_type, visual_desc, style_desc, consistency_text="", start_prompt_ref=None, prev_shot_context=""):
     consistency_instruction = f"**GLOBAL VISUAL RULES**: {consistency_text}. Maintain consistent characters and environment.\n" if consistency_text else ""
     context_instruction = f"\n**PREVIOUS SHOT CONTEXT**: \"{prev_shot_context}\". Ensure narrative continuity." if prev_shot_context else ""
@@ -435,19 +435,13 @@ def generate_voiceover():
         else: return jsonify({"error": result['error_msg']}), result.get('status_code', 500)
     return jsonify({"error": "Unsupported provider type"}), 400
 
-# --- 剪映导出接口 ---
-
 @app.route('/api/projects/<project_id>/export/jianying', methods=['POST'])
 def export_jianying(project_id):
     project_info = read_json(os.path.join(get_project_path(project_id), 'info.json'))
     shots = read_json(os.path.join(get_project_path(project_id), 'shot.json'), default=[])
-    
     result = export_draft(project_info, shots, STATIC_FOLDER, EXPORT_DIR)
-    
-    if result['success']:
-        return jsonify(result)
-    else:
-        return jsonify({"error": result['error']}), 500
+    if result['success']: return jsonify(result)
+    else: return jsonify({"error": result['error']}), 500
 
 if __name__ == '__main__':
     ensure_dirs()
