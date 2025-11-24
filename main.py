@@ -46,12 +46,12 @@ def write_json(filepath, data):
     directory = os.path.dirname(filepath)
     if directory:
         os.makedirs(directory, exist_ok=True)
-
+        
     def json_serial(obj):
         if isinstance(obj, datetime):
             return obj.isoformat()
         raise TypeError(f"Type {type(obj)} not serializable")
-
+    
     with open(filepath, 'w', encoding='utf-8') as f:
         json.dump(data, f, default=json_serial, indent=4, ensure_ascii=False)
 
@@ -71,7 +71,7 @@ def get_aliyun_api_key(provider_id=None):
     if provider_id:
         conf = get_provider_config(provider_id)
         if conf: return conf.get('api_key')
-
+    
     # 否则找第一个开启的 aliyun provider
     settings = get_settings_data()
     for p in settings.get('providers', []):
@@ -118,9 +118,9 @@ class StoryboardShot:
     notes: str = ""
     start_frame: str = ""
     end_frame: str = ""
-    video_url: str = "" # 新增：视频链接
-    images: List[str] = field(default_factory=list)
-
+    video_url: str = "" 
+    images: List[str] = field(default_factory=list) 
+    
     created_time: str = field(default_factory=lambda: datetime.now().isoformat())
     updated_time: str = field(default_factory=lambda: datetime.now().isoformat())
 
@@ -143,25 +143,19 @@ def index():
 
 @app.route('/api/settings', methods=['GET'])
 def get_settings():
-    """获取所有供应商配置列表"""
     data = get_settings_data()
     providers = data.get('providers', [])
-
     response_list = []
     for p in providers:
         p_copy = p.copy()
         if p_copy.get('api_key'):
             p_copy['api_key'] = p_copy['api_key'][:6] + '******'
-
         if 'models' not in p_copy:
             p_copy['models'] = []
-
         for m in p_copy['models']:
             if 'type' not in m:
-                m['type'] = 'image'
-
+                m['type'] = 'image' 
         response_list.append(p_copy)
-
     return jsonify(response_list)
 
 @app.route('/api/settings/provider', methods=['POST'])
@@ -170,9 +164,7 @@ def save_provider():
     settings = get_settings_data()
     if 'providers' not in settings:
         settings['providers'] = []
-
     p_id = req_data.get('id')
-
     new_provider = {
         'id': p_id or str(uuid.uuid4()),
         'name': req_data.get('name', 'New Provider'),
@@ -181,9 +173,7 @@ def save_provider():
         'models': req_data.get('models', []),
         'enabled': req_data.get('enabled', True)
     }
-
     input_key = req_data.get('api_key', '')
-
     if p_id:
         found = False
         for i, p in enumerate(settings['providers']):
@@ -192,7 +182,6 @@ def save_provider():
                     new_provider['api_key'] = p.get('api_key', '')
                 else:
                     new_provider['api_key'] = input_key
-
                 settings['providers'][i] = new_provider
                 found = True
                 break
@@ -202,7 +191,6 @@ def save_provider():
     else:
         new_provider['api_key'] = input_key
         settings['providers'].append(new_provider)
-
     write_json(SETTINGS_FILE, settings)
     return jsonify({"success": True, "id": new_provider['id']})
 
@@ -211,7 +199,6 @@ def delete_provider(provider_id):
     settings = get_settings_data()
     original_len = len(settings.get('providers', []))
     settings['providers'] = [p for p in settings.get('providers', []) if p['id'] != provider_id]
-
     if len(settings['providers']) < original_len:
         write_json(SETTINGS_FILE, settings)
         return jsonify({"success": True})
@@ -237,18 +224,13 @@ def create_project():
     data = request.json
     if not data.get('film_name'):
         return jsonify({"error": "项目名称必填"}), 400
-
     project = MovieProject.from_dict(data)
     path = os.path.join(get_project_path(project.id), 'info.json')
     write_json(path, project.to_dict())
-
     shot_path = os.path.join(get_project_path(project.id), 'shot.json')
     write_json(shot_path, [])
-
-    # 初始化脚本文件
     script_path = os.path.join(get_project_path(project.id), 'script.json')
     write_json(script_path, [])
-
     return jsonify(project.to_dict()), 201
 
 @app.route('/api/projects/<project_id>', methods=['GET'])
@@ -265,12 +247,10 @@ def update_project(project_id):
     data = read_json(path)
     if not data:
         return jsonify({"error": "项目不存在"}), 404
-
     update_data = request.json
     update_data['id'] = project_id
     update_data['created_time'] = data.get('created_time')
     update_data['updated_time'] = datetime.now().isoformat()
-
     new_project = MovieProject.from_dict({**data, **update_data})
     write_json(path, new_project.to_dict())
     return jsonify(new_project.to_dict())
@@ -297,30 +277,45 @@ def save_script(project_id):
     data = request.json
     path = os.path.join(get_project_path(project_id), 'script.json')
     write_json(path, data)
-
-    # 更新项目时间
     p_path = os.path.join(get_project_path(project_id), 'info.json')
     p_data = read_json(p_path)
     if p_data:
         p_data['updated_time'] = datetime.now().isoformat()
         write_json(p_path, p_data)
-
     return jsonify({"success": True})
 
-# --- AI 文本与分镜分析接口 ---
+# --- AI 业务逻辑接口 (Prompt Encapsulated Here) ---
 
-@app.route('/api/generate/text', methods=['POST'])
-def generate_text_api():
-    """通用 AI 文本生成（用于剧本续写）"""
+@app.route('/api/generate/script_continuation', methods=['POST'])
+def generate_script_continuation():
+    """
+    剧本续写：
+    前端仅传入上下文和项目信息，后端负责构建 Prompt 并强制中文回复。
+    """
     data = request.json
-    messages = data.get('messages', [])
-    model = data.get('model', 'qwen-plus')
+    context_text = data.get('context_text', '')
+    project_info = data.get('project_info', {})
     provider_id = data.get('provider_id')
+    model = data.get('model', 'qwen-plus')
+    
+    # 构建系统提示词，包含项目设定
+    system_prompt = "你是一个专业的中文电影编剧助手。请根据项目背景和前文，续写一段剧本。\n"
+    if project_info:
+        system_prompt += f"项目名称：{project_info.get('film_name', '未命名')}\n"
+        system_prompt += f"核心冲突：{project_info.get('script_core_conflict', '未定义')}\n"
+        system_prompt += f"情感基调：{project_info.get('script_emotional_keywords', '未定义')}\n"
+        system_prompt += f"世界观：{project_info.get('worldview_background', '未定义')}\n"
+    
+    system_prompt += "\n**重要要求**：\n1. 输出内容必须**全部使用中文**。\n2. 风格要连贯，富有电影画面感。\n3. 侧重人物动作、神态和对白描写。"
 
+    messages = [
+        {'role': 'system', 'content': system_prompt},
+        {'role': 'user', 'content': f"前文剧本：\n{context_text}\n\n请续写下一段情节："}
+    ]
+    
     api_key = get_aliyun_api_key(provider_id)
-
     result = generate_aliyun_text(messages, api_key=api_key, model=model)
-
+    
     if result['success']:
         return jsonify({'content': result['content']})
     else:
@@ -328,39 +323,45 @@ def generate_text_api():
 
 @app.route('/api/generate/analyze_script', methods=['POST'])
 def analyze_script():
-    """将剧本段落转化为分镜 JSON 数据"""
+    """
+    剧本转分镜：
+    后端构建 Prompt，强制 JSON 格式且值为中文。
+    """
     data = request.json
     script_content = data.get('content', '')
     provider_id = data.get('provider_id')
     model = data.get('model', 'qwen-plus')
-
+    
     if not script_content:
         return jsonify({'error': 'Empty content'}), 400
 
     system_prompt = """
     作为专业的电影分镜师，请分析以下剧本片段，将其转化为分镜表数据。
-    请返回一个JSON数组，数组中每个对象包含以下字段：
-    - scene: 场次 (例如 "1", "EXT. PARK")
+    
+    **输出要求**：
+    1. 返回一个纯 JSON 数组。
+    2. **必须使用中文**填写所有描述性字段（如画面说明、声音说明、备注等）。
+    3. 不要包含 Markdown 标记（如 ```json）。
+    
+    **JSON对象结构**：
+    - scene: 场次 (例如 "1", "内景. 书房")
     - shot_number: 镜号 (例如 "1", "1A")
-    - visual_description: 画面说明 (详细描述画面内容，用于AI生图)
-    - audio_description: 声音说明 (对白、音效)
+    - visual_description: 画面说明 (详细描述画面内容，用于AI生图，必须中文)
+    - audio_description: 声音说明 (对白、音效，必须中文)
     - duration: 时长 (例如 "3s")
-    - special_technique: 特殊技术 (例如 "推拉", "特写")
-
-    请只返回JSON字符串，不要包含markdown标记（如```json ... ```）。
+    - special_technique: 特殊技术 (例如 "推拉", "特写", "空镜头")
     """
-
+    
     messages = [
         {'role': 'system', 'content': system_prompt},
         {'role': 'user', 'content': f"剧本片段：\n{script_content}"}
     ]
-
+    
     api_key = get_aliyun_api_key(provider_id)
     result = generate_aliyun_text(messages, api_key=api_key, model=model)
-
+    
     if result['success']:
         raw_content = result['content']
-        # 清理可能的 markdown 标记
         cleaned_content = re.sub(r'^```json\s*|\s*```$', '', raw_content.strip(), flags=re.MULTILINE | re.DOTALL)
         try:
             shots_data = json.loads(cleaned_content)
@@ -370,20 +371,17 @@ def analyze_script():
     else:
         return jsonify({'error': result.get('error_msg')}), result.get('status_code', 500)
 
-
 # --- 分镜管理接口 ---
 
 @app.route('/api/projects/<project_id>/shots', methods=['GET'])
 def get_shots(project_id):
     path = os.path.join(get_project_path(project_id), 'shot.json')
     shots = read_json(path, default=[])
-
     def sort_key(s):
         try:
             return (s.get('scene', ''), float(s.get('shot_number', 0)))
         except:
             return (s.get('scene', ''), s.get('shot_number', ''))
-
     shots.sort(key=sort_key)
     return jsonify(shots)
 
@@ -393,46 +391,37 @@ def create_shot(project_id):
     data['movie_id'] = project_id
     if not data.get('shot_number'):
         return jsonify({"error": "镜头号必填"}), 400
-
     new_shot = StoryboardShot.from_dict(data)
     path = os.path.join(get_project_path(project_id), 'shot.json')
     shots = read_json(path, default=[])
     shots.append(new_shot.to_dict())
     write_json(path, shots)
-
     p_path = os.path.join(get_project_path(project_id), 'info.json')
     p_data = read_json(p_path)
     if p_data:
         p_data['updated_time'] = datetime.now().isoformat()
         write_json(p_path, p_data)
-
     return jsonify(new_shot.to_dict()), 201
 
 @app.route('/api/projects/<project_id>/shots/<shot_id>', methods=['PUT'])
 def update_shot(project_id, shot_id):
     path = os.path.join(get_project_path(project_id), 'shot.json')
     shots = read_json(path, default=[])
-
     found_index = -1
     for i, shot in enumerate(shots):
         if shot['id'] == shot_id:
             found_index = i
             break
-
     if found_index == -1:
         return jsonify({"error": "分镜不存在"}), 404
-
     update_data = request.json
     current_data = shots[found_index]
-
     update_data['id'] = shot_id
     update_data['movie_id'] = project_id
     update_data['created_time'] = current_data.get('created_time')
     update_data['updated_time'] = datetime.now().isoformat()
-
     updated_shot = StoryboardShot.from_dict({**current_data, **update_data})
     shots[found_index] = updated_shot.to_dict()
-
     write_json(path, shots)
     return jsonify(updated_shot.to_dict())
 
@@ -446,42 +435,47 @@ def delete_shot(project_id, shot_id):
     write_json(path, new_shots)
     return jsonify({"message": "删除成功"})
 
-# --- 媒体生成接口 ---
+# --- 媒体生成接口 (Image/Video Generation) ---
 
 @app.route('/api/generate/image', methods=['POST'])
 def generate_image():
     """图片生成入口"""
     data = request.json
-    provider_id = data.get('provider_id')
-    model_name = data.get('model_name', 'qwen-image-plus')
-    prompt = data.get('prompt', '')
-    frame_type = data.get('frame_type', 'start') # start or end
+    provider_id = data.get('provider_id') 
+    model_name = data.get('model_name', 'qwen-image-plus') 
+    
+    # 接收原始数据，后端组装 Prompt
+    visual_desc = data.get('visual_description', '')
+    style_desc = data.get('style_description', '') # 风格
+    frame_type = data.get('frame_type', 'start')
+    
+    if not visual_desc:
+        return jsonify({"error": "Missing visual description"}), 400
 
-    # 自动修改 Prompt
-    if frame_type == 'end':
-        prompt = f"{prompt}, end frame of the shot, showing the result of the action, consistent style"
-    else:
-        prompt = f"{prompt}, start frame of the shot, cinematic composition"
+    # 构建 Prompt (通义万相支持中文Prompt)
+    prompt = f"电影分镜插画，{style_desc}风格。画面内容：{visual_desc}。"
+    if frame_type == 'start':
+        prompt += " 构图：分镜首帧，建立镜头，高画质，细节丰富。"
+    elif frame_type == 'end':
+        prompt += " 构图：分镜尾帧，动作结果，高画质，细节丰富。"
 
-    # 获取配置
     config = get_provider_config(provider_id)
-
-    # 兼容 Mock 模式
+    
+    # 兼容 Mock
     if not config or config.get('type') == 'mock':
         time.sleep(1.0)
-        safe_prompt = prompt[:20].replace(" ", "+") if prompt else "Scene"
+        safe_prompt = visual_desc[:20].replace(" ", "+")
         label = "EndFrame" if frame_type == 'end' else "StartFrame"
-        mock_url = f"https://placehold.co/600x400/2c3e50/ffffff?text={label}:+{safe_prompt}\\n(Mock)"
+        mock_url = f"[https://placehold.co/600x400/2c3e50/ffffff?text=](https://placehold.co/600x400/2c3e50/ffffff?text=){label}:+{safe_prompt}\\n(Mock)"
         return jsonify({"url": mock_url})
 
     api_key = config.get('api_key')
     provider_type = config.get('type')
 
-    # 构造拼接后的 Base URL
+    # Base URL 拼接
     base_url = config.get('base_url', '')
     models = config.get('models', [])
     model_config = next((m for m in models if m['name'] == model_name), None)
-
     full_endpoint = base_url
     if model_config and model_config.get('path'):
         path = model_config.get('path')
@@ -491,19 +485,16 @@ def generate_image():
             full_endpoint = base_url + '/' + path
         else:
             full_endpoint = base_url + path
-
-    # 调用 Aliyun
+    
     if provider_type == 'aliyun':
         save_dir = os.path.join(STATIC_FOLDER, IMG_SAVE_DIR)
         web_prefix = f"/{IMG_SAVE_DIR}"
-
         result = generate_aliyun_image(prompt, save_dir, web_prefix, api_key=api_key, model=model_name, endpoint=full_endpoint)
-
         if result['success']:
             return jsonify({"url": result['url']})
         else:
             return jsonify({"error": result['error_msg']}), result['status_code']
-
+    
     return jsonify({"error": "Unsupported provider type"}), 400
 
 @app.route('/api/generate/video', methods=['POST'])
@@ -512,25 +503,28 @@ def generate_video():
     data = request.json
     provider_id = data.get('provider_id')
     model_name = data.get('model_name', 'wanx2.1-kf2v-plus')
-    prompt = data.get('prompt', '')
+    
+    # 接收原始数据
+    visual_desc = data.get('visual_description', '')
     start_frame_url = data.get('start_frame', '')
     end_frame_url = data.get('end_frame', '')
+    
+    # 构建 Prompt
+    prompt = f"电影镜头，{visual_desc}。高画质，流畅动作。"
 
     config = get_provider_config(provider_id)
 
     if not config or config.get('type') == 'mock':
         time.sleep(2)
-        mock_video_url = "https://www.w3schools.com/html/mov_bbb.mp4"
+        mock_video_url = "[https://www.w3schools.com/html/mov_bbb.mp4](https://www.w3schools.com/html/mov_bbb.mp4)"
         return jsonify({"url": mock_video_url})
 
     api_key = config.get('api_key')
     provider_type = config.get('type')
-
-    # Base URL 构造逻辑
+    
     base_url = config.get('base_url', '')
     models = config.get('models', [])
     model_config = next((m for m in models if m['name'] == model_name), None)
-
     full_endpoint = base_url
     if model_config and model_config.get('path'):
         path = model_config.get('path')
@@ -542,34 +536,29 @@ def generate_video():
             full_endpoint = base_url + path
 
     if provider_type == 'aliyun':
-        # 解析本地文件路径
         real_start_path = None
         real_end_path = None
-
         if start_frame_url and (start_frame_url.startswith('/static/') or start_frame_url.startswith('static/')):
             clean = start_frame_url.lstrip('/')
             real_start_path = os.path.abspath(os.path.join(STATIC_FOLDER, clean))
-
         if end_frame_url and (end_frame_url.startswith('/static/') or end_frame_url.startswith('static/')):
             clean = end_frame_url.lstrip('/')
             real_end_path = os.path.abspath(os.path.join(STATIC_FOLDER, clean))
-
-        # 准备保存路径
+        
         save_dir = os.path.join(STATIC_FOLDER, VIDEO_SAVE_DIR)
         web_prefix = f"/{VIDEO_SAVE_DIR}"
 
-        # 同步调用
         result = generate_aliyun_video(
-            prompt,
+            prompt, 
             save_dir,
             web_prefix,
-            api_key=api_key,
-            model=model_name,
+            api_key=api_key, 
+            model=model_name, 
             endpoint=full_endpoint,
             start_img_path=real_start_path,
             end_img_path=real_end_path
         )
-
+        
         if result['success']:
             return jsonify({"url": result['url']})
         else:
@@ -579,6 +568,6 @@ def generate_video():
 
 if __name__ == '__main__':
     ensure_dirs()
-    print(f"Server started on http://127.0.0.1:5000")
+    print(f"Server started on [http://127.0.0.1:5000](http://127.0.0.1:5000)")
     print(f"Project data: {os.path.abspath(DATA_DIR)}")
     app.run(debug=True, port=5000)
