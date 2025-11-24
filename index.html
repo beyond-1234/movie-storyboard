@@ -21,11 +21,13 @@
         .dialog-footer { text-align: right; }
         
         /* Script Editor Styles */
+        .script-list-container { min-height: 200px; }
         .script-section-block { 
             background: #fff; border-left: 4px solid #409EFF; padding: 15px; margin-bottom: 15px; border-radius: 0 4px 4px 0; box-shadow: 0 1px 4px rgba(0,0,0,0.05); 
             position: relative;
             display: flex;
             gap: 10px;
+            cursor: move; /* Add move cursor for drag */
         }
         .script-section-block:hover { box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
         .script-checkbox { margin-top: 5px; }
@@ -72,6 +74,12 @@
             position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
             background: rgba(0,0,0,0.6); color: #fff; border-radius: 50%; width: 30px; height: 30px;
             display: flex; align-items: center; justify-content: center; cursor: pointer; font-size: 16px;
+        }
+
+        /* Sortable ghost style */
+        .sortable-ghost {
+            opacity: 0.5;
+            background: #f0f9eb;
         }
 
         ::-webkit-scrollbar { width: 8px; height: 8px; }
@@ -138,17 +146,21 @@
                                 </div>
                             </div>
 
-                            <div v-for="(section, index) in scriptSections" :key="index" class="script-section-block">
-                                <div class="script-checkbox">
-                                    <el-checkbox v-model="section._checked"></el-checkbox>
-                                </div>
-                                <div class="script-content-wrapper">
-                                    <div class="script-index">#{{ index + 1 }}</div>
-                                    <el-input type="textarea" :autosize="{ minRows: 3, maxRows: 10}" placeholder="请输入剧本内容..." v-model="section.content" @change="saveScript"></el-input>
-                                    <div class="script-toolbar">
-                                        <el-button size="mini" type="success" icon="el-icon-magic-stick" plain @click="generateScriptContinuation(index)">AI 续写</el-button>
-                                        <el-button size="mini" type="primary" icon="el-icon-video-camera" plain @click="convertScriptToShot(section, index)">一键转分镜</el-button>
-                                        <el-button size="mini" type="danger" icon="el-icon-delete" plain @click="removeScriptSection(index)">删除</el-button>
+                            <!-- Script List with ref for SortableJS -->
+                            <div ref="scriptListRef" class="script-list-container">
+                                <div v-for="(section, index) in scriptSections" :key="index" class="script-section-block">
+                                    <div class="script-checkbox">
+                                        <el-checkbox v-model="section._checked"></el-checkbox>
+                                    </div>
+                                    <div class="script-content-wrapper">
+                                        <div class="script-index">#{{ index + 1 }}</div>
+                                        <el-input type="textarea" :autosize="{ minRows: 3, maxRows: 10}" placeholder="请输入剧本内容..." v-model="section.content" @change="saveScript"></el-input>
+                                        <div class="script-toolbar">
+                                            <i class="el-icon-rank" style="cursor: move; margin-right: 10px; margin-top: 5px;" title="拖拽排序"></i>
+                                            <el-button size="mini" type="success" icon="el-icon-magic-stick" plain @click="generateScriptContinuation(index)">AI 续写</el-button>
+                                            <el-button size="mini" type="primary" icon="el-icon-video-camera" plain @click="convertScriptToShot(section, index)">一键转分镜</el-button>
+                                            <el-button size="mini" type="danger" icon="el-icon-delete" plain @click="removeScriptSection(index)">删除</el-button>
+                                        </div>
                                     </div>
                                 </div>
                             </div>
@@ -168,7 +180,22 @@
                                 <el-button type="primary" size="small" @click="openCreateShot">添加分镜</el-button>
                             </div>
 
-                            <el-table :data="shotList" border stripe style="width: 100%" v-loading="loadingShots" @selection-change="handleShotSelectionChange">
+                            <!-- Added row-key for Drag Sort -->
+                            <el-table 
+                                :data="shotList" 
+                                border 
+                                stripe 
+                                style="width: 100%" 
+                                v-loading="loadingShots" 
+                                @selection-change="handleShotSelectionChange"
+                                row-key="id"
+                                ref="shotTable"
+                            >
+                                <el-table-column width="40">
+                                    <template slot-scope="scope">
+                                        <i class="el-icon-rank" style="cursor: move; color: #909399;"></i>
+                                    </template>
+                                </el-table-column>
                                 <el-table-column type="selection" width="55"></el-table-column>
                                 <el-table-column prop="scene" label="场次" width="80" align="center"></el-table-column>
                                 <el-table-column prop="shot_number" label="镜号" width="80" align="center"></el-table-column>
@@ -364,11 +391,11 @@
                             </el-col>
                             <el-col :span="12"><el-form-item label="启用状态"><el-switch v-model="editingProvider.enabled"></el-switch></el-form-item></el-col>
                         </el-row>
-                        <el-form-item label="Base URL"><el-input v-model="editingProvider.base_url"></el-input></el-form-item>
-                        <el-form-item label="API Key"><el-input v-model="editingProvider.api_key" show-password></el-input></el-form-item>
+                        <el-form-item label="Base URL (可选)"><el-input v-model="editingProvider.base_url" placeholder="https://..."></el-input></el-form-item>
+                        <el-form-item label="API Key"><el-input v-model="editingProvider.api_key" show-password placeholder="输入 Key (若不修改请保持原样/空)"></el-input></el-form-item>
                         <div class="model-list-header"><span style="font-weight: bold;">模型列表</span><el-button type="text" icon="el-icon-plus" @click="addModelToProvider">添加</el-button></div>
                         <div v-if="editingProvider.models && editingProvider.models.length">
-                            <div v-for="(m, idx) in editingProvider.models" :key="idx" style="display: flex; gap: 10px; margin-bottom: 10px;">
+                            <div v-for="(m, idx) in editingProvider.models" :key="idx" style="display: flex; gap: 10px; margin-bottom: 10px; align-items: center;">
                                 <el-input v-model="m.name" placeholder="模型名称" style="flex: 2"></el-input>
                                 <el-input v-model="m.path" placeholder="Path" style="flex: 2"></el-input>
                                 <el-select v-model="m.type" placeholder="类型" style="flex: 1"><el-option label="图片" value="image"></el-option><el-option label="视频" value="video"></el-option></el-select>
@@ -389,6 +416,8 @@
     <script src="https://unpkg.com/vue@2.6.14/dist/vue.min.js"></script>
     <script src="https://unpkg.com/element-ui/lib/index.js"></script>
     <script src="https://unpkg.com/axios/dist/axios.min.js"></script>
+    <!-- SortableJS for Drag and Drop -->
+    <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.0/Sortable.min.js"></script>
 
     <script>
         new Vue({
@@ -403,7 +432,8 @@
                 genOptions: { providerId: '', imageModelName: '', videoModelName: '' },
                 projectDialogVisible: false, projectDialogTitle: '新建项目', activeProjectTab: 'basic', projectForm: {},
                 shotDialogVisible: false, videoUrl: '', shotForm: {},
-                previewVisible: false, previewUrl: ''
+                previewVisible: false, previewUrl: '',
+                scriptSortable: null, shotSortable: null // Sortable instances
             },
             computed: {
                 currentProviderModels() { const p = this.providers.find(x => x.id === this.genOptions.providerId); return (p && p.models) ? p.models : []; },
@@ -456,7 +486,64 @@
                 },
 
                 handleTabClick(tab) { if (tab.name === 'script') this.fetchScript(); else if (tab.name === 'shots') this.fetchShots(this.currentProjectId); },
-                async fetchScript() { if (!this.currentProjectId) return; try { const res = await this.request('GET', `/api/projects/${this.currentProjectId}/script`); this.scriptSections = res.length ? res : [{ content: '' }]; } catch (e) {} },
+                
+                // Initializing SortableJS
+                initScriptSortable() {
+                    const el = this.$refs.scriptListRef;
+                    if (!el) return;
+                    if (this.scriptSortable) this.scriptSortable.destroy();
+                    
+                    this.scriptSortable = Sortable.create(el, {
+                        animation: 150,
+                        handle: '.script-section-block', // drag entire block or specific handle
+                        onEnd: (evt) => {
+                            const { oldIndex, newIndex } = evt;
+                            if (oldIndex === newIndex) return;
+                            
+                            // Move item in array
+                            const item = this.scriptSections.splice(oldIndex, 1)[0];
+                            this.scriptSections.splice(newIndex, 0, item);
+                            
+                            // Save new order
+                            this.saveScript();
+                        }
+                    });
+                },
+                
+                initShotSortable() {
+                    // Access the table body element
+                    const table = this.$refs.shotTable;
+                    if (!table) return;
+                    const el = table.$el.querySelector('.el-table__body-wrapper tbody');
+                    if (!el) return;
+                    if (this.shotSortable) this.shotSortable.destroy();
+
+                    this.shotSortable = Sortable.create(el, {
+                        animation: 150,
+                        handle: '.el-icon-rank', // Only drag using the rank icon
+                        onEnd: async (evt) => {
+                            const { oldIndex, newIndex } = evt;
+                            if (oldIndex === newIndex) return;
+
+                            // Move item in local array
+                            const item = this.shotList.splice(oldIndex, 1)[0];
+                            this.shotList.splice(newIndex, 0, item);
+                            
+                            // Sync order to backend
+                            const orderedIds = this.shotList.map(s => s.id);
+                            await this.request('POST', `/api/projects/${this.currentProjectId}/shots/reorder`, { shot_ids: orderedIds });
+                        }
+                    });
+                },
+
+                async fetchScript() { 
+                    if (!this.currentProjectId) return; 
+                    try { 
+                        const res = await this.request('GET', `/api/projects/${this.currentProjectId}/script`); 
+                        this.scriptSections = res.length ? res : [{ content: '' }];
+                        this.$nextTick(() => this.initScriptSortable()); // Init Sortable after DOM update
+                    } catch (e) {} 
+                },
                 async saveScript() { if (!this.currentProjectId) return; const cleanData = this.scriptSections.map(({_checked, ...rest}) => rest); await this.request('POST', `/api/projects/${this.currentProjectId}/script`, cleanData); },
                 addScriptSection() { this.scriptSections.push({ content: '' }); this.saveScript(); },
                 removeScriptSection(idx) { this.$confirm('删除？').then(() => { this.scriptSections.splice(idx, 1); this.saveScript(); }); },
@@ -537,7 +624,14 @@
                 async submitProject() { if(!this.projectForm.film_name) return; const method = this.projectForm.id ? 'PUT' : 'POST'; const url = this.projectForm.id ? `/api/projects/${this.projectForm.id}` : '/api/projects'; const res = await this.request(method, url, this.projectForm); if(!this.projectForm.id) { this.projectList.unshift(res); this.currentProjectId=res.id; this.handleProjectChange(res.id); } else { const idx = this.projectList.findIndex(p=>p.id===res.id); this.$set(this.projectList, idx, res); this.currentProject=res; } this.projectDialogVisible = false; },
                 async deleteProject() { await this.request('DELETE', `/api/projects/${this.currentProjectId}`); this.currentProject=null; this.currentProjectId=''; this.fetchProjects(); },
                 
-                async fetchShots(pid) { if(!pid) return; this.loadingShots = true; try { this.shotList = await this.request('GET', `/api/projects/${pid}/shots`); } finally { this.loadingShots = false; } },
+                async fetchShots(pid) { 
+                    if(!pid) return; 
+                    this.loadingShots = true; 
+                    try { 
+                        this.shotList = await this.request('GET', `/api/projects/${pid}/shots`);
+                        this.$nextTick(() => this.initShotSortable()); // Init Sortable after table render
+                    } finally { this.loadingShots = false; } 
+                },
                 openCreateShot() { this.shotForm = { movie_id: this.currentProjectId, images: [], start_frame: '', end_frame: '', video_url: '' }; this.videoUrl=''; this.shotDialogVisible = true; },
                 editShot(row) { this.shotForm = JSON.parse(JSON.stringify(row)); this.videoUrl=row.video_url||''; this.shotDialogVisible = true; },
                 async submitShot() { if(!this.shotForm.shot_number) return; if(this.videoUrl) this.shotForm.video_url = this.videoUrl; const method = this.shotForm.id ? 'PUT' : 'POST'; const url = this.shotForm.id ? `/api/projects/${this.currentProjectId}/shots/${this.shotForm.id}` : `/api/projects/${this.currentProjectId}/shots`; await this.request(method, url, this.shotForm); this.fetchShots(this.currentProjectId); this.shotDialogVisible = false; },

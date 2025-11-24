@@ -367,12 +367,7 @@ def analyze_script():
 def get_shots(project_id):
     path = os.path.join(get_project_path(project_id), 'shot.json')
     shots = read_json(path, default=[])
-    def sort_key(s):
-        try:
-            return (s.get('scene', ''), float(s.get('shot_number', 0)))
-        except:
-            return (s.get('scene', ''), s.get('shot_number', ''))
-    shots.sort(key=sort_key)
+    # 默认按 JSON 中的顺序返回，不再强制排序，以便支持自定义排序
     return jsonify(shots)
 
 @app.route('/api/projects/<project_id>/shots', methods=['POST'])
@@ -442,6 +437,35 @@ def batch_delete_shots(project_id):
         write_json(path, new_shots)
         return jsonify({"success": True, "deleted_count": original_count - len(new_shots)})
     return jsonify({"success": True, "deleted_count": 0})
+
+@app.route('/api/projects/<project_id>/shots/reorder', methods=['POST'])
+def reorder_shots(project_id):
+    """根据ID列表对分镜进行重新排序"""
+    data = request.json
+    ordered_ids = data.get('shot_ids', [])
+    if not ordered_ids:
+        return jsonify({"message": "No IDs provided"}), 400
+    
+    path = os.path.join(get_project_path(project_id), 'shot.json')
+    shots = read_json(path, default=[])
+    
+    # 创建ID到分镜对象的映射
+    shot_map = {s['id']: s for s in shots}
+    
+    # 按照新的ID顺序构建列表
+    new_shots = []
+    for shot_id in ordered_ids:
+        if shot_id in shot_map:
+            new_shots.append(shot_map[shot_id])
+            
+    # 确保那些未在ordered_ids中出现但存在于原列表的分镜不会丢失（追加到最后）
+    existing_ids = set(ordered_ids)
+    for s in shots:
+        if s['id'] not in existing_ids:
+            new_shots.append(s)
+            
+    write_json(path, new_shots)
+    return jsonify({"success": True})
 
 # --- 媒体生成接口 (Image/Video Generation) ---
 
