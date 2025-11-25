@@ -12,20 +12,15 @@ from urllib.parse import urlparse, unquote
 from pathlib import PurePosixPath, Path
 from typing import Dict, Any, Optional, List
 
+# 配置日志
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger("AIService")
 
-# 尝试导入 dashscope
+# 尝试导入 dashscope (仅用于阿里云)
 try:
     import dashscope
     from dashscope import ImageSynthesis, VideoSynthesis, MultiModalConversation, Generation
-    # 尝试导入新的 TTS 模块，如果不存在则回退或报错
-    try:
-        from dashscope.audio.tts import SpeechSynthesizer
-    except ImportError:
-        # 兼容旧版本 SDK
-        from dashscope.audio.qwen_tts import SpeechSynthesizer
-    
+    from dashscope.audio.tts import SpeechSynthesizer 
     DASHSCOPE_AVAILABLE = True
 except ImportError:
     DASHSCOPE_AVAILABLE = False
@@ -47,7 +42,6 @@ def file_to_base64(file_path: str) -> Optional[str]:
 
 def download_file(url: str, save_path: str):
     try:
-        # 增加 verify=False 以防某些自签名证书问题，但生产环境建议开启
         resp = requests.get(url, stream=True, timeout=120)
         if resp.status_code == 200:
             with open(save_path, 'wb') as f:
@@ -60,7 +54,7 @@ def download_file(url: str, save_path: str):
     return False
 
 # ============================================================
-#  Provider Handlers
+#  Provider Handlers (不同提供商的实现)
 # ============================================================
 
 class AliyunHandler:
@@ -136,7 +130,6 @@ class AliyunHandler:
         api_key = config.get('api_key')
         model = config.get('model_name') or 'qwen3-tts-flash'
         
-        # 处理 Endpoint (如果有配置)
         base_url = config.get('base_url', '')
         if base_url:
             dashscope.base_http_api_url = base_url
@@ -144,7 +137,6 @@ class AliyunHandler:
         try:
             rsp = SpeechSynthesizer.call(model=model, api_key=api_key, text=text, format='mp3')
             if rsp.status_code == HTTPStatus.OK:
-                # 修复: 检查 get_audio_data 是否存在
                 if hasattr(rsp, 'get_audio_data'):
                     audio_data = rsp.get_audio_data()
                     if audio_data:
@@ -210,8 +202,7 @@ class OpenAICompatibleHandler:
 class ComfyUIHandler:
     @staticmethod
     def generate_image(prompt, save_dir, url_prefix, config):
-        # ... (简化实现，确保不崩溃)
-        return {'success': False, 'error_msg': "ComfyUI generation not fully implemented in this snippet"}
+        return {'success': False, 'error_msg': "ComfyUI generation not implemented yet"}
 
 class MockHandler:
     @staticmethod
@@ -228,44 +219,93 @@ class MockHandler:
     def generate_voice(text, save_dir, url_prefix, config):
         return {'success': True, 'url': "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3"}
 
-# --- Dispatcher ---
+# ============================================================
+#  Dispatcher
+# ============================================================
+
 def get_handler(provider_type):
     if provider_type == 'aliyun': return AliyunHandler
     if provider_type == 'siliconflow' or provider_type == 'runninghub': return OpenAICompatibleHandler
     if provider_type == 'comfyui': return ComfyUIHandler
     return MockHandler
 
-# --- Business Logic Wrappers ---
+# ============================================================
+#  Business Logic (Prompt Engineering & Coordination)
+# ============================================================
+
 def run_text_generation(messages, config):
-    handler = get_handler(config.get('type', 'mock'))
+    handler = get_handler(config.get('type'))
     return handler.generate_text(messages, config)
 
 def run_script_analysis(script_content, config):
-    system_prompt = "作为分镜师，请将剧本转为JSON数组..." # (Keep short for safety)
-    messages = [{'role': 'system', 'content': system_prompt}, {'role': 'user', 'content': script_content}]
+    system_prompt = """
+    作为专业的电影分镜师，请分析以下剧本片段，将其转化为分镜表数据。
+    **输出要求**：1. 返回一个纯 JSON 数组。2. **必须使用中文**填写所有描述性字段。3. 不要包含 Markdown 标记。
+    **JSON对象结构**：- scene: 场次 - shot_number: 镜号 - visual_description: 画面说明 - audio_description: 声音说明 - dialogue: 台词 - duration: 时长 - special_technique: 特殊技术
+    """
+    messages = [{'role': 'system', 'content': system_prompt}, {'role': 'user', 'content': f"剧本片段：\n{script_content}"}]
     return run_text_generation(messages, config)
 
 def run_image_generation(visual_desc, style_desc, consistency_text, frame_type, config, save_dir, url_prefix, start_prompt_ref=None, prev_shot_context=""):
-    # Prompt Logic
-    prompt = f"{style_desc}, {visual_desc}"
-    if consistency_text: prompt += f", {consistency_text}"
-    
+    """
+    图片生成流程：包含 Prompt 优化逻辑 (Prompt Chaining)
+    """
+    # 1. 准备 Prompt Engineering 的输入
+    consistency_instruction = f"**GLOBAL VISUAL RULES**: {consistency_text}. Maintain consistent characters and environment.\n" if consistency_text else ""
+    context_instruction = f"\n**PREVIOUS SHOT CONTEXT**: \"{prev_shot_context}\". Ensure narrative continuity." if prev_shot_context else ""
+
+    sys_prompt = ""
+    user_prompt = ""
+
+    if frame_type == 'start':
+        sys_prompt = f"""You are an expert AI Art Prompt Engineer. Convert user's description into a high-quality English prompt. {consistency_instruction}{context_instruction} Requirements: 1. Describe subject, environment, lighting, composition, style. 2. Use English, comma-separated. 3. Emphasize cinematic quality. 4. DIRECTLY output prompt text only."""
+        user_prompt = f"Style: {style_desc}\nDescription: {visual_desc}"
+    else:
+        sys_prompt = f"""You are an expert AI Art Prompt Engineer. Generate an [End Frame] prompt based on the [Start Frame Prompt]. {consistency_instruction} Requirements: 1. **KEEP** character appearance, background, and style from Start Frame Prompt EXACTLY the same. 2. **ONLY CHANGE** action/pose based on 'End Frame Description'. 3. Use English. 4. DIRECTLY output prompt text only."""
+        user_prompt = f"Start Frame Prompt: {start_prompt_ref}\n\nEnd Frame Action: {visual_desc}"
+
+    # 默认的简单 Prompt (降级策略)
+    optimized_prompt = f"{style_desc}, {visual_desc}" 
+    if consistency_text: optimized_prompt += f", {consistency_text}"
+
+    # 2. 尝试使用文本模型优化 Prompt
     handler = get_handler(config.get('type', 'mock'))
-    # 尝试先用文本生成优化 Prompt (如果 handler 支持)
-    if hasattr(handler, 'generate_text') and config.get('type') == 'aliyun':
-        # 仅对 Aliyun 开启 LLM 优化，防止其他 Provider API 格式不兼容
+    
+    # 检查 handler 是否支持文本生成，并且当前配置是否有效
+    if hasattr(handler, 'generate_text'):
         try:
-            # ... (Call optimize logic) ...
-            pass
-        except: pass
-        
-    result = handler.generate_image(prompt, save_dir, url_prefix, config)
-    return result, prompt
+            # 创建一个用于文本生成的临时配置
+            # 主要是为了处理模型名称的问题：用户在生图配置里选的是生图模型 (如 qwen-image-plus)，
+            # 我们需要换成一个文本模型 (如 qwen-plus) 来生成 Prompt。
+            text_config = config.copy()
+            if config.get('type') == 'aliyun':
+                text_config['model_name'] = 'qwen-plus'
+            elif config.get('type') in ['siliconflow', 'runninghub']:
+                # 如果用户没指定文本模型，尝试用通用模型
+                text_config['model_name'] = 'Qwen/Qwen2.5-7B-Instruct'
+            
+            # 执行 Prompt 优化
+            res = handler.generate_text([{'role': 'system', 'content': sys_prompt}, {'role': 'user', 'content': user_prompt}], text_config)
+            
+            if res['success']:
+                optimized_prompt = res['content']
+                logger.info(f"[Prompt Eng] Optimized Prompt: {optimized_prompt[:50]}...")
+            else:
+                logger.warning(f"[Prompt Eng] Failed, using raw prompt. Reason: {res.get('error_msg')}")
+        except Exception as e:
+            logger.error(f"[Prompt Eng] Exception during optimization: {e}")
+            # 保持 optimized_prompt 为默认值
+
+    # 3. 调用生图 API
+    # 这里使用原始配置（包含生图模型名称）
+    result = handler.generate_image(optimized_prompt, save_dir, url_prefix, config)
+    
+    return result, optimized_prompt
 
 def run_video_generation(prompt, start_img_path, end_img_path, config, save_dir, url_prefix):
-    handler = get_handler(config.get('type', 'mock'))
+    handler = get_handler(config.get('type'))
     return handler.generate_video(prompt, save_dir, url_prefix, config, start_img=start_img_path, end_img=end_img_path)
 
 def run_voice_generation(text, config, save_dir, url_prefix):
-    handler = get_handler(config.get('type', 'mock'))
+    handler = get_handler(config.get('type'))
     return handler.generate_voice(text, save_dir, url_prefix, config)

@@ -3,6 +3,7 @@ import json
 import uuid
 import time
 import re
+import random
 from dataclasses import dataclass, field, asdict
 from datetime import datetime
 from typing import List, Optional, Dict, Any
@@ -23,7 +24,7 @@ EXPORT_DIR = "exports"
 
 app = Flask(__name__, static_url_path='', static_folder=STATIC_FOLDER)
 
-# --- 工具函数 ---
+# --- 基础工具 ---
 def ensure_dirs():
     if not os.path.exists(DATA_DIR): os.makedirs(DATA_DIR)
     for d in [IMG_SAVE_DIR, VIDEO_SAVE_DIR, AUDIO_SAVE_DIR, EXPORT_DIR]:
@@ -38,7 +39,11 @@ def read_json(filepath, default=None):
     except: return default if default is not None else {}
 
 def write_json(filepath, data):
-    os.makedirs(os.path.dirname(filepath), exist_ok=True)
+    # 修复：只有当路径包含目录时才创建目录，防止 Windows 下 os.makedirs('') 报错
+    directory = os.path.dirname(filepath)
+    if directory:
+        os.makedirs(directory, exist_ok=True)
+        
     def json_serial(obj):
         if isinstance(obj, datetime): return obj.isoformat()
         raise TypeError(f"Type {type(obj)} not serializable")
@@ -101,7 +106,6 @@ class StoryboardShot:
 @app.route('/')
 def index(): return send_file('index.html')
 
-# --- Settings CRUD ---
 @app.route('/api/settings', methods=['GET'])
 def get_settings():
     data = read_json(SETTINGS_FILE, default={'providers': []})
@@ -123,6 +127,7 @@ def save_provider():
         'models': req.get('models', []),
         'enabled': req.get('enabled', True)
     }
+    
     input_key = req.get('api_key', '')
     existing = next((p for p in providers if p['id'] == new_p['id']), None)
     
@@ -145,7 +150,7 @@ def delete_provider(pid):
     write_json(SETTINGS_FILE, settings)
     return jsonify({"success": True})
 
-# --- Project CRUD ---
+# Project CRUD
 @app.route('/api/projects', methods=['GET'])
 def get_projects():
     ensure_dirs()
@@ -187,7 +192,7 @@ def delete_project(project_id):
     if os.path.exists(get_project_path(project_id)): shutil.rmtree(get_project_path(project_id)); return jsonify({"message": "Deleted"})
     return jsonify({"error": "Not found"}), 404
 
-# --- Script/Shot CRUD ---
+# Script CRUD
 @app.route('/api/projects/<project_id>/script', methods=['GET'])
 def get_script(project_id): return jsonify(read_json(os.path.join(get_project_path(project_id), 'script.json'), default=[]))
 
@@ -196,6 +201,7 @@ def save_script(project_id):
     write_json(os.path.join(get_project_path(project_id), 'script.json'), request.json)
     return jsonify({"success": True})
 
+# Shot CRUD
 @app.route('/api/projects/<project_id>/shots', methods=['GET'])
 def get_shots(project_id): return jsonify(read_json(os.path.join(get_project_path(project_id), 'shot.json'), default=[]))
 
@@ -249,13 +255,18 @@ def reorder_shots(project_id):
     write_json(path, new_shots)
     return jsonify({"success": True})
 
-# --- AI & Export ---
+# === AI & Export (Updated for Text Model) ===
+
 @app.route('/api/generate/script_continuation', methods=['POST'])
 def generate_script_continuation():
     data = request.json
     config = get_provider_config(data.get('provider_id'))
-    sys = "你是一个专业的中文电影编剧助手。"
+    # 允许前端覆盖模型
+    if data.get('model_name'): config['model_name'] = data.get('model_name')
+    
+    sys = "你是一个专业的中文电影编剧助手。请根据前文续写一段剧本。要求：全中文，画面感强。"
     msgs = [{'role': 'system', 'content': sys}, {'role': 'user', 'content': f"前文：\n{data.get('context_text','')}\n\n请续写："}]
+    
     result = ai_service.run_text_generation(msgs, config)
     return jsonify(result) if result.get('success') else (jsonify(result), 500)
 
@@ -263,12 +274,16 @@ def generate_script_continuation():
 def analyze_script():
     data = request.json
     config = get_provider_config(data.get('provider_id'))
+    # 允许前端覆盖模型
+    if data.get('model_name'): config['model_name'] = data.get('model_name')
+    
     result = ai_service.run_script_analysis(data.get('content', ''), config)
+    
     if result.get('success'):
         try:
             cleaned = re.sub(r'^```json\s*|\s*```$', '', result['content'].strip(), flags=re.MULTILINE | re.DOTALL)
             return jsonify({'shots': json.loads(cleaned)})
-        except: return jsonify({'error': 'Invalid JSON'}), 500
+        except: return jsonify({'error': 'Invalid JSON from AI'}), 500
     return jsonify(result), 500
 
 @app.route('/api/generate/image', methods=['POST'])
@@ -283,9 +298,10 @@ def generate_image():
     shots = read_json(shots_path, default=[])
     current_shot = next((s for s in shots if s['id'] == shot_id), None)
     
-    start_prompt_ref = current_shot.get('start_frame_prompt') if current_shot else ""
-    prev_context = "" 
+    if not current_shot: return jsonify({"error": "Shot not found"}), 404
     
+    prev_context = "" 
+    start_prompt_ref = current_shot.get('start_frame_prompt')
     save_dir = os.path.join(STATIC_FOLDER, IMG_SAVE_DIR)
     web_prefix = f"/{IMG_SAVE_DIR}"
 
@@ -293,13 +309,13 @@ def generate_image():
         data.get('visual_description'), data.get('style_description'), data.get('consistency_text'),
         data.get('frame_type'), config, save_dir, web_prefix, start_prompt_ref, prev_context
     )
-    
-    if result.get('success') and current_shot:
+
+    if result.get('success'):
         if data.get('frame_type') == 'start': current_shot['start_frame_prompt'] = used_prompt
         else: current_shot['end_frame_prompt'] = used_prompt
         write_json(shots_path, shots)
         return jsonify(result)
-    return jsonify(result), 500 if not result.get('success') else 200
+    return jsonify(result), 500
 
 @app.route('/api/generate/video', methods=['POST'])
 def generate_video():
@@ -315,7 +331,9 @@ def generate_video():
     save_dir = os.path.join(STATIC_FOLDER, VIDEO_SAVE_DIR)
     web_prefix = f"/{VIDEO_SAVE_DIR}"
 
-    result = ai_service.run_video_generation(data.get('visual_description'), s_path, e_path, config, save_dir, web_prefix)
+    result = ai_service.run_video_generation(
+        data.get('visual_description'), s_path, e_path, config, save_dir, web_prefix
+    )
     return jsonify(result) if result.get('success') else (jsonify(result), 500)
 
 @app.route('/api/generate/voiceover', methods=['POST'])
@@ -323,8 +341,10 @@ def generate_voiceover():
     data = request.json
     config = get_provider_config(data.get('provider_id'))
     if data.get('model_name'): config['model_name'] = data.get('model_name')
+    
     save_dir = os.path.join(STATIC_FOLDER, AUDIO_SAVE_DIR)
     web_prefix = f"/{AUDIO_SAVE_DIR}"
+    
     result = ai_service.run_voice_generation(data.get('text'), config, save_dir, web_prefix)
     return jsonify(result) if result.get('success') else (jsonify(result), 500)
 
