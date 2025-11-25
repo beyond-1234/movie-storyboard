@@ -9,7 +9,7 @@
         body { margin: 0; background-color: #f0f2f5; font-family: "Helvetica Neue", Helvetica, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "微软雅黑", Arial, sans-serif; }
         .el-header { background-color: #304156; color: #fff; line-height: 60px; display: flex; justify-content: space-between; align-items: center; padding: 0 20px; }
         .app-title { font-size: 20px; font-weight: bold; }
-        .main-container { width: 80%; max-width: none; margin: 0 auto; padding: 20px; }
+        .main-container { width: 90%; max-width: 1600px; margin: 0 auto; padding: 20px; }
         .project-card { margin-bottom: 20px; }
         .shot-card { min-height: 600px; }
         .image-preview-list { display: flex; gap: 10px; flex-wrap: wrap; }
@@ -82,7 +82,6 @@
         .config-label { width: 60px; font-size: 13px; color: #606266; font-weight: bold; }
         .config-selects { flex: 1; display: flex; gap: 10px; }
         
-        /* Flex helper for header actions */
         .header-actions { float: right; display: flex; align-items: center; height: 100%; gap: 15px; }
     </style>
 </head>
@@ -120,7 +119,6 @@
                     <div slot="header" class="clearfix" style="line-height: 32px;">
                         <span style="font-weight: bold; font-size: 18px;">{{ currentProject.film_name }}</span>
                         <el-tag size="small" type="success" style="margin-left: 10px">核心冲突: {{ currentProject.script_core_conflict || '无' }}</el-tag>
-                        <!-- 修复对齐问题的按钮组 -->
                         <div class="header-actions">
                             <el-button type="text" icon="el-icon-film" style="color: #E6A23C;" @click="exportJianyingDraft">导出剪映草稿</el-button>
                             <el-button type="text" icon="el-icon-edit" @click="openEditProject">编辑详情</el-button>
@@ -224,7 +222,6 @@
                                             <div v-if="scope.row.start_frame" style="text-align: center; position: relative;">
                                                 <el-image style="width: 70px; height: 50px; border-radius: 4px" :src="scope.row.start_frame" :preview-src-list="[scope.row.start_frame]"></el-image>
                                                 <div style="font-size: 10px; color: #999;">首帧</div>
-                                                <!-- 移除了视频播放覆盖层 -->
                                             </div>
                                             <div v-if="scope.row.end_frame" style="text-align: center;">
                                                 <el-image style="width: 70px; height: 50px; border-radius: 4px" :src="scope.row.end_frame" :preview-src-list="[scope.row.end_frame]"></el-image>
@@ -423,7 +420,7 @@
                 <div class="settings-sidebar">
                     <div style="margin-bottom: 10px;"><el-button type="primary" size="mini" icon="el-icon-plus" style="width: 100%" @click="initNewProvider">新增供应商</el-button></div>
                     <div v-for="p in providers" :key="p.id" class="provider-item" :class="{active: editingProvider && editingProvider.id === p.id}" @click="selectProvider(p)">
-                        <div style="display:flex; align-items:center;"><div class="provider-item-icon" :style="{background: p.type === 'aliyun' ? '#FF6A00' : '#909399'}">{{ p.name.charAt(0).toUpperCase() }}</div><span style="font-size: 13px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; width: 120px;">{{ p.name }}</span></div>
+                        <div style="display:flex; align-items:center;"><div class="provider-item-icon" :style="{background: getProviderColor(p.type)}">{{ p.name.charAt(0).toUpperCase() }}</div><span style="font-size: 13px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; width: 120px;">{{ p.name }}</span></div>
                         <i class="el-icon-arrow-right" style="font-size: 12px; color: #ccc;"></i>
                     </div>
                 </div>
@@ -431,7 +428,7 @@
                     <el-form label-position="top" size="small">
                         <el-form-item label="供应商名称"><el-input v-model="editingProvider.name"></el-input></el-form-item>
                         <el-row :gutter="20">
-                            <el-col :span="12"><el-form-item label="类型"><el-select v-model="editingProvider.type" style="width: 100%"><el-option label="Aliyun DashScope" value="aliyun"></el-option><el-option label="Mock Service" value="mock"></el-option></el-select></el-form-item></el-col>
+                            <el-col :span="12"><el-form-item label="类型"><el-select v-model="editingProvider.type" style="width: 100%"><el-option label="Aliyun DashScope" value="aliyun"></el-option><el-option label="SiliconFlow (OpenAI)" value="siliconflow"></el-option><el-option label="RunningHub" value="runninghub"></el-option><el-option label="ComfyUI (Local)" value="comfyui"></el-option><el-option label="Mock Service" value="mock"></el-option></el-select></el-form-item></el-col>
                             <el-col :span="12"><el-form-item label="启用状态"><el-switch v-model="editingProvider.enabled"></el-switch></el-form-item></el-col>
                         </el-row>
                         <el-form-item label="Base URL (可选)"><el-input v-model="editingProvider.base_url" placeholder="https://..."></el-input></el-form-item>
@@ -488,7 +485,6 @@
                 batchDialogVisible: false, batchConfig: { target: '', scope: 'all' } 
             },
             computed: {
-                // Helper to get models for a specific provider ID
                 getModelsByProviderId() {
                     return (id) => {
                         const p = this.providers.find(x => x.id === id);
@@ -556,8 +552,8 @@
                         visual_description: row.visual_description,
                         style_description: styleDesc,
                         consistency_text: this.currentProject.visual_consistency_prompt,
-                        provider_id: this.genOptions.imageProviderId, // Use Specific ID
-                        model_name: this.genOptions.imageModelName, // Use Specific Model
+                        provider_id: this.genOptions.imageProviderId, 
+                        model_name: this.genOptions.imageModelName, 
                         frame_type: type,
                         shot_id: row.id, 
                         project_id: this.currentProjectId
@@ -573,8 +569,8 @@
                         visual_description: row.visual_description,
                         start_frame: row.start_frame,
                         end_frame: row.end_frame,
-                        provider_id: this.genOptions.videoProviderId, // Use Specific ID
-                        model_name: this.genOptions.videoModelName // Use Specific Model
+                        provider_id: this.genOptions.videoProviderId, 
+                        model_name: this.genOptions.videoModelName 
                     }, { signal: this.currentAbortController.signal });
                     if (res.url) {
                         row.video_url = res.url;
@@ -606,8 +602,6 @@
                     this.startGlobalLoading('AI 续写中...', '请稍候');
                     try {
                         const ctx = this.scriptSections.slice(Math.max(0, index - 2), index + 1).map(s => s.content).join('\n');
-                        // Use a default or first available provider for text generation logic (usually qwen-plus)
-                        // For now, let's use the imageProviderId as a fallback or pick the first available
                         const pid = this.genOptions.imageProviderId || (this.providers.length ? this.providers[0].id : '');
                         const res = await this.request('POST', '/api/generate/script_continuation', { context_text: ctx, project_info: this.currentProject, provider_id: pid }, { signal: this.currentAbortController.signal });
                         this.scriptSections.splice(index + 1, 0, { content: res.content }); this.saveScript();
@@ -670,22 +664,12 @@
                     try { await this._internalGenerateVideo(row); this.$message.success('视频生成完毕'); } catch(e) { if (e.message !== '已取消') console.error(e); } finally { this.stopGlobalLoading(); }
                 },
                 
-                // 导出剪映
                 async exportJianyingDraft() {
                     this.startGlobalLoading('导出剪映草稿...', '正在组装媒体资源');
                     try {
                         const res = await this.request('POST', `/api/projects/${this.currentProjectId}/export/jianying`);
-                        if (res.success) {
-                            this.$alert(`导出成功！<br>草稿路径：<b>${res.path}</b>`, '导出完成', {
-                                dangerouslyUseHTMLString: true,
-                                confirmButtonText: '确定'
-                            });
-                        }
-                    } catch (e) {
-                        if (e.message !== '已取消') console.error(e);
-                    } finally {
-                        this.stopGlobalLoading();
-                    }
+                        if (res.success) { this.$alert(`导出成功！<br>草稿路径：<b>${res.path}</b>`, '导出完成', { dangerouslyUseHTMLString: true, confirmButtonText: '确定' }); }
+                    } catch (e) {} finally { this.stopGlobalLoading(); }
                 },
                 
                 async handleGenVoice() {
@@ -707,6 +691,12 @@
                 playAudio(url) { const audio = new Audio(url); audio.play().catch(e => this.$message.error('播放失败: ' + e.message)); },
                 playVideo(row) { this.playerVideoUrl = row.video_url; this.videoPlayerVisible = true; },
 
+                getProviderColor(type) {
+                    if(type==='aliyun') return '#FF6A00';
+                    if(type==='siliconflow') return '#7B68EE';
+                    if(type==='comfyui') return '#3CB371';
+                    return '#909399';
+                },
                 async fetchSettings() { try { const list = await this.request('GET', '/api/settings'); this.providers = list; if(list.length) { this.initDefaultSelections(); } } catch(e){} },
                 openSettings() { this.fetchSettings(); this.settingsVisible = true; if(this.providers.length) this.selectProvider(this.providers[0]); else this.initNewProvider(); },
                 selectProvider(p) { this.editingProvider = JSON.parse(JSON.stringify(p)); },
@@ -722,50 +712,21 @@
                             this.$message.success("保存成功"); 
                             this.fetchSettings(); 
                             if(!this.editingProvider.id && res.id) { this.editingProvider.id = res.id; } 
-                        } else {
-                            this.$message.error("保存失败");
-                        }
-                    } catch(e) {
-                         // request wrapper already shows error, but we can add extra logic here
-                    }
+                        } else { this.$message.error("保存失败"); }
+                    } catch(e) { }
                 },
-                
                 async deleteCurrentProvider() { if(!this.editingProvider.id) return; await this.request('DELETE', `/api/settings/provider/${this.editingProvider.id}`); this.fetchSettings(); this.editingProvider=null; },
                 
-                // Initialize default selections when providers load
                 initDefaultSelections() {
-                    // Helper to find first provider with specific model type
-                    const findProviderForType = (type) => {
-                        for (const p of this.providers) {
-                            if (p.models && p.models.some(m => m.type === type)) return p.id;
-                        }
-                        return this.providers[0].id; // Fallback to first provider
-                    };
-
-                    if (!this.genOptions.imageProviderId) this.genOptions.imageProviderId = findProviderForType('image');
-                    if (!this.genOptions.videoProviderId) this.genOptions.videoProviderId = findProviderForType('video');
-                    if (!this.genOptions.voiceProviderId) this.genOptions.voiceProviderId = findProviderForType('audio');
-                    
-                    // Trigger model updates
-                    this.updateImageModelDefault();
-                    this.updateVideoModelDefault();
-                    this.updateVoiceModelDefault();
+                    const findP = (t) => { for(const p of this.providers) if(p.models && p.models.some(m => m.type === t)) return p.id; return this.providers[0]?.id || ''; };
+                    if(!this.genOptions.imageProviderId) this.genOptions.imageProviderId = findP('image');
+                    if(!this.genOptions.videoProviderId) this.genOptions.videoProviderId = findP('video');
+                    if(!this.genOptions.voiceProviderId) this.genOptions.voiceProviderId = findP('audio');
+                    this.updateImageModelDefault(); this.updateVideoModelDefault(); this.updateVoiceModelDefault();
                 },
-                
-                updateImageModelDefault() {
-                    const models = this.availableImageModels;
-                    if(models.length > 0) this.genOptions.imageModelName = models[0].name; else this.genOptions.imageModelName = '';
-                },
-                updateVideoModelDefault() {
-                    const models = this.availableVideoModels;
-                    if(models.length > 0) this.genOptions.videoModelName = models[0].name; else this.genOptions.videoModelName = '';
-                },
-                updateVoiceModelDefault() {
-                    const models = this.availableVoiceModels;
-                    if(models.length > 0) this.genOptions.voiceModelName = models[0].name; else this.genOptions.voiceModelName = '';
-                },
-                
-                // Deprecated generic handler, replaced by specific updates
+                updateImageModelDefault() { const m = this.availableImageModels; if(m.length) this.genOptions.imageModelName = m[0].name; else this.genOptions.imageModelName = ''; },
+                updateVideoModelDefault() { const m = this.availableVideoModels; if(m.length) this.genOptions.videoModelName = m[0].name; else this.genOptions.videoModelName = ''; },
+                updateVoiceModelDefault() { const m = this.availableVoiceModels; if(m.length) this.genOptions.voiceModelName = m[0].name; else this.genOptions.voiceModelName = ''; },
                 handleProviderChange() { this.initDefaultSelections(); },
 
                 async fetchProjects() { const list = await this.request('GET', '/api/projects'); this.projectList = list; if(list.length && !this.currentProjectId) { this.currentProjectId = list[0].id; this.handleProjectChange(list[0].id); } },
@@ -775,14 +736,7 @@
                 async submitProject() { if(!this.projectForm.film_name) return; const method = this.projectForm.id ? 'PUT' : 'POST'; const url = this.projectForm.id ? `/api/projects/${this.projectForm.id}` : '/api/projects'; const res = await this.request(method, url, this.projectForm); if(!this.projectForm.id) { this.projectList.unshift(res); this.currentProjectId=res.id; this.handleProjectChange(res.id); } else { const idx = this.projectList.findIndex(p=>p.id===res.id); this.$set(this.projectList, idx, res); this.currentProject=res; } this.projectDialogVisible = false; },
                 async deleteProject() { await this.request('DELETE', `/api/projects/${this.currentProjectId}`); this.currentProject=null; this.currentProjectId=''; this.fetchProjects(); },
                 
-                async fetchShots(pid) { 
-                    if(!pid) return; 
-                    this.loadingShots = true; 
-                    try { 
-                        this.shotList = await this.request('GET', `/api/projects/${pid}/shots`);
-                        this.$nextTick(() => this.initShotSortable()); 
-                    } finally { this.loadingShots = false; } 
-                },
+                async fetchShots(pid) { if(!pid) return; this.loadingShots = true; try { this.shotList = await this.request('GET', `/api/projects/${pid}/shots`); this.$nextTick(() => this.initShotSortable()); } finally { this.loadingShots = false; } },
                 openCreateShot() { this.shotForm = { movie_id: this.currentProjectId, images: [], start_frame: '', end_frame: '', video_url: '', dialogue: '', audio_url: '' }; this.videoUrl=''; this.shotDialogVisible = true; },
                 editShot(row) { this.shotForm = JSON.parse(JSON.stringify(row)); this.videoUrl=row.video_url||''; this.shotDialogVisible = true; },
                 async submitShot() { if(!this.shotForm.shot_number) return; if(this.videoUrl) this.shotForm.video_url = this.videoUrl; const method = this.shotForm.id ? 'PUT' : 'POST'; const url = this.shotForm.id ? `/api/projects/${this.currentProjectId}/shots/${this.shotForm.id}` : `/api/projects/${this.currentProjectId}/shots`; await this.request(method, url, this.shotForm); this.fetchShots(this.currentProjectId); this.shotDialogVisible = false; },
