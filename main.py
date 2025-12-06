@@ -300,7 +300,11 @@ def generate_image():
     
     if not current_shot: return jsonify({"error": "Shot not found"}), 404
     
-    prev_context = "" 
+    prev_shot = next((s for s in shots if s['shot_number'] == current_shot['shot_number'] - 1), None)
+    
+    prev_context = ''
+    if prev_shot:  prev_context = prev_shot['end_frame_prompt']
+    
     start_prompt_ref = current_shot.get('start_frame_prompt')
     save_dir = os.path.join(STATIC_FOLDER, IMG_SAVE_DIR)
     web_prefix = f"/{IMG_SAVE_DIR}"
