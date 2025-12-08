@@ -13,6 +13,7 @@ from http import HTTPStatus
 from urllib.parse import urlparse, unquote
 from pathlib import PurePosixPath, Path
 from typing import Dict, Any, Optional, List
+from zai import ZhipuAiClient
 
 # 配置日志
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -875,6 +876,125 @@ class JimengHandler:
         """
         return {'success': False, 'error_msg': "Jimeng does not support text generation"}
 
+
+
+class ZhipuHandler:
+    @staticmethod
+    def generate_text(messages, config):
+        try:
+            api_key = config.get('api_key')
+            if not api_key:
+                return {'success': False, 'error_msg': "Zhipu API key is required"}
+            
+            model = config.get('model_name') or 'glm-4.6'
+            client = ZhipuAiClient(api_key=api_key)
+            
+            response = client.chat.completions.create(
+                model=model,
+                messages=messages
+            )
+            
+            if response.choices:
+                return {'success': True, 'content': response.choices[0].message.content}
+            return {'success': False, 'error_msg': "No response from Zhipu API"}
+            
+        except Exception as e:
+            logger.error(f"[Zhipu] Text generation error: {e}")
+            return {'success': False, 'error_msg': str(e)}
+
+    @staticmethod
+    def generate_image(prompt, save_dir, url_prefix, config):
+        try:
+            api_key = config.get('api_key')
+            if not api_key:
+                return {'success': False, 'error_msg': "Zhipu API key is required"}
+            
+            model = config.get('model_name') or 'cogview-3'
+            client = ZhipuAiClient(api_key=api_key)
+            
+            response = client.images.generations(
+                model=model,
+                prompt=prompt,
+                size=config.get('size', "1024x1024"),
+                quality=config.get('quality', "standard")
+            )
+            
+            if response.data and len(response.data) > 0:
+                img_url = response.data[0].url
+                fname = f"{uuid.uuid4()}.png"
+                save_path = os.path.join(save_dir, fname)
+                
+                if download_file(img_url, save_path):
+                    return {'success': True, 'url': f"{url_prefix.rstrip('/')}/{fname}"}
+                return {'success': False, 'error_msg': "Failed to download image"}
+            
+            return {'success': False, 'error_msg': "No image data in response"}
+            
+        except Exception as e:
+            logger.error(f"[Zhipu] Image generation error: {e}")
+            return {'success': False, 'error_msg': str(e)}
+
+    @staticmethod
+    def generate_video(prompt, save_dir, url_prefix, config, start_img=None, end_img=None):
+        try:
+            api_key = config.get('api_key')
+            if not api_key:
+                return {'success': False, 'error_msg': "Zhipu API key is required"}
+            
+            if not start_img:
+                return {'success': False, 'error_msg': "Zhipu video generation requires start image"}
+            
+            # 处理起始图片为base64
+            start_img_b64 = file_to_base64(start_img)
+            end_img_b64 = file_to_base64(end_img)
+            if not start_img_b64 or not end_img_b64:
+                return {'success': False, 'error_msg': "Failed to encode start image to base64"}
+            
+            model = config.get('model_name') or 'cogvideox-2'
+            client = ZhipuAiClient(api_key=api_key)
+            
+            # 提交视频生成任务
+            response = client.videos.generations(
+                model=model,
+                image_url=[start_img_b64, end_img_b64],
+                prompt=prompt,
+                quality=config.get('quality', "speed"),
+                with_audio=config.get('with_audio', True),
+                size=config.get('size', "1280x720"),
+                fps=config.get('fps', 30)
+            )
+            
+            if not response.id:
+                return {'success': False, 'error_msg': "No task ID returned from API"}
+            
+            # 轮询等待结果
+            max_wait = config.get('max_wait', 600)
+            start_time = time.time()
+            while time.time() - start_time < max_wait:
+                result = client.videos.retrieve_videos_result(id=response.id)
+                
+                if result.status == 'succeeded':
+                    video_url = result.data[0].url if result.data else None
+                    if video_url:
+                        fname = f"{response.id}.mp4"
+                        save_path = os.path.join(save_dir, fname)
+                        
+                        if download_file(video_url, save_path):
+                            return {'success': True, 'url': f"{url_prefix.rstrip('/')}/{fname}"}
+                        return {'success': True, 'url': video_url}
+                    return {'success': False, 'error_msg': "No video URL in response"}
+                
+                if result.status == 'failed':
+                    return {'success': False, 'error_msg': f"Video generation failed: {result.failure_details}"}
+                
+                time.sleep(10)  # 每10秒查询一次
+            
+            return {'success': False, 'error_msg': f"Timeout after {max_wait}s waiting for video"}
+            
+        except Exception as e:
+            logger.error(f"[Zhipu] Video generation error: {e}")
+            return {'success': False, 'error_msg': str(e)}
+
 # ============================================================
 #  Dispatcher
 # ============================================================
@@ -885,6 +1005,7 @@ def get_handler(provider_type):
     if provider_type == 'comfyui': return ComfyUIHandler
     if provider_type == 'vidu': return ViduHandler
     if provider_type == 'jimeng': return JimengHandler
+    if provider_type == 'zai': return ZhipuHandler
     return MockHandler
 
 # ============================================================
@@ -954,8 +1075,11 @@ def run_image_generation(visual_desc, style_desc, consistency_text, frame_type, 
             elif config.get('type') in ['siliconflow', 'runninghub']:
                 # 如果用户没指定文本模型，尝试用通用模型
                 text_config['model_name'] = 'Qwen/Qwen2.5-7B-Instruct'
+            elif config.get('type') == 'zai':
+                text_config['model_name'] = 'glm-4.6'
             
             # 执行 Prompt 优化
+            logger.info("start prompt eng")
             res = handler.generate_text([{'role': 'system', 'content': sys_prompt + " 使用中文回答"}, {'role': 'user', 'content': user_prompt}], text_config)
             
             if res['success']:
