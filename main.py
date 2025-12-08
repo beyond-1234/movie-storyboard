@@ -61,11 +61,8 @@ class MovieProject:
     film_name: str
     script_core_conflict: str = ""
     script_emotional_keywords: str = ""
-    character_biography: str = ""
-    worldview_background: str = ""
-    worldview_spatial_trait: str = ""
-    director_emotional_intensity: int = 5
-    director_expression_focus: str = ""
+    # 合并世界观设定的三个字段为一个基础信息字段
+    basic_info: str = ""  # 包含时代背景、空间特质、人物小传
     visual_color_system: str = ""
     visual_consistency_prompt: str = "" 
     id: str = field(default_factory=lambda: str(uuid.uuid4()))
@@ -403,16 +400,18 @@ def generate_character_views():
     save_dir = os.path.join(STATIC_FOLDER, IMG_SAVE_DIR)
     web_prefix = f"/{IMG_SAVE_DIR}"
     
-    # 获取项目信息，包括色彩体系和情感关键词
+    # 获取项目信息，包括色彩体系、情感关键词和基础信息
     color_system = None
     emotional_keywords = None
+    basic_info = None
     if project_id:
         project_info = read_json(os.path.join(get_project_path(project_id), 'info.json'), default={})
         color_system = project_info.get('visual_color_system', '')
         emotional_keywords = project_info.get('script_emotional_keywords', '')
+        basic_info = project_info.get('basic_info', '')
 
-    # 构建包含正面特写和多视图的prompt，并加入色彩体系和情感关键词
-    prompt = build_comprehensive_character_prompt(character_desc, color_system, emotional_keywords)
+    # 构建包含正面特写和多视图的prompt，并加入色彩体系、情感关键词和基础信息
+    prompt = build_comprehensive_character_prompt(character_desc, color_system, emotional_keywords, basic_info)
     
     # 使用不带提示词工程的简单图片生成方法
     result = ai_service.run_simple_image_generation(
@@ -427,8 +426,8 @@ def generate_character_views():
     
     return jsonify({'success': False, 'error': '生成失败'}), 500
 
-def build_comprehensive_character_prompt(character_desc, color_system=None, emotional_keywords=None):
-    """构建包含正面特写和多视图的角色prompt，并加入色彩体系和情感关键词"""
+def build_comprehensive_character_prompt(character_desc, color_system=None, emotional_keywords=None, basic_info=None):
+    """构建包含正面特写和多视图的角色prompt，并加入色彩体系、情感关键词和基础信息"""
     
     # 基础提示词
     prompt = f"""电影角色设计图，{character_desc}。
@@ -464,6 +463,14 @@ def build_comprehensive_character_prompt(character_desc, color_system=None, emot
 13. 情感基调：{emotional_keywords}
 14. 角色表情和姿态应体现指定的情感基调
 15. 整体氛围应与项目的情感风格保持一致"""
+    
+    # 如果有基础信息，添加到提示词中
+    if basic_info and basic_info.strip():
+        prompt += f"""
+        
+16. 项目基础信息：{basic_info}
+17. 角色设计应符合项目设定的时代背景、空间环境和人物特点
+18. 角色服装、装备和整体风格应与项目世界观保持一致"""
     
     return prompt
 

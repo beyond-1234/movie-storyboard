@@ -214,12 +214,10 @@
                         </div>
                     </div>
                     <el-descriptions :column="4" border size="small">
-                        <el-descriptions-item label="时代背景">{{ currentProject.worldview_background }}</el-descriptions-item>
-                        <el-descriptions-item label="空间特质">{{ currentProject.worldview_spatial_trait }}</el-descriptions-item>
-                        <el-descriptions-item label="情感浓度">{{ currentProject.director_emotional_intensity }}/10</el-descriptions-item>
+                        <el-descriptions-item label="基础信息" :span="4">{{ currentProject.basic_info }}</el-descriptions-item>
+                        <el-descriptions-item label="情感关键词">{{ currentProject.script_emotional_keywords }}</el-descriptions-item>
                         <el-descriptions-item label="色彩体系">{{ currentProject.visual_color_system }}</el-descriptions-item>
-                        <el-descriptions-item label="人物小传" :span="4">{{ currentProject.character_biography }}</el-descriptions-item>
-                        <el-descriptions-item label="视觉统一" :span="4">
+                        <el-descriptions-item label="人物设定" :span="4">
                              <span v-if="currentProject.visual_consistency_prompt">{{ currentProject.visual_consistency_prompt }}</span>
                              <span v-else style="color:#ccc;font-style:italic;">未设置 (在编辑中添加以保证角色一致性)</span>
                         </el-descriptions-item>
@@ -286,7 +284,7 @@
                                     </el-select>
 
                                     <el-button type="primary" size="small" icon="el-icon-plus" @click="openCreateCharacter">创建角色</el-button>
-                                    <el-button type="success" size="small" icon="el-icon-magic-stick" @click="generateCharactersFromPrompt">从视觉统一设定生成</el-button>
+                                    <el-button type="success" size="small" icon="el-icon-magic-stick" @click="generateCharactersFromPrompt">从人物设定生成</el-button>
                                 </div>
                             </div>
                         
@@ -489,16 +487,10 @@
                         <el-form-item label="项目名称" prop="film_name" required><el-input v-model="projectForm.film_name"></el-input></el-form-item>
                         <el-form-item label="核心冲突"><el-input type="textarea" v-model="projectForm.script_core_conflict" :rows="3"></el-input></el-form-item>
                         <el-form-item label="情感关键词"><el-input v-model="projectForm.script_emotional_keywords"></el-input></el-form-item>
+                        <el-form-item label="基础信息" prop="basic_info"><el-input type="textarea" v-model="projectForm.basic_info" :rows="4" placeholder="包含时代背景、空间特质、人物小传等信息"></el-input></el-form-item>
                     </el-tab-pane>
-                    <el-tab-pane label="世界观设定" name="world">
-                        <el-form-item label="时代背景"><el-input v-model="projectForm.worldview_background"></el-input></el-form-item>
-                        <el-form-item label="空间特质"><el-input v-model="projectForm.worldview_spatial_trait"></el-input></el-form-item>
-                        <el-form-item label="人物小传"><el-input type="textarea" v-model="projectForm.character_biography" :rows="4"></el-input></el-form-item>
-                    </el-tab-pane>
-                    <el-tab-pane label="导演/视觉" name="director">
-                        <el-form-item label="视觉统一设定" prop="visual_consistency_prompt"><el-input type="textarea" v-model="projectForm.visual_consistency_prompt" :rows="4" placeholder="例：男主角张三，35岁..."></el-input></el-form-item>
-                        <el-form-item label="情感浓度"><el-slider v-model="projectForm.director_emotional_intensity" :min="1" :max="10" show-input></el-slider></el-form-item>
-                        <el-form-item label="表达重点"><el-input v-model="projectForm.director_expression_focus"></el-input></el-form-item>
+                    <el-tab-pane label="视觉风格" name="visual">
+                        <el-form-item label="人物设定" prop="visual_consistency_prompt"><el-input type="textarea" v-model="projectForm.visual_consistency_prompt" :rows="4" placeholder="例：男主角张三，35岁..."></el-input></el-form-item>
                         <el-form-item label="色彩体系"><el-input v-model="projectForm.visual_color_system"></el-input></el-form-item>
                     </el-tab-pane>
                 </el-tabs>
@@ -1117,7 +1109,17 @@
 
                 async fetchProjects() { const list = await this.request('GET', '/api/projects'); this.projectList = list; if(list.length && !this.currentProjectId) { this.currentProjectId = list[0].id; this.handleProjectChange(list[0].id); } },
                 async handleProjectChange(pid) { this.currentProject = this.projectList.find(p => p.id === pid); this.activeTab='script'; this.fetchScript(); },
-                openCreateProject() { this.projectForm = { director_emotional_intensity: 5 }; this.projectDialogVisible = true; },
+                openCreateProject() { 
+    this.projectForm = { 
+        film_name: '',
+        script_core_conflict: '',
+        script_emotional_keywords: '',
+        basic_info: '',
+        visual_color_system: '',
+        visual_consistency_prompt: ''
+    }; 
+    this.projectDialogVisible = true; 
+},
                 openEditProject() { this.projectForm = JSON.parse(JSON.stringify(this.currentProject)); this.projectDialogVisible = true; },
                 async submitProject() { if(!this.projectForm.film_name) return; const method = this.projectForm.id ? 'PUT' : 'POST'; const url = this.projectForm.id ? `/api/projects/${this.projectForm.id}` : '/api/projects'; const res = await this.request(method, url, this.projectForm); if(!this.projectForm.id) { this.projectList.unshift(res); this.currentProjectId=res.id; this.handleProjectChange(res.id); } else { const idx = this.projectList.findIndex(p=>p.id===res.id); this.$set(this.projectList, idx, res); this.currentProject=res; } this.projectDialogVisible = false; },
                 async deleteProject() { await this.request('DELETE', `/api/projects/${this.currentProjectId}`); this.currentProject=null; this.currentProjectId=''; this.fetchProjects(); },
@@ -1214,10 +1216,10 @@
                     }
                 },
 
-                // 根据视觉统一字段生成角色列表
+                // 根据人物设定字段生成角色列表
                 async generateCharactersFromPrompt() {
                     if (!this.currentProject || !this.currentProject.visual_consistency_prompt) {
-                        this.$message.warning('请先在项目设置中填写视觉统一设定');
+                        this.$message.warning('请先在项目设置中填写人物设定');
                         return;
                     }
                     
