@@ -379,6 +379,7 @@
                                         <el-option label="SiliconFlow (OpenAI)" value="siliconflow"></el-option>
                                         <el-option label="RunningHub" value="runninghub"></el-option>
                                         <el-option label="VIDU Studio" value="vidu"></el-option>
+                                        <el-option label="即梦 (Volcengine)" value="jimeng"></el-option>
                                         <el-option label="ComfyUI (Local)" value="comfyui"></el-option>
                                         <el-option label="Mock Service" value="mock"></el-option>
                                     </el-select>
@@ -389,7 +390,17 @@
                         <el-form-item label="Base URL (可选)">
                             <el-input v-model="editingProvider.base_url" placeholder="https://api.vidu.com"></el-input>
                         </el-form-item>
-                        <el-form-item label="API Key"><el-input v-model="editingProvider.api_key" show-password placeholder="输入 Key (若不修改请保持原样/空)"></el-input></el-form-item>
+                        <el-form-item label="API Key">
+                            <el-input 
+                                v-model="editingProvider.api_key" 
+                                show-password 
+                                :placeholder="editingProvider.type === 'jimeng' ? 'AccessKeyId|SecretKey (用竖线分隔)' : '输入 Key (若不修改请保持原样/空)'">
+                            </el-input>
+                            <div v-if="editingProvider.type === 'jimeng'" style="font-size: 12px; color: #909399; margin-top: 5px;">
+                                <i class="el-icon-info"></i> 即梦需要填写格式: <code>AccessKeyId|SecretKey</code>
+                                <br>示例: <code>AKTP1234567890|aGVsbG93b3JsZA==</code>
+                            </div>
+                        </el-form-item>
                         <div class="model-list-header"><span style="font-weight: bold;">模型列表</span><el-button type="text" icon="el-icon-plus" @click="addModelToProvider">添加</el-button></div>
                         <div v-if="editingProvider.models && editingProvider.models.length">
                             <div v-for="(m, idx) in editingProvider.models" :key="idx" style="display: flex; gap: 10px; margin-bottom: 10px; align-items: center;">
@@ -822,7 +833,8 @@
                 getProviderColor(type) {
                     if(type==='aliyun') return '#FF6A00';
                     if(type==='siliconflow') return '#7B68EE';
-                    if(type==='vidu') return '#FF1493';  // 新增：玫红色
+                    if(type==='vidu') return '#FF1493';
+                    if(type==='jimeng') return '#FF4500';
                     if(type==='comfyui') return '#3CB371';
                     return '#909399';
                 },
