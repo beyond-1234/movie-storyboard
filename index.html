@@ -153,6 +153,48 @@
 
                         <!-- Shot Tab -->
                         <el-tab-pane label="分镜列表" name="shots">
+
+                            <!-- 全局媒体生成配置【新增核心代码】 -->
+                            <div class="media-config-panel">
+                                <div style="margin-bottom: 10px; font-weight: bold;">全局媒体生成配置</div>
+                                <div class="config-row">
+                                    <div class="config-label">图片</div>
+                                    <div class="config-selects">
+                                        <el-select v-model="genOptions.imageProviderId" size="mini" placeholder="供应商" style="flex:1"
+                                            @change="updateImageModelDefault">
+                                            <el-option v-for="p in providers" :key="p.id" :label="p.name" :value="p.id"></el-option>
+                                        </el-select>
+                                        <el-select v-model="genOptions.imageModelName" size="mini" placeholder="模型" style="flex:1">
+                                            <el-option v-for="m in availableImageModels" :key="m.name" :label="m.name" :value="m.name"></el-option>
+                                        </el-select>
+                                    </div>
+                                </div>
+                                <div class="config-row">
+                                    <div class="config-label">视频</div>
+                                    <div class="config-selects">
+                                        <el-select v-model="genOptions.videoProviderId" size="mini" placeholder="供应商" style="flex:1"
+                                            @change="updateVideoModelDefault">
+                                            <el-option v-for="p in providers" :key="p.id" :label="p.name" :value="p.id"></el-option>
+                                        </el-select>
+                                        <el-select v-model="genOptions.videoModelName" size="mini" placeholder="模型" style="flex:1">
+                                            <el-option v-for="m in availableVideoModels" :key="m.name" :label="m.name" :value="m.name"></el-option>
+                                        </el-select>
+                                    </div>
+                                </div>
+                                <div class="config-row" style="border-bottom:none;">
+                                    <div class="config-label">语音</div>
+                                    <div class="config-selects">
+                                        <el-select v-model="genOptions.voiceProviderId" size="mini" placeholder="供应商" style="flex:1"
+                                            @change="updateVoiceModelDefault">
+                                            <el-option v-for="p in providers" :key="p.id" :label="p.name" :value="p.id"></el-option>
+                                        </el-select>
+                                        <el-select v-model="genOptions.voiceModelName" size="mini" placeholder="模型" style="flex:1">
+                                            <el-option v-for="m in availableVoiceModels" :key="m.name" :label="m.name" :value="m.name"></el-option>
+                                        </el-select>
+                                    </div>
+                                </div>
+                            </div>
+
                             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
                                 <div><span style="margin-right: 20px;">共 {{ shotList.length }} 个分镜</span><el-button type="danger" size="small" icon="el-icon-delete" plain :disabled="multipleShotSelection.length === 0" @click="deleteSelectedShots">批量删除</el-button><el-button type="danger" size="small" icon="el-icon-delete-solid" @click="deleteAllShots">清空全部</el-button></div>
                                 <div>
@@ -304,30 +346,6 @@
                     </el-form>
                 </div>
                 <div style="flex: 1; border-left: 1px solid #eee; padding-left: 20px;">
-                    <div style="margin-bottom: 10px; font-weight: bold;">媒体生成配置</div>
-                    <div style="margin-bottom: 10px;">
-                         <div class="config-row">
-                            <div class="config-label">图片</div>
-                            <div class="config-selects">
-                                <el-select v-model="genOptions.imageProviderId" size="mini" placeholder="供应商" style="flex:1" @change="updateImageModelDefault"><el-option v-for="p in providers" :key="p.id" :label="p.name" :value="p.id"></el-option></el-select>
-                                <el-select v-model="genOptions.imageModelName" size="mini" placeholder="模型" style="flex:1"><el-option v-for="m in availableImageModels" :key="m.name" :label="m.name" :value="m.name"></el-option></el-select>
-                            </div>
-                         </div>
-                         <div class="config-row">
-                            <div class="config-label">视频</div>
-                            <div class="config-selects">
-                                <el-select v-model="genOptions.videoProviderId" size="mini" placeholder="供应商" style="flex:1" @change="updateVideoModelDefault"><el-option v-for="p in providers" :key="p.id" :label="p.name" :value="p.id"></el-option></el-select>
-                                <el-select v-model="genOptions.videoModelName" size="mini" placeholder="模型" style="flex:1"><el-option v-for="m in availableVideoModels" :key="m.name" :label="m.name" :value="m.name"></el-option></el-select>
-                            </div>
-                         </div>
-                         <div class="config-row" style="border-bottom:none;">
-                            <div class="config-label">语音</div>
-                            <div class="config-selects">
-                                <el-select v-model="genOptions.voiceProviderId" size="mini" placeholder="供应商" style="flex:1" @change="updateVoiceModelDefault"><el-option v-for="p in providers" :key="p.id" :label="p.name" :value="p.id"></el-option></el-select>
-                                <el-select v-model="genOptions.voiceModelName" size="mini" placeholder="模型" style="flex:1"><el-option v-for="m in availableVoiceModels" :key="m.name" :label="m.name" :value="m.name"></el-option></el-select>
-                            </div>
-                         </div>
-                    </div>
                     <div style="margin-bottom: 20px; border-top: 1px dashed #eee; padding-top: 10px;">
                         <div style="display: flex; justify-content: space-between; margin-bottom: 5px;"><span style="font-weight: bold; font-size: 14px;">关键帧生成</span><el-button type="primary" size="mini" plain icon="el-icon-magic-stick" @click="handleGenAllImages">一键生成全部</el-button></div>
                         <div class="frames-grid">
