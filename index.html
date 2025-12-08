@@ -156,15 +156,14 @@
                             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
                                 <div><span style="margin-right: 20px;">共 {{ shotList.length }} 个分镜</span><el-button type="danger" size="small" icon="el-icon-delete" plain :disabled="multipleShotSelection.length === 0" @click="deleteSelectedShots">批量删除</el-button><el-button type="danger" size="small" icon="el-icon-delete-solid" @click="deleteAllShots">清空全部</el-button></div>
                                 <div>
-                                    <el-dropdown split-button type="success" size="small" @command="openBatchDialog" @click="openBatchDialog('start_frame')">
-                                        <i class="el-icon-magic-stick"></i> 批量生成首帧
-                                        <el-dropdown-menu slot="dropdown">
-                                            <el-dropdown-item command="start_frame" icon="el-icon-picture-outline">批量生成首帧</el-dropdown-item>
-                                            <el-dropdown-item command="end_frame" icon="el-icon-picture">批量生成尾帧</el-dropdown-item>
-                                            <el-dropdown-item command="video" divided icon="el-icon-video-camera">批量生成视频</el-dropdown-item>
-                                        </el-dropdown-menu>
-                                    </el-dropdown>
-                                    <el-button type="primary" size="small" icon="el-icon-plus" @click="openCreateShot" style="margin-left: 10px;">添加分镜</el-button>
+                                    <el-button type="danger" size="small" icon="el-icon-sort"
+                                        @click="openBatchDialog('sequential_frames')">批量顺序生成</el-button>
+                                    <el-button type="warning" size="small" icon="el-icon-video-camera" @click="openBatchDialog('video')">批量生成视频</el-button>
+                                    <el-button type="success" size="small" icon="el-icon-picture-outline"
+                                        @click="openBatchDialog('start_frame')">批量生成首帧</el-button>
+                                    <el-button type="success" size="small" icon="el-icon-picture" @click="openBatchDialog('end_frame')">批量生成尾帧</el-button>
+                                    <el-button type="primary" size="small" icon="el-icon-plus" @click="openCreateShot"
+                                        style="margin-left: 10px;">添加分镜</el-button>
                                 </div>
                             </div>
 
@@ -224,13 +223,33 @@
                     <el-tag v-if="batchConfig.target === 'start_frame'">分镜首帧 (Start Frame)</el-tag>
                     <el-tag v-if="batchConfig.target === 'end_frame'" type="success">分镜尾帧 (End Frame)</el-tag>
                     <el-tag v-if="batchConfig.target === 'video'" type="warning">分镜视频 (Video)</el-tag>
+                    <el-tag v-if="batchConfig.target === 'sequential_frames'" type="danger">顺序生成关键帧 (Sequential)</el-tag>
                 </el-form-item>
+
+                <!-- 顺序生成时显示特殊说明 -->
+                <el-alert v-if="batchConfig.target === 'sequential_frames'" type="info" :closable="false" style="margin-bottom: 15px;">
+                    <template slot="title">
+                        <div style="font-size: 13px; line-height: 1.6;">
+                            <strong>顺序生成模式:</strong><br>
+                            1. 按分镜顺序依次生成首帧<br>
+                            2. 使用上一个分镜的尾帧作为参考<br>
+                            3. 生成完所有首帧后,再生成尾帧<br>
+                            4. 保证画面连贯性和角色一致性
+                        </div>
+                    </template>
+                </el-alert>
+
                 <el-form-item label="选择生成范围">
                     <el-radio-group v-model="batchConfig.scope" style="display: flex; flex-direction: column; gap: 10px;">
                         <el-radio label="all">全部 {{ shotList.length }} 个分镜</el-radio>
                         <el-radio label="selected" :disabled="multipleShotSelection.length === 0">已选中的 {{ multipleShotSelection.length }} 个分镜 <span v-if="multipleShotSelection.length===0" style="color:#999;font-size:12px">(请先在列表中勾选)</span></el-radio>
-                        <el-radio label="missing">仅针对未生成的 {{ getMissingCount(batchConfig.target) }} 个数据 <span style="color:#999;font-size:12px">(跳过已存在的)</span></el-radio>
+                        <el-radio label="missing">仅针对未生成的 {{ getMissingCount(batchConfig.target) }} 个分镜 <span style="color:#999;font-size:12px">(跳过已存在的)</span></el-radio>
                     </el-radio-group>
+                </el-form-item>
+
+                <!-- 顺序生成固定使用全部分镜 -->
+                <el-form-item label="生成范围" v-if="batchConfig.target === 'sequential_frames'">
+                    <el-tag type="info">将处理全部 {{ shotList.length }} 个分镜(按顺序)</el-tag>
                 </el-form-item>
             </el-form>
             <div slot="footer"><el-button icon="el-icon-close" @click="batchDialogVisible = false">取 消</el-button><el-button type="primary" icon="el-icon-video-play" @click="startBatchGeneration">开始生成</el-button></div>
@@ -338,9 +357,14 @@
         <el-dialog title="模型供应商管理" :visible.sync="settingsVisible" width="800px">
             <div class="settings-container">
                 <div class="settings-sidebar">
-                    <div style="margin-bottom: 10px;"><el-button type="primary" size="mini" icon="el-icon-plus" style="width: 100%" @click="initNewProvider">新增供应商</el-button></div>
+                    <div style="margin-bottom: 10px;">
+                        <el-button type="primary" size="mini" icon="el-icon-plus" style="width: 100%" @click="initNewProvider">新增供应商</el-button>
+                    </div>
                     <div v-for="p in providers" :key="p.id" class="provider-item" :class="{active: editingProvider && editingProvider.id === p.id}" @click="selectProvider(p)">
-                        <div style="display:flex; align-items:center;"><div class="provider-item-icon" :style="{background: getProviderColor(p.type)}">{{ p.name.charAt(0).toUpperCase() }}</div><span style="font-size: 13px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; width: 120px;">{{ p.name }}</span></div>
+                        <div style="display:flex; align-items:center;">
+                            <div class="provider-item-icon" :style="{background: getProviderColor(p.type)}">{{ p.name.charAt(0).toUpperCase() }}</div>
+                            <span style="font-size: 13px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; width: 120px;">{{ p.name }}</span>
+                        </div>
                         <i class="el-icon-arrow-right" style="font-size: 12px; color: #ccc;"></i>
                     </div>
                 </div>
@@ -348,34 +372,41 @@
                     <el-form label-position="top" size="small">
                         <el-form-item label="供应商名称"><el-input v-model="editingProvider.name"></el-input></el-form-item>
                         <el-row :gutter="20">
-                            <el-col :span="12"><el-form-item label="类型"><el-select v-model="editingProvider.type" style="width: 100%">
-                                <el-option label="Aliyun DashScope" value="aliyun"></el-option>
-                                <el-option label="SiliconFlow (OpenAI)" value="siliconflow"></el-option>
-                                <el-option label="RunningHub" value="runninghub"></el-option>
-                                <el-option label="ComfyUI (Local)" value="comfyui"></el-option>
-                                <el-option label="Mock Service" value="mock"></el-option>
-                            </el-select></el-form-item></el-col>
+                            <el-col :span="12">
+                                <el-form-item label="类型">
+                                    <el-select v-model="editingProvider.type" style="width: 100%">
+                                        <el-option label="Aliyun DashScope" value="aliyun"></el-option>
+                                        <el-option label="SiliconFlow (OpenAI)" value="siliconflow"></el-option>
+                                        <el-option label="RunningHub" value="runninghub"></el-option>
+                                        <el-option label="VIDU Studio" value="vidu"></el-option>
+                                        <el-option label="ComfyUI (Local)" value="comfyui"></el-option>
+                                        <el-option label="Mock Service" value="mock"></el-option>
+                                    </el-select>
+                                </el-form-item>
+                            </el-col>
                             <el-col :span="12"><el-form-item label="启用状态"><el-switch v-model="editingProvider.enabled"></el-switch></el-form-item></el-col>
                         </el-row>
-                        <el-form-item label="Base URL (可选)"><el-input v-model="editingProvider.base_url" placeholder="https://..."></el-input></el-form-item>
+                        <el-form-item label="Base URL (可选)">
+                            <el-input v-model="editingProvider.base_url" placeholder="https://api.vidu.com"></el-input>
+                        </el-form-item>
                         <el-form-item label="API Key"><el-input v-model="editingProvider.api_key" show-password placeholder="输入 Key (若不修改请保持原样/空)"></el-input></el-form-item>
                         <div class="model-list-header"><span style="font-weight: bold;">模型列表</span><el-button type="text" icon="el-icon-plus" @click="addModelToProvider">添加</el-button></div>
                         <div v-if="editingProvider.models && editingProvider.models.length">
                             <div v-for="(m, idx) in editingProvider.models" :key="idx" style="display: flex; gap: 10px; margin-bottom: 10px; align-items: center;">
-                                <el-input v-model="m.name" placeholder="模型名称" style="flex: 2"></el-input>
-                                <el-input v-model="m.path" placeholder="Path" style="flex: 2"></el-input>
+                                <el-input v-model="m.name" placeholder="模型名称 (如: vidu-1)" style="flex: 2"></el-input>
+                                <el-input v-model="m.path" placeholder="Path (可选)" style="flex: 2"></el-input>
                                 <el-select v-model="m.type" placeholder="类型" style="flex: 1">
                                     <el-option label="图片" value="image"></el-option>
                                     <el-option label="视频" value="video"></el-option>
                                     <el-option label="语音" value="audio"></el-option>
-                                    <el-option label="文本" value="text"></el-option> <!-- Added Text Option -->
+                                    <el-option label="文本" value="text"></el-option>
                                 </el-select>
                                 <el-button type="danger" icon="el-icon-delete" circle plain size="mini" @click="removeModelFromProvider(idx)"></el-button>
                             </div>
                         </div>
                         <div style="margin-top: 30px; text-align: right;">
-                             <el-button type="danger" plain icon="el-icon-delete" @click="deleteCurrentProvider" v-if="editingProvider.id">删除</el-button>
-                             <el-button type="primary" icon="el-icon-check" @click="saveCurrentProvider">保存</el-button>
+                            <el-button type="danger" plain icon="el-icon-delete" @click="deleteCurrentProvider" v-if="editingProvider.id">删除</el-button>
+                            <el-button type="primary" icon="el-icon-check" @click="saveCurrentProvider">保存</el-button>
                         </div>
                     </el-form>
                 </div>
@@ -438,18 +469,45 @@
                 startGlobalLoading(title, subtext) { this.globalLoading = true; this.loadingTitle = title; this.loadingSubText = subtext; this.currentAbortController = new AbortController(); },
                 stopGlobalLoading() { this.globalLoading = false; this.currentAbortController = null; },
                 cancelGeneration() { if (this.currentAbortController) this.currentAbortController.abort(); this.stopGlobalLoading(); },
-
-                openBatchDialog(command) { this.batchConfig = { target: command, scope: 'all' }; this.batchDialogVisible = true; },
+                openBatchDialog(command) { 
+                    this.batchConfig = { 
+                        target: command, 
+                        scope: command === 'sequential_frames' ? 'sequential' : 'all' 
+                    }; 
+                    this.batchDialogVisible = true; 
+                },
                 getMissingCount(target) {
                     if(!this.shotList) return 0;
                     if(target === 'start_frame') return this.shotList.filter(s => !s.start_frame).length;
                     if(target === 'end_frame') return this.shotList.filter(s => !s.end_frame).length;
                     if(target === 'video') return this.shotList.filter(s => !s.video_url).length;
+                    if (target === 'sequential_frames') {
+                        // 顺序生成模式：统计实际需要生成的帧数
+                        // 每个分镜最多需要生成2帧（首帧+尾帧）
+                        let count = 0;
+                        this.shotList.forEach(s => {
+                            if (!s.start_frame)  {
+                                count++; // 缺首帧
+                                return;
+                            }
+                            if (!s.end_frame) { 
+                                count++;    // 缺尾帧
+                                return;
+                            }
+                        });
+                        return count;
+                    }
                     return 0;
                 },
                 async startBatchGeneration() {
                     const { target, scope } = this.batchConfig;
                     this.batchDialogVisible = false;
+
+                    if (target === 'sequential_frames') {
+                        await this.sequentialGenerateFrames();
+                        return;
+                    }
+
                     let tasks = [];
                     if (scope === 'all') tasks = [...this.shotList];
                     else if (scope === 'selected') tasks = [...this.multipleShotSelection];
@@ -478,7 +536,127 @@
                     this.stopGlobalLoading();
                     this.$message({ type: failCount === 0 ? 'success' : 'warning', message: `批量任务完成！成功: ${successCount}, 失败: ${failCount}` });
                 },
+                async sequentialGenerateFrames() {
+                    const shots = [...this.shotList]; // 按当前顺序
+                    if (shots.length === 0) {
+                        this.$message.info("没有分镜可以生成");
+                        return;
+                    }
 
+                    const total = shots.length;
+                    let successCount = 0;
+                    let failCount = 0;
+
+                    this.startGlobalLoading(
+                        `顺序生成中... (0/${total * 2})`,
+                        `第一阶段:生成所有首帧 | 第二阶段:生成所有尾帧`
+                    );
+
+                    try {
+                        // === 第一阶段:按顺序生成所有首帧 ===
+                        this.loadingSubText = '第一阶段:顺序生成首帧,保证画面连贯...';
+
+                        for (let i = 0; i < shots.length; i++) {
+                            if (this.currentAbortController.signal.aborted) break;
+
+                            const shot = shots[i];
+                            const prevShot = i > 0 ? shots[i - 1] : null;
+
+                            this.loadingTitle = `正在生成第 ${i + 1}/${total} 个分镜的首帧...`;
+
+                            try {
+                                // 如果已有首帧则跳过
+                                if (shot.start_frame) {
+                                    console.log(`Shot ${shot.shot_number} 首帧已存在,跳过`);
+                                    successCount++;
+                                    continue;
+                                }
+
+                                await this._internalGenerateImageSequential(shot, 'start', prevShot);
+                                successCount++;
+
+                                // 短暂延迟,避免API限流
+                                await new Promise(resolve => setTimeout(resolve, 500));
+
+                            } catch (e) {
+                                console.error(`首帧生成失败 shot ${shot.shot_number}:`, e);
+                                failCount++;
+                            }
+                        }
+
+                        // === 第二阶段:生成所有尾帧 ===
+                        this.loadingSubText = '第二阶段:生成尾帧,为视频过渡做准备...';
+
+                        for (let i = 0; i < shots.length; i++) {
+                            if (this.currentAbortController.signal.aborted) break;
+
+                            const shot = shots[i];
+                            this.loadingTitle = `正在生成第 ${i + 1}/${total} 个分镜的尾帧...`;
+
+                            try {
+                                // 如果已有尾帧则跳过
+                                if (shot.end_frame) {
+                                    console.log(`Shot ${shot.shot_number} 尾帧已存在,跳过`);
+                                    successCount++;
+                                    continue;
+                                }
+
+                                // 尾帧基于该分镜的首帧生成
+                                await this._internalGenerateImageSequential(shot, 'end', null);
+                                successCount++;
+
+                                await new Promise(resolve => setTimeout(resolve, 500));
+
+                            } catch (e) {
+                                console.error(`尾帧生成失败 shot ${shot.shot_number}:`, e);
+                                failCount++;
+                            }
+                        }
+
+                    } finally {
+                        this.stopGlobalLoading();
+                        this.$message({
+                            type: failCount === 0 ? 'success' : 'warning',
+                            message: `顺序生成完成!成功: ${successCount}, 失败: ${failCount}`,
+                            duration: 5000
+                        });
+                    }
+                },
+                async _internalGenerateImageSequential(shot, type, prevShot) {
+                    const styleDesc = `${this.currentProject.worldview_background} ${this.currentProject.visual_color_system}`;
+
+                    // 构建请求参数
+                    const params = {
+                        visual_description: shot.visual_description,
+                        style_description: styleDesc,
+                        consistency_text: this.currentProject.visual_consistency_prompt,
+                        provider_id: this.genOptions.imageProviderId,
+                        model_name: this.genOptions.imageModelName,
+                        frame_type: type,
+                        shot_id: shot.id,
+                        project_id: this.currentProjectId
+                    };
+
+                    // 如果是生成首帧且有前一个分镜,使用前一个分镜的尾帧prompt作为参考
+                    if (type === 'start' && prevShot && prevShot.end_frame_prompt) {
+                        params.prev_shot_context = prevShot.end_frame_prompt;
+                    }
+
+                    const res = await this.request('POST', '/api/generate/image', params, {
+                        signal: this.currentAbortController.signal
+                    });
+
+                    const isStart = type === 'start';
+                    if (isStart) {
+                        shot.start_frame = res.url;
+                    } else {
+                        shot.end_frame = res.url;
+                    }
+
+                    await this.request('PUT', `/api/projects/${this.currentProjectId}/shots/${shot.id}`, {
+                        [isStart ? 'start_frame' : 'end_frame']: res.url
+                    });
+                },
                 async _internalGenerateImage(row, type) {
                     const styleDesc = `${this.currentProject.worldview_background} ${this.currentProject.visual_color_system}`;
                     const res = await this.request('POST', '/api/generate/image', {
@@ -644,13 +822,24 @@
                 getProviderColor(type) {
                     if(type==='aliyun') return '#FF6A00';
                     if(type==='siliconflow') return '#7B68EE';
+                    if(type==='vidu') return '#FF1493';  // 新增：玫红色
                     if(type==='comfyui') return '#3CB371';
                     return '#909399';
                 },
                 async fetchSettings() { try { const list = await this.request('GET', '/api/settings'); this.providers = list; if(list.length) { this.initDefaultSelections(); } } catch(e){} },
                 openSettings() { this.fetchSettings(); this.settingsVisible = true; if(this.providers.length) this.selectProvider(this.providers[0]); else this.initNewProvider(); },
                 selectProvider(p) { this.editingProvider = JSON.parse(JSON.stringify(p)); },
-                initNewProvider() { this.editingProvider = { id: '', name: 'New Provider', type: 'aliyun', base_url: '', api_key: '', enabled: true, models: [ { name: 'qwen-image-plus', type: 'image', path: '' }, { name: 'wanx2.1-kf2v-plus', type: 'video', path: '' }, { name: 'qwen3-tts-flash', type: 'audio', path: '' }, { name: 'qwen-plus', type: 'text', path: '' } ] }; },
+                initNewProvider() { 
+                    this.editingProvider = { 
+                        id: '', 
+                        name: 'New Provider', 
+                        type: 'aliyun', 
+                        base_url: '', 
+                        api_key: '', 
+                        enabled: true, 
+                        models: [ ] 
+                    }; 
+                },
                 addModelToProvider() { if(!this.editingProvider.models) this.$set(this.editingProvider, 'models', []); this.editingProvider.models.push({ name: '', type: 'image', path: '' }); },
                 removeModelFromProvider(idx) { this.editingProvider.models.splice(idx, 1); },
                 
