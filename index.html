@@ -208,7 +208,7 @@
                             <!-- 角色生成配置 -->
                             <div style="margin-bottom: 15px; background: #f5f7fa; padding: 10px; border-radius: 4px;">
                                 <div style="display:flex; align-items:center; gap: 15px;">
-                                    <span style="font-size:13px; color:#606266; font-weight:bold;">AI 模型:</span>
+                                    <span style="font-size:13px; color:#606266; font-weight:bold;">图片生成模型:</span>
                                     <el-select v-model="genOptions.imageProviderId" size="mini" placeholder="供应商" style="width: 120px;"
                                         @change="updateImageModelDefault">
                                         <el-option v-for="p in providers" :key="p.id" :label="p.name" :value="p.id"></el-option>
@@ -216,6 +216,15 @@
                                     <el-select v-model="genOptions.imageModelName" size="mini" placeholder="模型" style="width: 150px;">
                                         <el-option v-for="m in availableImageModels" :key="m.name" :label="m.name" :value="m.name"></el-option>
                                     </el-select>
+                                    <p></p>
+                                    <span style="font-size:13px; color:#606266; font-weight:bold;">角色列表生成的文本模型:</span>
+                                    <el-select v-model="genOptions.textProviderId" size="mini" placeholder="供应商" style="width: 120px;" @change="updateTextModelDefault">
+                                        <el-option v-for="p in providers" :key="p.id" :label="p.name" :value="p.id"></el-option>
+                                    </el-select>
+                                    <el-select v-model="genOptions.textModelName" size="mini" placeholder="模型" style="width: 150px;">
+                                        <el-option v-for="m in availableTextModels" :key="m.name" :label="m.name" :value="m.name"></el-option>
+                                    </el-select>
+
                                     <el-button type="primary" size="small" icon="el-icon-plus" @click="openCreateCharacter">创建角色</el-button>
                                     <el-button type="success" size="small" icon="el-icon-magic-stick" @click="generateCharactersFromPrompt">从视觉统一设定生成</el-button>
                                 </div>
