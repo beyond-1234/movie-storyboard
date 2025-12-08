@@ -79,6 +79,11 @@ class StoryboardShot:
     scene: str
     shot_number: str
     visual_description: str
+    # 场景相关字段
+    scene_description: str = ""
+    scene_prompt: str = ""
+    scene_image: str = ""
+    characters: List[str] = field(default_factory=list)
     id: str = field(default_factory=lambda: str(uuid.uuid4()))
     audio_description: str = ""
     special_technique: str = ""
@@ -274,7 +279,70 @@ def analyze_script():
     # 允许前端覆盖模型
     if data.get('model_name'): config['model_name'] = data.get('model_name')
     
-    result = ai_service.run_script_analysis(data.get('content', ''), config)
+    # 获取项目信息和角色列表
+    project_id = data.get('project_id')
+    project_info = {}
+    character_list = []
+    
+    if project_id:
+        project_info = read_json(os.path.join(get_project_path(project_id), 'info.json'), default={})
+        character_list = read_json(os.path.join(get_project_path(project_id), 'characters.json'), default=[])
+    
+    # 构建角色信息字符串，供AI参考
+    characters_info = ""
+    if character_list:
+        characters_info = "\n".join([f"- {char.get('name', '')}: {char.get('description', '')}" for char in character_list])
+        characters_info = f"\n\n已有角色列表：\n{characters_info}"
+    
+    # 获取项目基础信息
+    basic_info = project_info.get('basic_info', '')
+    emotional_keywords = project_info.get('script_emotional_keywords', '')
+    color_system = project_info.get('visual_color_system', '')
+    
+    # 构建系统提示词
+    sys = "你是一个专业的电影分镜设计师。请根据剧本内容，生成详细的分镜列表，每个分镜包含场景说明和角色信息。"
+    
+    # 构建用户提示词
+    user_prompt = f"""剧本内容：
+{data.get('content', '')}
+
+{characters_info}
+
+项目基础信息：{basic_info}
+情感关键词：{emotional_keywords}
+色彩体系：{color_system}
+
+请将上述剧本内容转换为分镜列表，每个分镜必须包含以下字段：
+1. scene: 场次编号
+2. shot_number: 镜号
+3. visual_description: 画面描述
+4. scene_description: 场景说明（详细描述场景环境、时间、地点等）
+5. characters: 出席角色列表（从已有角色中选择，或根据剧本内容推断新角色）
+6. dialogue: 台词（如果有）
+7. audio_description: 声音描述
+8. special_technique: 特殊拍摄技巧
+9. duration: 预计时长
+
+请直接返回JSON格式的分镜数组，不要包含其他解释或说明。格式如下：
+{{
+  "shots": [
+    {{
+      "scene": "1",
+      "shot_number": "1",
+      "visual_description": "画面描述",
+      "scene_description": "场景说明",
+      "characters": ["角色1", "角色2"],
+      "dialogue": "台词内容",
+      "audio_description": "声音描述",
+      "special_technique": "拍摄技巧",
+      "duration": "5秒"
+    }},
+    ...
+  ]
+}}"""
+
+    msgs = [{'role': 'system', 'content': sys}, {'role': 'user', 'content': user_prompt}]
+    result = ai_service.run_text_generation(msgs, config)
     
     if result.get('success'):
         try:
@@ -552,6 +620,131 @@ def allowed_file(filename):
     ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'bmp'}
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
+
+@app.route('/api/generate/scene_prompt', methods=['POST'])
+def generate_scene_prompt():
+    """生成场景提示词"""
+    data = request.json
+    scene_description = data.get('scene_description')
+    project_id = data.get('project_id')
+    provider_id = data.get('provider_id')
+    model_name = data.get('model_name')
+
+    if not scene_description:
+        return jsonify({'success': False, 'error': '场景描述不能为空'}), 400
+
+    # 获取配置
+    config = get_provider_config(provider_id)
+    if model_name:
+        config['model_name'] = model_name
+
+    # 获取项目信息
+    project_info = {}
+    if project_id:
+        project_info = read_json(os.path.join(get_project_path(project_id), 'info.json'), default={})
+
+    # 构建系统提示词
+    sys = "你是一个专业的电影场景设计师。请根据场景描述生成详细的场景提示词，用于AI图片生成。"
+    
+    # 构建用户提示词，包含场景描述和项目信息
+    user_prompt = f"""场景描述：{scene_description}
+
+请生成一个详细的场景提示词，必须包含以下元素：
+1. 精确的时间设定（早晨、中午、下午、傍晚、夜晚等）
+2. 天气状况（晴朗、阴天、雨天、雪天等）
+3. 光源类型和方向（自然光、人造光、逆光等）
+4. 空间类型（室内、室外、半开放空间等）
+5. 空间尺度（狭小、适中、广阔等）
+6. 场景高度（低角度、平视、高角度等）
+7. 场景中的标志性建筑或物体
+8. 背景、前景和氛围的详细框架说明
+9. 整体氛围（宁静、紧张、欢乐等）
+10. 整体风格（写实、卡通、奇幻等）
+11. 景别（远景、全景、中景、近景等）
+12. 视角设定（平视、俯视、仰视等）
+13. 构图方式（对称、黄金分割、对角线等）
+
+请直接返回提示词内容，不要包含其他解释或说明。"""
+
+    # 如果有项目信息，添加到提示词中
+    if project_info:
+        color_system = project_info.get('visual_color_system', '')
+        emotional_keywords = project_info.get('script_emotional_keywords', '')
+        basic_info = project_info.get('basic_info', '')
+        
+        if color_system:
+            user_prompt += f"\n\n色彩体系要求：{color_system}"
+        if emotional_keywords:
+            user_prompt += f"\n\n情感基调：{emotional_keywords}"
+        if basic_info:
+            user_prompt += f"\n\n项目基础信息：{basic_info}"
+
+    msgs = [{'role': 'system', 'content': sys}, {'role': 'user', 'content': user_prompt}]
+
+    result = ai_service.run_text_generation(msgs, config)
+
+    if result.get('success'):
+        return jsonify({'success': True, 'prompt': result['content']})
+    else:
+        return jsonify({'success': False, 'error': result.get('error', '生成失败')}), 500
+
+
+@app.route('/api/generate/scene_image', methods=['POST'])
+def generate_scene_image():
+    """生成场景图片"""
+    data = request.json
+    scene_id = data.get('scene_id')
+    scene_prompt = data.get('scene_prompt')
+    provider_id = data.get('provider_id')
+    model_name = data.get('model_name')
+    
+    if not scene_prompt:
+        return jsonify({'success': False, 'error': '场景提示词不能为空'}), 400
+    
+    # 构建场景图片生成的提示词
+    full_prompt = f"""电影场景设计图，{scene_prompt}。
+    请生成一张高质量的场景设计图，包含以下元素：
+    1. 精确的时间设定（早晨、中午、下午、傍晚、夜晚等）
+    2. 天气状况（晴朗、阴天、雨天、雪天等）
+    3. 光源类型和方向（自然光、人造光、逆光等）
+    4. 空间类型（室内、室外、半开放空间等）
+    5. 空间尺度（狭小、适中、广阔等）
+    6. 场景高度（低角度、平视、高角度等）
+    7. 场景中的标志性建筑或物体
+    8. 背景、前景和氛围的详细框架说明
+    9. 整体氛围（宁静、紧张、欢乐等）
+    10. 整体风格（写实、卡通、奇幻等）
+    11. 景别（远景、全景、中景、近景等）
+    12. 视角设定（平视、俯视、仰视等）
+    13. 构图方式（对称、黄金分割、对角线等）
+    
+    图片要求：
+    - 高分辨率，细节丰富
+    - 电影级质感，色彩协调
+    - 光影效果真实自然
+    - 构图均衡，有深度感"""
+    
+    # 获取配置
+    config = get_provider_config(provider_id)
+    if model_name:
+        config['model_name'] = model_name
+    
+    # 设置保存路径
+    save_dir = os.path.join(STATIC_FOLDER, IMG_SAVE_DIR)
+    web_prefix = f"/{IMG_SAVE_DIR}"
+    
+    # 使用AI服务生成图片
+    result = ai_service.run_simple_image_generation(
+        full_prompt,
+        config,
+        save_dir,
+        web_prefix
+    )
+    
+    if result.get('success'):
+        return jsonify({'success': True, 'url': result['url']})
+    else:
+        return jsonify({'success': False, 'error': result.get('error_msg', '生成失败')}), 500
 
 @app.route('/api/projects/<project_id>/characters/<character_id>', methods=['PUT'])
 def update_character(project_id, character_id):

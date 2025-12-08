@@ -333,6 +333,67 @@
                             </el-row>
                         </el-tab-pane>
 
+                        <!-- Scene Tab -->
+                        <el-tab-pane label="场景列表" name="scenes">
+                            <!-- 场景生成配置 -->
+                            <div style="margin-bottom: 15px; background: #f5f7fa; padding: 10px; border-radius: 4px;">
+                                <div style="display:flex; align-items:center; gap: 15px;">
+                                    <span style="font-size:13px; color:#606266; font-weight:bold;">文本生成模型:</span>
+                                    <el-select v-model="genOptions.textProviderId" size="mini" placeholder="供应商" style="width: 120px;" @change="updateTextModelDefault">
+                                        <el-option v-for="p in providers" :key="p.id" :label="p.name" :value="p.id"></el-option>
+                                    </el-select>
+                                    <el-select v-model="genOptions.textModelName" size="mini" placeholder="模型" style="width: 150px;">
+                                        <el-option v-for="m in availableTextModels" :key="m.name" :label="m.name" :value="m.name"></el-option>
+                                    </el-select>
+                                    
+                                    <span style="font-size:13px; color:#606266; font-weight:bold;">图片生成模型:</span>
+                                    <el-select v-model="genOptions.imageProviderId" size="mini" placeholder="供应商" style="width: 120px;" @change="updateImageModelDefault">
+                                        <el-option v-for="p in providers" :key="p.id" :label="p.name" :value="p.id"></el-option>
+                                    </el-select>
+                                    <el-select v-model="genOptions.imageModelName" size="mini" placeholder="模型" style="width: 150px;">
+                                        <el-option v-for="m in availableImageModels" :key="m.name" :label="m.name" :value="m.name"></el-option>
+                                    </el-select>
+                                </div>
+                            </div>
+
+                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+                                <div><span style="margin-right: 20px;">共 {{ shotList.length }} 个场景</span>
+                                    <el-button type="danger" size="small" icon="el-icon-delete" plain :disabled="multipleSceneSelection.length === 0" @click="deleteSelectedScenes">批量删除</el-button>
+                                    <el-button type="danger" size="small" icon="el-icon-delete-solid" @click="deleteAllScenes">清空全部</el-button>
+                                    <el-button type="success" size="small" icon="el-icon-magic-stick" @click="batchGenerateScenePrompts">批量生成场景提示词</el-button>
+                                </div>
+                                <div>
+                                    <el-button type="primary" size="small" icon="el-icon-plus" @click="openCreateScene">添加场景</el-button>
+                                </div>
+                            </div>
+
+                            <el-table :data="shotList" border stripe style="width: 100%" v-loading="loadingShots" row-key="id" @selection-change="handleSceneSelectionChange">
+                                <el-table-column type="selection" width="55"></el-table-column>
+                                <el-table-column prop="scene" label="场次" width="100"></el-table-column>
+                                <el-table-column prop="shot_number" label="场景编号" width="100"></el-table-column>
+                                <el-table-column prop="scene_description" label="场景说明" min-width="50"></el-table-column>
+                                <el-table-column prop="scene_prompt" label="场景提示词" min-width="200"></el-table-column>
+                                <el-table-column label="场景图片" width="120">
+                                    <template slot-scope="scope">
+                                        <el-image v-if="scope.row.scene_image" :src="scope.row.scene_image" style="width: 80px; height: 60px; object-fit: cover;" :preview-src-list="[scope.row.scene_image]"></el-image>
+                                        <span v-else style="color: #999;">暂无图片</span>
+                                    </template>
+                                </el-table-column>
+                                <el-table-column prop="characters" label="出席人物" width="150">
+                                    <template slot-scope="scope">
+                                        <el-tag v-for="charId in scope.row.characters" :key="charId" size="mini" style="margin-right: 5px;">{{ getCharacterName(charId) }}</el-tag>
+                                    </template>
+                                </el-table-column>
+                                <el-table-column label="操作" width="180">
+                                    <template slot-scope="scope">
+                                        <el-button type="text" size="small" icon="el-icon-edit" @click="openEditScene(scope.row)">编辑</el-button>
+                                        <el-button type="text" size="small" icon="el-icon-magic-stick" @click="generateScenePrompt(scope.row)">生成提示词</el-button>
+                                        <el-button type="text" size="small" icon="el-icon-picture" @click="generateSceneImage(scope.row)">生成图片</el-button>
+                                    </template>
+                                </el-table-column>
+                            </el-table>
+                        </el-tab-pane>
+
                         <!-- Shot Tab -->
                         <el-tab-pane label="分镜列表" name="shots">
 
@@ -622,6 +683,33 @@
             </div>
         </el-dialog>
 
+        <!-- Scene Dialog -->
+        <el-dialog :title="sceneDialogTitle" :visible.sync="sceneDialogVisible" width="60%">
+            <el-form :model="sceneForm" label-width="100px">
+                <el-form-item label="场次" prop="scene" required><el-input v-model="sceneForm.scene"></el-input></el-form-item>
+                <el-form-item label="场景编号" prop="shot_number" required><el-input v-model="sceneForm.shot_number"></el-input></el-form-item>
+                <el-form-item label="场景说明" prop="scene_description"><el-input type="textarea" v-model="sceneForm.scene_description" :rows="3"></el-input></el-form-item>
+                <el-form-item label="场景提示词" prop="scene_prompt">
+                    <el-input type="textarea" v-model="sceneForm.scene_prompt" :rows="5" 
+                        placeholder="必须包含：时间、天气、光源、空间类型、空间尺度、高度、场景中的标志性建筑或物体、背景+前景+氛围的框架说明、氛围、整体风格、景别、视角设定、构图"></el-input>
+                </el-form-item>
+                <el-form-item label="出席人物" prop="characters">
+                    <el-select v-model="sceneForm.characters" multiple placeholder="选择人物" style="width: 100%">
+                        <el-option v-for="char in characterList" :key="char.id" :label="char.name" :value="char.id"></el-option>
+                    </el-select>
+                </el-form-item>
+                <el-form-item label="场景图片">
+                    <div v-if="sceneForm.scene_image" style="margin-bottom: 10px;">
+                        <el-image :src="sceneForm.scene_image" style="width: 200px; height: 150px; object-fit: cover;" :preview-src-list="[sceneForm.scene_image]"></el-image>
+                    </div>
+                    <el-upload action="/api/upload" :show-file-list="false" :on-success="handleSceneImageSuccess">
+                        <el-button size="small" type="primary">上传图片</el-button>
+                    </el-upload>
+                </el-form-item>
+            </el-form>
+            <span slot="footer" class="dialog-footer"><el-button icon="el-icon-close" @click="sceneDialogVisible = false">取 消</el-button><el-button type="primary" icon="el-icon-check" @click="submitScene">确 定</el-button></span>
+        </el-dialog>
+
         <!-- Character Dialog -->
         <el-dialog title="创建角色" :visible.sync="characterDialogVisible" width="500px">
             <el-form :model="characterForm" label-width="80px">
@@ -652,7 +740,7 @@
             data: {
                 projectList: [], currentProjectId: '', currentProject: null, shotList: [], loadingShots: false,
                 activeTab: 'script', scriptSections: [],
-                allScriptsSelected: false, multipleShotSelection: [],
+                allScriptsSelected: false, multipleShotSelection: [], multipleSceneSelection: [],
                 globalLoading: false, loadingTitle: '', loadingSubText: '', currentAbortController: null, 
                 settingsVisible: false, providers: [], editingProvider: null, 
                 videoPlayerVisible: false, playerVideoUrl: '',
@@ -673,6 +761,16 @@
                 characterForm: {
                     name: '',
                     description: ''
+                },
+                sceneDialogVisible: false,
+                sceneDialogTitle: '编辑场景',
+                sceneForm: {
+                    scene: '',
+                    shot_number: '',
+                    scene_description: '',
+                    scene_prompt: '',
+                    scene_image: '',
+                    characters: []
                 }
             },
             computed: {
@@ -916,10 +1014,15 @@
                 deleteSelectedScripts() { this.$confirm('删除？').then(() => { this.scriptSections = this.scriptSections.filter(s => !s._checked); this.allScriptsSelected = false; this.saveScript(); }); },
                 deleteAllScripts() { this.$confirm('清空？').then(() => { this.scriptSections = []; this.saveScript(); }); },
                 handleShotSelectionChange(val) { this.multipleShotSelection = val; },
+                handleSceneSelectionChange(val) { this.multipleSceneSelection = val; },
                 async deleteSelectedShots() { this.$confirm('删除？').then(async () => { const ids = this.multipleShotSelection.map(s => s.id); await this.request('POST', `/api/projects/${this.currentProjectId}/shots/batch_delete`, { ids }); this.fetchShots(this.currentProjectId); }); },
                 async deleteAllShots() { this.$confirm('清空？').then(async () => { const ids = this.shotList.map(s => s.id); if(ids.length) await this.request('POST', `/api/projects/${this.currentProjectId}/shots/batch_delete`, { ids }); this.fetchShots(this.currentProjectId); }); },
 
-                handleTabClick(tab) { if (tab.name === 'script') this.fetchScript(); else if (tab.name === 'shots') this.fetchShots(this.currentProjectId); else if (tab.name === 'characters') this.fetchCharacters(); },
+                handleTabClick(tab) { 
+                    // 确保在切换到场景列表标签页时也能加载数据
+                    if (tab.name === "scenes" && this.currentProjectId) {
+                        this.fetchShots(this.currentProjectId);
+                    } else if (tab.name === 'script') this.fetchScript(); else if (tab.name === 'shots') this.fetchShots(this.currentProjectId); else if (tab.name === 'characters') this.fetchCharacters(); },
                 initScriptSortable() {
                     const el = this.$refs.scriptListRef; if (!el || this.scriptSortable) return;
                     this.scriptSortable = Sortable.create(el, { animation: 150, handle: '.script-section-block', onEnd: (evt) => { const { oldIndex, newIndex } = evt; if (oldIndex === newIndex) return; const item = this.scriptSections.splice(oldIndex, 1)[0]; this.scriptSections.splice(newIndex, 0, item); this.saveScript(); } });
@@ -952,8 +1055,22 @@
                         const model = this.genOptions.textModelName;
                         if (!pid || !model) { throw new Error("请先在顶部选择文本模型"); }
 
-                        const res = await this.request('POST', '/api/generate/analyze_script', { content: section.content, provider_id: pid, model_name: model }, { signal: this.currentAbortController.signal });
-                        if(res.shots) { for(let s of res.shots) await this.request('POST', `/api/projects/${this.currentProjectId}/shots`, { ...s, movie_id: this.currentProjectId }); this.$message.success(`生成 ${res.shots.length} 个分镜`); }
+                        const res = await this.request('POST', '/api/generate/analyze_script', { 
+                            content: section.content, 
+                            project_id: this.currentProjectId,
+                            provider_id: pid, 
+                            model_name: model 
+                        }, { signal: this.currentAbortController.signal });
+                        if(res.shots) { 
+                            for(let s of res.shots) {
+                                // 确保characters字段是数组
+                                if (typeof s.characters === 'string') {
+                                    s.characters = [s.characters];
+                                }
+                                await this.request('POST', `/api/projects/${this.currentProjectId}/shots`, { ...s, movie_id: this.currentProjectId }); 
+                            }
+                            this.$message.success(`生成 ${res.shots.length} 个分镜`); 
+                        }
                     } catch(e) { if (e.message !== '已取消') console.error(e); } finally { this.stopGlobalLoading(); }
                 },
 
@@ -1108,7 +1225,7 @@
                 handleProviderChange() { this.initDefaultSelections(); },
 
                 async fetchProjects() { const list = await this.request('GET', '/api/projects'); this.projectList = list; if(list.length && !this.currentProjectId) { this.currentProjectId = list[0].id; this.handleProjectChange(list[0].id); } },
-                async handleProjectChange(pid) { this.currentProject = this.projectList.find(p => p.id === pid); this.activeTab='script'; this.fetchScript(); },
+                async handleProjectChange(pid) { this.currentProject = this.projectList.find(p => p.id === pid); this.activeTab='script'; this.fetchScript(); this.fetchCharacters(); },
                 openCreateProject() { 
     this.projectForm = { 
         film_name: '',
@@ -1214,6 +1331,216 @@
                     } catch (e) {
                         if (e !== 'cancel') console.error(e);
                     }
+                },
+                // 场景批量删除方法
+                async deleteSelectedScenes() { 
+                    this.$confirm('删除？').then(async () => { 
+                        const ids = this.multipleSceneSelection.map(s => s.id); 
+                        await this.request('POST', `/api/projects/${this.currentProjectId}/shots/batch_delete`, { ids }); 
+                        this.fetchShots(this.currentProjectId); 
+                    }); 
+                },
+                async deleteAllScenes() { 
+                    this.$confirm('清空？').then(async () => { 
+                        const ids = this.shotList.map(s => s.id); 
+                        if(ids.length) await this.request('POST', `/api/projects/${this.currentProjectId}/shots/batch_delete`, { ids }); 
+                        this.fetchShots(this.currentProjectId); 
+                    }); 
+                },
+                
+                // 生成场景提示词
+                async generateScenePrompt(shot) {
+                    if (!shot.scene_description) {
+                        this.$message.warning('请先填写场景说明');
+                        return;
+                    }
+                    
+                    if (!this.genOptions.textProviderId || !this.genOptions.textModelName) {
+                        this.$message.warning('请先选择文本生成模型');
+                        return;
+                    }
+                    
+                    this.startGlobalLoading('生成场景提示词...', '请稍候');
+                    try {
+                        const res = await this.request('POST', '/api/generate/scene_prompt', {
+                            scene_description: shot.scene_description,
+                            project_id: this.currentProjectId,
+                            provider_id: this.genOptions.textProviderId,
+                            model_name: this.genOptions.textModelName
+                        });
+                        
+                        if (res.success) {
+                            // 更新分镜数据中的场景提示词
+                            await this.request('PUT', `/api/projects/${this.currentProjectId}/shots/${shot.id}`, {
+                                scene_prompt: res.prompt
+                            });
+                            const idx = this.shotList.findIndex(s=>s.id===shot.id);
+                            if(idx !== -1) {
+                                this.$set(this.shotList, idx, { ...this.shotList[idx], scene_prompt: res.prompt });
+                            }
+                            this.$message.success('场景提示词生成成功');
+                        } else {
+                            this.$message.error(res.error || '生成失败');
+                        }
+                    } catch(e) {
+                        console.error('生成场景提示词失败', e);
+                        this.$message.error('生成场景提示词失败');
+                    } finally {
+                        this.stopGlobalLoading();
+                    }
+                },
+                
+                // 批量生成场景提示词
+                async batchGenerateScenePrompts() {
+                    if (!this.genOptions.textProviderId || !this.genOptions.textModelName) {
+                        this.$message.warning('请先选择文本生成模型');
+                        return;
+                    }
+                    
+                    const tasks = this.shotList.filter(s => !s.scene_prompt || s.scene_prompt.trim() === '');
+                    if (tasks.length === 0) {
+                        this.$message.info('所有场景都已有提示词');
+                        return;
+                    }
+                    
+                    const total = tasks.length;
+                    let successCount = 0;
+                    let failCount = 0;
+                    
+                    this.startGlobalLoading(`批量生成场景提示词... (0/${total})`, `共 ${total} 个任务，请勿关闭页面`);
+                    
+                    for (let i = 0; i < total; i++) {
+                        const shot = tasks[i];
+                        this.loadingTitle = `正在处理第 ${i + 1}/${total} 个场景...`;
+                        
+                        try {
+                            if (this.currentAbortController.signal.aborted) break;
+                            
+                            if (!shot.scene_description) {
+                                console.warn(`场景 ${shot.shot_number} 没有描述，跳过`);
+                                continue;
+                            }
+                            
+                            const res = await this.request('POST', '/api/generate/scene_prompt', {
+                                scene_description: shot.scene_description,
+                                project_id: this.currentProjectId,
+                                provider_id: this.genOptions.textProviderId,
+                                model_name: this.genOptions.textModelName
+                            }, { signal: this.currentAbortController.signal });
+                            
+                            if (res.success) {
+                                await this.request('PUT', `/api/projects/${this.currentProjectId}/shots/${shot.id}`, {
+                                    scene_prompt: res.prompt
+                                });
+                                
+                                const idx = this.shotList.findIndex(s => s.id === shot.id);
+                                if (idx !== -1) {
+                                    this.$set(this.shotList, idx, { ...this.shotList[idx], scene_prompt: res.prompt });
+                                }
+                                
+                                successCount++;
+                            } else {
+                                failCount++;
+                            }
+                            
+                            // 短暂延迟，避免API限流
+                            await new Promise(resolve => setTimeout(resolve, 500));
+                            
+                        } catch (e) {
+                            console.error(`场景提示词生成失败 shot ${shot.shot_number}:`, e);
+                            failCount++;
+                        }
+                    }
+                    
+                    this.stopGlobalLoading();
+                    this.$message({ 
+                        type: failCount === 0 ? 'success' : 'warning', 
+                        message: `批量任务完成！成功: ${successCount}, 失败: ${failCount}` 
+                    });
+                },
+                
+                // 场景相关方法（操作分镜数据）
+                openCreateScene() {
+                    this.sceneForm = {
+                        scene: '',
+                        shot_number: '',
+                        scene_description: '',
+                        scene_prompt: '',
+                        scene_image: '',
+                        characters: []
+                    };
+                    this.sceneDialogTitle = '添加场景';
+                    this.sceneDialogVisible = true;
+                },
+                openEditScene(shot) {
+                    this.sceneForm = JSON.parse(JSON.stringify(shot));
+                    this.sceneDialogTitle = '编辑场景';
+                    this.sceneDialogVisible = true;
+                },
+                async submitScene() {
+                    if(!this.sceneForm.scene || !this.sceneForm.shot_number) {
+                        this.$message.error('请输入场次和场景编号');
+                        return;
+                    }
+                    // 更新分镜数据
+                    const idx = this.shotList.findIndex(s=>s.id===this.sceneForm.id);
+                    if(idx !== -1) {
+                        const updatedShot = { ...this.shotList[idx], ...this.sceneForm };
+                        await this.request('PUT', `/api/projects/${this.currentProjectId}/shots/${updatedShot.id}`, updatedShot);
+                        this.$set(this.shotList, idx, updatedShot);
+                    } else {
+                        // 如果是新的分镜，添加到列表
+                        const newShot = {
+                            movie_id: this.currentProjectId,
+                            ...this.sceneForm,
+                            visual_description: ''
+                        };
+                        const res = await this.request('POST', `/api/projects/${this.currentProjectId}/shots`, newShot);
+                        this.shotList.push(res);
+                    }
+                    this.sceneDialogVisible = false;
+                },
+                async generateSceneImage(shot) {
+                    if(!shot.scene_prompt) {
+                        this.$message.error('请先设置场景提示词');
+                        return;
+                    }
+                    try {
+                        this.$message.info('正在生成场景图片...');
+                        const result = await this.request('POST', '/api/generate/scene_image', {
+                            scene_id: shot.id,
+                            scene_prompt: shot.scene_prompt,
+                            provider_id: this.genOptions.imageProviderId,
+                            model_name: this.genOptions.imageModelName
+                        });
+                        if(result.success) {
+                            // 更新分镜数据中的场景图片
+                            await this.request('PUT', `/api/projects/${this.currentProjectId}/shots/${shot.id}`, {
+                                scene_image: result.url
+                            });
+                            const idx = this.shotList.findIndex(s=>s.id===shot.id);
+                            if(idx !== -1) {
+                                this.$set(this.shotList, idx, { ...this.shotList[idx], scene_image: result.url });
+                            }
+                            this.$message.success('场景图片生成成功');
+                        } else {
+                            this.$message.error(result.error || '生成失败');
+                        }
+                    } catch(e) {
+                        console.error('生成场景图片失败', e);
+                        this.$message.error('生成场景图片失败');
+                    }
+                },
+                handleSceneImageSuccess(res) {
+                    if(res.success) {
+                        this.sceneForm.scene_image = res.url;
+                    } else {
+                        this.$message.error(res.error || '上传失败');
+                    }
+                },
+                getCharacterName(id) {
+                    const char = this.characterList.find(c => c.id === id);
+                    return char ? char.name : '未知角色';
                 },
 
                 // 根据人物设定字段生成角色列表
