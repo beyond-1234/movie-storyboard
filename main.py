@@ -399,11 +399,20 @@ def generate_character_views():
         config['model_name'] = data.get('model_name')
 
     character_desc = data.get('character_description')
+    project_id = data.get('project_id')
     save_dir = os.path.join(STATIC_FOLDER, IMG_SAVE_DIR)
     web_prefix = f"/{IMG_SAVE_DIR}"
+    
+    # 获取项目信息，包括色彩体系和情感关键词
+    color_system = None
+    emotional_keywords = None
+    if project_id:
+        project_info = read_json(os.path.join(get_project_path(project_id), 'info.json'), default={})
+        color_system = project_info.get('visual_color_system', '')
+        emotional_keywords = project_info.get('script_emotional_keywords', '')
 
-    # 构建包含正面特写和多视图的prompt
-    prompt = build_comprehensive_character_prompt(character_desc)
+    # 构建包含正面特写和多视图的prompt，并加入色彩体系和情感关键词
+    prompt = build_comprehensive_character_prompt(character_desc, color_system, emotional_keywords)
     
     result, used_prompt = ai_service.run_image_generation(
         prompt,
@@ -420,23 +429,45 @@ def generate_character_views():
     
     return jsonify({'success': False, 'error': '生成失败'}), 500
 
-def build_comprehensive_character_prompt(character_desc):
-    """构建包含正面特写和多视图的角色prompt"""
-    return f"""电影角色设计图，{character_desc}。
+def build_comprehensive_character_prompt(character_desc, color_system=None, emotional_keywords=None):
+    """构建包含正面特写和多视图的角色prompt，并加入色彩体系和情感关键词"""
+    
+    # 基础提示词
+    prompt = f"""电影角色设计图，{character_desc}。
 请生成一张包含以下内容的角色设计图：
 1. 左上角：角色正面特写肖像，清晰展示面部特征和表情
 2. 右上角：角色正面全身视图，展示完整体型和服装
 3. 左下角：角色侧面全身视图，展示体型轮廓和侧面特征
 4. 右下角：角色背面全身视图，展示背面服装和轮廓
 
-要求：
-1. 纯白背景，专业角色设计图风格
-2. 清晰的线条和细节
-3. 准确的人体比例
-4. 精致的服装和配饰细节
-5. 无水印，无文字，纯角色展示图
-6. 四个视图均匀分布，布局合理
-7. 每个视图都有足够的空间展示细节"""
+重要要求：
+1. 必须包含四个视图：正面特写肖像、正面全身、侧面全身、背面全身
+2. 纯白背景，专业角色设计图风格
+3. 清晰的线条和细节
+4. 准确的人体比例
+5. 精致的服装和配饰细节
+6. 无水印，无文字，纯角色展示图
+7. 四个视图均匀分布，布局合理，每个视图大小相等
+8. 每个视图都有足够的空间展示细节
+9. 角色形象必须保持一致，所有视图展示的是同一个角色"""
+    
+    # 如果有色彩体系，添加到提示词中
+    if color_system and color_system.strip():
+        prompt += f"""
+        
+10. 色彩体系要求：{color_system}
+11. 角色服装和配饰必须严格遵循指定的色彩体系
+12. 整体色调必须与项目的视觉风格保持一致"""
+    
+    # 如果有情感关键词，添加到提示词中
+    if emotional_keywords and emotional_keywords.strip():
+        prompt += f"""
+        
+13. 情感基调：{emotional_keywords}
+14. 角色表情和姿态应体现指定的情感基调
+15. 整体氛围应与项目的情感风格保持一致"""
+    
+    return prompt
 
 
 @app.route('/api/generate/character_list', methods=['POST'])

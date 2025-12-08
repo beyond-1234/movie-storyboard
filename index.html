@@ -307,6 +307,7 @@
                                                     <el-image :src="char.image_url" :preview-src-list="[char.image_url]" fit="contain"></el-image>
                                                     <div class="image-actions">
                                                         <el-button type="text" size="mini" @click="uploadCharacterImage(char)">替换图片</el-button>
+                                                        <el-button type="text" size="mini" @click="generateCharacterView(char)">重新生成</el-button>
                                                     </div>
                                                 </div>
                                                 <div class="view-placeholder" v-else>
@@ -1171,6 +1172,7 @@
                     try {
                         const res = await this.request('POST', '/api/generate/character_views', {
                             character_description: character.description,
+                            project_id: this.currentProjectId,
                             provider_id: this.genOptions.imageProviderId,
                             model_name: this.genOptions.imageModelName
                         });
