@@ -1106,8 +1106,17 @@ def run_simple_image_generation(prompt, config, save_dir, url_prefix):
     不带提示词工程的简单图片生成方法
     直接使用用户提供的prompt，不进行任何优化
     """
+    logger.info(f"[Simple Image Gen] Starting generation with prompt: {prompt[:50]}...")
+    
     handler = get_handler(config.get('type', 'mock'))
-    return handler.generate_image(prompt, save_dir, url_prefix, config)
+    result = handler.generate_image(prompt, save_dir, url_prefix, config)
+    
+    if result.get('success'):
+        logger.info(f"[Simple Image Gen] Generation successful. URL: {result.get('url', 'N/A')}")
+    else:
+        logger.error(f"[Simple Image Gen] Generation failed. Error: {result.get('error_msg', 'Unknown error')}")
+    
+    return result
 
 def run_voice_generation(text, config, save_dir, url_prefix):
     handler = get_handler(config.get('type'))
