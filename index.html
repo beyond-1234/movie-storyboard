@@ -343,6 +343,8 @@
                         <el-form-item label="声音说明"><el-input type="textarea" :rows="2" v-model="shotForm.audio_description"></el-input></el-form-item>
                         <el-form-item label="特殊技术"><el-input v-model="shotForm.special_technique"></el-input></el-form-item>
                         <el-form-item label="备注"><el-input v-model="shotForm.notes"></el-input></el-form-item>
+                        <el-form-item label="首帧提示词"><el-input v-model="shotForm.start_frame_prompt"></el-input></el-form-item>
+                        <el-form-item label="尾帧提示词"><el-input v-model="shotForm.end_frame_prompt"></el-input></el-form-item>
                     </el-form>
                 </div>
                 <div style="flex: 1; border-left: 1px solid #eee; padding-left: 20px;">
@@ -578,12 +580,12 @@
 
                     this.startGlobalLoading(
                         `顺序生成中... (0/${total * 2})`,
-                        `第一阶段:生成所有首帧 | 第二阶段:生成所有尾帧`
+                        `按分镜顺序生成首尾帧`
                     );
 
                     try {
                         // === 第一阶段:按顺序生成所有首帧 ===
-                        this.loadingSubText = '第一阶段:顺序生成首帧,保证画面连贯...';
+                        this.loadingSubText = '顺序生成,保证画面连贯...';
 
                         for (let i = 0; i < shots.length; i++) {
                             if (this.currentAbortController.signal.aborted) break;
@@ -598,7 +600,6 @@
                                 if (shot.start_frame) {
                                     console.log(`Shot ${shot.shot_number} 首帧已存在,跳过`);
                                     successCount++;
-                                    continue;
                                 }
 
                                 await this._internalGenerateImageSequential(shot, 'start', prevShot);
@@ -611,15 +612,7 @@
                                 console.error(`首帧生成失败 shot ${shot.shot_number}:`, e);
                                 failCount++;
                             }
-                        }
 
-                        // === 第二阶段:生成所有尾帧 ===
-                        this.loadingSubText = '第二阶段:生成尾帧,为视频过渡做准备...';
-
-                        for (let i = 0; i < shots.length; i++) {
-                            if (this.currentAbortController.signal.aborted) break;
-
-                            const shot = shots[i];
                             this.loadingTitle = `正在生成第 ${i + 1}/${total} 个分镜的尾帧...`;
 
                             try {

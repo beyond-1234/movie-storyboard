@@ -916,12 +916,25 @@ def run_image_generation(visual_desc, style_desc, consistency_text, frame_type, 
     user_prompt = ""
 
     if frame_type == 'start':
-        sys_prompt = f"""You are an expert AI Art Prompt Engineer. Convert user's description into a high-quality English prompt. {consistency_instruction}{context_instruction} Requirements: 1. Describe subject, environment, lighting, composition, style. 2. Use English, comma-separated. 3. Emphasize cinematic quality. 4. DIRECTLY output prompt text only."""
-        user_prompt = f"Style: {style_desc}\nDescription: {visual_desc}"
+        sys_prompt = f"""你是一位专业的AI电影分镜提示词工程师。专为电影/短剧的连续镜头生成【起始帧分镜】提示词。{consistency_instruction}{context_instruction} 核心要求：
+    1. 完整描述主体、环境、光线、构图、风格（含笔触、色彩、光影、质感、渲染方式）；
+    2. 严格遵循电影分镜规范：无任何商业水印、无宣传文案/标语、无海报式排版、无装饰性边框，仅呈现纯分镜画面；
+    3. 明确标注摄影机参数（机位、视角、焦距、景别、机位高度、轴线方向），且所有参数需符合电影连续镜头拍摄逻辑；
+    4. 所有风格/摄影参数需具备可复用性，确保后续基于此生成的结束帧能完全匹配，符合连续镜头的视觉一致性；
+    5. 输出的提示词仅用于生成电影/短剧分镜帧，非单张宣传图/海报/装饰画；
+    6. 使用中文，逗号分隔，仅直接输出提示词文本，无额外说明。"""
+        user_prompt = f"风格：{style_desc}\n描述：{visual_desc}\n核心约束：生成结果为电影/短剧的起始分镜帧，无水印、无宣传文案、无海报风格，仅为纯分镜画面；明确标注摄影机机位/视角/焦距/景别/高度/轴线方向（遵循180度轴线规则），风格特征需具体到笔触/色彩/光影/质感/渲染方式，确保可精准复用于后续结束帧生成。"
     else:
-        sys_prompt = f"""You are an expert AI Art Prompt Engineer. Generate an [End Frame] prompt based on the [Start Frame Prompt]. {consistency_instruction} Requirements: 1. **KEEP** character appearance, background, and style from Start Frame Prompt EXACTLY the same. 2. **ONLY CHANGE** action/pose based on 'End Frame Description'. 3. Use English. 4. DIRECTLY output prompt text only."""
-        user_prompt = f"Start Frame Prompt: {start_prompt_ref}\n\nEnd Frame Action: {visual_desc}"
-
+        sys_prompt = f"""你是一位专业的AI电影分镜提示词工程师。基于【起始帧分镜提示词】生成电影/短剧的【结束帧分镜】提示词。{consistency_instruction} 核心要求：
+    1. **严格保持**起始帧提示词中的所有核心特征100%不变（禁止任何偏离）：
+    - 风格类：人物外貌、背景、笔触、色彩、光影、质感、渲染方式；
+    - 摄影类：摄影机机位、视角、焦距、景别、机位高度、轴线方向（严格遵守180度轴线规则，禁止越轴）；
+    - 分镜属性：无水印、无宣传文案、无海报式排版、纯分镜画面的核心属性；
+    2. **仅修改**基于「结束帧描述」的人物动作/姿势，且动作修改需符合原有摄影机视角和轴线逻辑，适配连续镜头的分镜节奏；
+    3. 输出的提示词仅用于生成电影/短剧的结束分镜帧，非单张宣传图/海报/装饰画，需保持与起始帧的连续镜头一致性；
+    4. 使用中文，仅直接输出提示词文本，无额外说明。"""
+        user_prompt = f"起始帧提示词：{start_prompt_ref}\n\n结束帧动作：{visual_desc}\n\n强制约束：生成结果为电影/短剧的结束分镜帧，无水印、无宣传文案、无海报风格，仅为纯分镜画面；禁止修改起始帧的画风（笔触/色彩/光影/质感/渲染方式）、摄影机参数（机位/视角/焦距/景别/高度/轴线），仅调整人物动作/姿势，且动作需符合连续镜头的分镜逻辑，严格遵守180度轴线规则。"   
+    
     # 默认的简单 Prompt (降级策略)
     optimized_prompt = f"{style_desc}, {visual_desc}" 
     if consistency_text: optimized_prompt += f", {consistency_text}"
@@ -943,7 +956,7 @@ def run_image_generation(visual_desc, style_desc, consistency_text, frame_type, 
                 text_config['model_name'] = 'Qwen/Qwen2.5-7B-Instruct'
             
             # 执行 Prompt 优化
-            res = handler.generate_text([{'role': 'system', 'content': sys_prompt}, {'role': 'user', 'content': user_prompt}], text_config)
+            res = handler.generate_text([{'role': 'system', 'content': sys_prompt + " 使用中文回答"}, {'role': 'user', 'content': user_prompt}], text_config)
             
             if res['success']:
                 optimized_prompt = res['content']
