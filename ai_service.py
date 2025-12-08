@@ -1101,6 +1101,14 @@ def run_video_generation(prompt, start_img_path, end_img_path, config, save_dir,
     handler = get_handler(config.get('type'))
     return handler.generate_video(prompt, save_dir, url_prefix, config, start_img=start_img_path, end_img=end_img_path)
 
+def run_simple_image_generation(prompt, config, save_dir, url_prefix):
+    """
+    不带提示词工程的简单图片生成方法
+    直接使用用户提供的prompt，不进行任何优化
+    """
+    handler = get_handler(config.get('type', 'mock'))
+    return handler.generate_image(prompt, save_dir, url_prefix, config)
+
 def run_voice_generation(text, config, save_dir, url_prefix):
     handler = get_handler(config.get('type'))
     return handler.generate_voice(text, save_dir, url_prefix, config)

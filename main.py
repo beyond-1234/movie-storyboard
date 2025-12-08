@@ -414,11 +414,9 @@ def generate_character_views():
     # 构建包含正面特写和多视图的prompt，并加入色彩体系和情感关键词
     prompt = build_comprehensive_character_prompt(character_desc, color_system, emotional_keywords)
     
-    result, used_prompt = ai_service.run_image_generation(
+    # 使用不带提示词工程的简单图片生成方法
+    result = ai_service.run_simple_image_generation(
         prompt,
-        "",  # style_desc
-        "",  # consistency_text
-        "character_view",  # 自定义类型
         config,
         save_dir,
         web_prefix
