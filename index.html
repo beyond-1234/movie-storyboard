@@ -343,8 +343,8 @@
                         <el-form-item label="声音说明"><el-input type="textarea" :rows="2" v-model="shotForm.audio_description"></el-input></el-form-item>
                         <el-form-item label="特殊技术"><el-input v-model="shotForm.special_technique"></el-input></el-form-item>
                         <el-form-item label="备注"><el-input v-model="shotForm.notes"></el-input></el-form-item>
-                        <el-form-item label="首帧提示词"><el-input v-model="shotForm.start_frame_prompt"></el-input></el-form-item>
-                        <el-form-item label="尾帧提示词"><el-input v-model="shotForm.end_frame_prompt"></el-input></el-form-item>
+                        <el-form-item label="首帧提示词"><el-input type="textarea" v-model="shotForm.start_frame_prompt"></el-input></el-form-item>
+                        <el-form-item label="尾帧提示词"><el-input type="textarea" v-model="shotForm.end_frame_prompt"></el-input></el-form-item>
                     </el-form>
                 </div>
                 <div style="flex: 1; border-left: 1px solid #eee; padding-left: 20px;">
