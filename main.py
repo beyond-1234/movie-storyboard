@@ -300,46 +300,29 @@ def analyze_script():
     color_system = project_info.get('visual_color_system', '')
     
     # 构建系统提示词
-    sys = "你是一个专业的电影分镜设计师。请根据剧本内容，生成详细的分镜列表，每个分镜包含场景说明和角色信息。"
+    sys = f"""
+    你是一个专业的电影分镜设计师。请根据剧本内容，生成详细的分镜列表，每个分镜包含场景说明和角色信息。
+    **输出要求**：1. 返回一个纯 JSON 数组。2. **必须使用中文**填写所有描述性字段。3. 不要包含 Markdown 标记。
+     **JSON对象结构**：
+        1. scene: 场次编号
+        2. shot_number: 镜号
+        3. visual_description: 画面描述
+        4. scene_description: 场景说明（详细描述场景环境、时间、地点等）
+        5. characters: 出席角色列表（从已有角色中选择，或根据剧本内容推断新角色）
+        6. dialogue: 台词（如果有）
+        7. audio_description: 声音描述
+        8. special_technique: 特殊拍摄技巧
+        9. duration: 预计时长
+    """
     
     # 构建用户提示词
-    user_prompt = f"""剧本内容：
-{data.get('content', '')}
-
-{characters_info}
-
-项目基础信息：{basic_info}
-情感关键词：{emotional_keywords}
-色彩体系：{color_system}
-
-请将上述剧本内容转换为分镜列表，每个分镜必须包含以下字段：
-1. scene: 场次编号
-2. shot_number: 镜号
-3. visual_description: 画面描述
-4. scene_description: 场景说明（详细描述场景环境、时间、地点等）
-5. characters: 出席角色列表（从已有角色中选择，或根据剧本内容推断新角色）
-6. dialogue: 台词（如果有）
-7. audio_description: 声音描述
-8. special_technique: 特殊拍摄技巧
-9. duration: 预计时长
-
-请直接返回JSON格式的分镜数组，不要包含其他解释或说明。格式如下：
-{{
-  "shots": [
-    {{
-      "scene": "1",
-      "shot_number": "1",
-      "visual_description": "画面描述",
-      "scene_description": "场景说明",
-      "characters": ["角色1", "角色2"],
-      "dialogue": "台词内容",
-      "audio_description": "声音描述",
-      "special_technique": "拍摄技巧",
-      "duration": "5秒"
-    }},
-    ...
-  ]
-}}"""
+    user_prompt = f"""
+        剧本内容：{data.get('content', '')}
+        人物信息：{characters_info}
+        项目基础信息：{basic_info}
+        情感关键词：{emotional_keywords}
+        色彩体系：{color_system}
+    """
 
     msgs = [{'role': 'system', 'content': sys}, {'role': 'user', 'content': user_prompt}]
     result = ai_service.run_text_generation(msgs, config)

@@ -1016,14 +1016,6 @@ def run_text_generation(messages, config):
     handler = get_handler(config.get('type'))
     return handler.generate_text(messages, config)
 
-def run_script_analysis(script_content, config):
-    system_prompt = """
-    作为专业的电影分镜师，请分析以下剧本片段，将其转化为分镜表数据。
-    **输出要求**：1. 返回一个纯 JSON 数组。2. **必须使用中文**填写所有描述性字段。3. 不要包含 Markdown 标记。
-    **JSON对象结构**：- scene: 场次 - shot_number: 镜号 - visual_description: 画面说明 - audio_description: 声音说明 - dialogue: 台词 - duration: 时长 - special_technique: 特殊技术
-    """
-    messages = [{'role': 'system', 'content': system_prompt}, {'role': 'user', 'content': f"剧本片段：\n{script_content}"}]
-    return run_text_generation(messages, config)
 
 def run_image_generation(visual_desc, style_desc, consistency_text, frame_type, config, save_dir, url_prefix, start_prompt_ref=None, prev_shot_context=""):
     """
