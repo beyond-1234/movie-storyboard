@@ -219,6 +219,186 @@ class MockHandler:
     def generate_voice(text, save_dir, url_prefix, config):
         return {'success': True, 'url': "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3"}
 
+class ViduHandler:
+    """
+    VIDU API Handler - Start-End to Video
+    官方文档: https://api.vidu.com/ent/v2/start-end2video
+    支持首尾帧生成视频
+    """
+    
+    @staticmethod
+    def _get_headers(config):
+        return {
+            "Authorization": f"Token {config.get('api_key')}",
+            "Content-Type": "application/json"
+        }
+    
+    @staticmethod
+    def _wait_for_video(task_id, config, max_wait=600):
+        """
+        轮询等待视频生成完成
+        max_wait: 最大等待时间(秒)，默认10分钟（off_peak模式可能需要48小时）
+        """
+        import time
+        base_url = config.get('base_url', 'https://api.vidu.com')
+        url = f"{base_url.rstrip('/')}/ent/v2/tasks/{task_id}/creations" 
+        headers = ViduHandler._get_headers(config)
+        
+        start_time = time.time()
+        while time.time() - start_time < max_wait:
+            try:
+                resp = requests.get(url, headers=headers, timeout=30)
+                if resp.status_code == 200:
+                    data = resp.json()
+                    state = data.get('state')
+                    err_code = data.get('err_code')
+                    
+                    logger.info(f"[VIDU] Task {task_id} state: {state} err_code: {err_code}")
+                    
+                    if state == 'success':
+                        # 成功，获取视频URL
+                        video_url = data.get('video_url') or data.get('video')
+                        if video_url:
+                            return {'success': True, 'url': video_url, 'data': data}
+                        else:
+                            return {'success': False, 'error_msg': 'No video URL in response'}
+                    
+                    elif state == 'failed':
+                        error_msg = data.get('error', 'Generation failed')
+                        return {'success': False, 'error_msg': error_msg}
+                    
+                    elif state in ['created', 'queueing', 'processing']:
+                        # 继续等待
+                        time.sleep(10)  # 每10秒查询一次
+                    
+                    else:
+                        logger.warning(f"[VIDU] Unknown state: {state}")
+                        time.sleep(10)
+                else:
+                    logger.error(f"[VIDU] Query failed: {resp.status_code} - {resp.text}")
+                    if resp.status_code == 404:
+                        return {'success': False, 'error_msg': 'Task not found'}
+                    time.sleep(10)
+                    
+            except Exception as e:
+                logger.error(f"[VIDU] Query error: {e}")
+                time.sleep(10)
+        
+        return {'success': False, 'error_msg': f'Timeout after {max_wait}s waiting for video generation'}
+    
+    @staticmethod
+    def generate_video(prompt, save_dir, url_prefix, config, start_img=None, end_img=None):
+        """
+        VIDU 首尾帧生成视频 (Start-End to Video)
+        必须提供首帧和尾帧
+        """
+        api_key = config.get('api_key')
+        base_url = config.get('base_url', 'https://api.vidu.com')
+        model = config.get('model_name', 'viduq2-pro-fast')
+        
+        if not api_key:
+            return {'success': False, 'error_msg': "Missing VIDU API key"}
+        
+        if not start_img or not end_img:
+            return {'success': False, 'error_msg': "VIDU requires both start frame and end frame images"}
+        
+        # 转换图片为 base64
+        start_img_b64 = file_to_base64(start_img)
+        end_img_b64 = file_to_base64(end_img)
+        
+        if not start_img_b64 or not end_img_b64:
+            return {'success': False, 'error_msg': "Failed to encode images to base64"}
+        
+        # API endpoint
+        url = f"{base_url.rstrip('/')}/ent/v2/start-end2video"
+        
+        # 构建请求参数
+        payload = {
+            "model": model,
+            "images": [start_img_b64, end_img_b64],  # 首帧和尾帧
+            "prompt": "",
+            "duration": 2,  # 默认5秒，可根据模型调整
+            "resolution": "360p",  # 默认720p，可选: 540p, 720p, 1080p
+            "movement_amplitude": "auto",  # auto, small, medium, large
+            "off_peak": False,  # 非高峰模式
+            "bgm": False  # 不添加背景音乐
+        }
+        
+        # 可选：如果需要固定随机种子
+        # payload["seed"] = 42
+        
+        try:
+            headers = ViduHandler._get_headers(config)
+            logger.info(f"[VIDU] Creating task with model: {model}")
+            
+            resp = requests.post(url, json=payload, headers=headers, timeout=60)
+            
+            if resp.status_code in [200, 201]:
+                data = resp.json()
+                task_id = data.get('task_id')
+                state = data.get('state')
+                credits = data.get('credits', 0)
+                
+                logger.info(f"[VIDU] Task created: {task_id}, state: {state}, credits: {credits}")
+                
+                if not task_id:
+                    return {'success': False, 'error_msg': 'No task_id returned from API'}
+                
+                # 等待视频生成完成
+                result = ViduHandler._wait_for_video(task_id, config, max_wait=600)
+                
+                if result['success'] and result.get('url'):
+                    video_url = result['url']
+                    
+                    # 下载视频到本地
+                    fname = f"{task_id}.mp4"
+                    save_path = os.path.join(save_dir, fname)
+                    
+                    logger.info(f"[VIDU] Downloading video from: {video_url}")
+                    
+                    if download_file(video_url, save_path):
+                        logger.info(f"[VIDU] Video saved to: {save_path}")
+                        return {'success': True, 'url': f"{url_prefix.rstrip('/')}/{fname}"}
+                    else:
+                        # 下载失败，返回远程URL
+                        logger.warning(f"[VIDU] Download failed, returning remote URL")
+                        return {'success': True, 'url': video_url}
+                
+                return result
+            
+            else:
+                # API调用失败
+                error_msg = resp.text
+                try:
+                    error_data = resp.json()
+                    error_msg = error_data.get('error', {}).get('message', error_msg)
+                except:
+                    pass
+                
+                logger.error(f"[VIDU] API Error {resp.status_code}: {error_msg}")
+                return {'success': False, 'error_msg': f"API Error ({resp.status_code}): {error_msg}"}
+                
+        except requests.exceptions.Timeout:
+            return {'success': False, 'error_msg': 'Request timeout'}
+        except Exception as e:
+            logger.exception("[VIDU] Generation failed")
+            return {'success': False, 'error_msg': str(e)}
+    
+    @staticmethod
+    def generate_image(prompt, save_dir, url_prefix, config):
+        """
+        VIDU 不支持图片生成，返回错误
+        """
+        return {'success': False, 'error_msg': "VIDU only supports video generation (start-end to video)"}
+    
+    @staticmethod
+    def generate_text(messages, config):
+        """
+        VIDU 不支持文本生成，返回错误
+        """
+        return {'success': False, 'error_msg': "VIDU does not support text generation"}
+
+
 # ============================================================
 #  Dispatcher
 # ============================================================
@@ -227,6 +407,7 @@ def get_handler(provider_type):
     if provider_type == 'aliyun': return AliyunHandler
     if provider_type == 'siliconflow' or provider_type == 'runninghub': return OpenAICompatibleHandler
     if provider_type == 'comfyui': return ComfyUIHandler
+    if provider_type == 'vidu': return ViduHandler
     return MockHandler
 
 # ============================================================
