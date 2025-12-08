@@ -55,6 +55,59 @@
         .config-label { width: 60px; font-size: 13px; color: #606266; font-weight: bold; }
         .config-selects { flex: 1; display: flex; gap: 10px; }
         .header-actions { float: right; display: flex; align-items: center; height: 100%; gap: 15px; }
+        .character-views {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+            margin-bottom: 10px;
+        }
+
+        .view-item {
+            text-align: center;
+        }
+
+        .view-title {
+            font-size: 12px;
+            color: #666;
+            margin-bottom: 5px;
+        }
+
+        .view-image {
+            width: 100%;
+            height: 120px;
+        }
+
+        .view-image img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            border-radius: 4px;
+        }
+
+        .view-placeholder {
+            width: 100%;
+            height: 120px;
+            border: 1px dashed #dcdfe6;
+            border-radius: 4px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            color: #909399;
+        }
+
+        .view-placeholder:hover {
+            border-color: #409EFF;
+            color: #409EFF;
+        }
+
+        .character-desc {
+            font-size: 13px;
+            color: #666;
+            margin-top: 10px;
+            line-height: 1.4;
+        }
         ::-webkit-scrollbar { width: 8px; height: 8px; }
         ::-webkit-scrollbar-thumb { background: #ccc; border-radius: 4px; }
         ::-webkit-scrollbar-track { background: #f1f1f1; }
@@ -149,6 +202,69 @@
                                 </div>
                             </div>
                             <div style="margin-top: 20px;"><el-button type="primary" icon="el-icon-plus" style="width: 100%" @click="addScriptSection">添加新段落</el-button></div>
+                        </el-tab-pane>
+
+                        <el-tab-pane label="角色设定" name="characters">
+                            <!-- 角色生成配置 -->
+                            <div style="margin-bottom: 15px; background: #f5f7fa; padding: 10px; border-radius: 4px;">
+                                <div style="display:flex; align-items:center; gap: 15px;">
+                                    <span style="font-size:13px; color:#606266; font-weight:bold;">AI 模型:</span>
+                                    <el-select v-model="genOptions.imageProviderId" size="mini" placeholder="供应商" style="width: 120px;"
+                                        @change="updateImageModelDefault">
+                                        <el-option v-for="p in providers" :key="p.id" :label="p.name" :value="p.id"></el-option>
+                                    </el-select>
+                                    <el-select v-model="genOptions.imageModelName" size="mini" placeholder="模型" style="width: 150px;">
+                                        <el-option v-for="m in availableImageModels" :key="m.name" :label="m.name" :value="m.name"></el-option>
+                                    </el-select>
+                                    <el-button type="primary" size="small" icon="el-icon-plus" @click="openCreateCharacter">创建角色</el-button>
+                                    <el-button type="success" size="small" icon="el-icon-magic-stick" @click="generateCharactersFromPrompt">从视觉统一设定生成</el-button>
+                                </div>
+                            </div>
+                        
+                            <!-- 角色列表 -->
+                            <el-row :gutter="20">
+                                <el-col :span="6" v-for="char in characterList" :key="char.id">
+                                    <el-card style="margin-bottom: 20px;">
+                                        <div slot="header">
+                                            <span>{{ char.name }}</span>
+                                            <el-button style="float: right; padding: 3px 0" type="text" icon="el-icon-delete"
+                                                @click="deleteCharacter(char.id)"></el-button>
+                                        </div>
+                                        <div class="character-views">
+                                            <div class="view-item" v-for="(url, type) in char.images" :key="type">
+                                                <div class="view-title">{{ getViewTitle(type) }}</div>
+                                                <div class="view-image" v-if="url">
+                                                    <el-image :src="url" :preview-src-list="[url]"></el-image>
+                                                    <div style="margin-top: 5px; text-align: center;">
+                                                        <el-button type="text" size="mini" @click="uploadCharacterImage(char, type)">替换图片</el-button>
+                                                    </div>
+                                                </div>
+                                                <div class="view-placeholder" v-else>
+                                                    <el-upload
+                                                        action="/api/upload/character_image"
+                                                        :show-file-list="false"
+                                                        :on-success="(res) => handleImageUploadSuccess(res, char, type)"
+                                                        :before-upload="beforeImageUpload"
+                                                        :data="{character_id: char.id, view_type: type}"
+                                                        accept="image/*"
+                                                    >
+                                                        <div style="cursor: pointer;">
+                                                            <i class="el-icon-picture-outline"></i>
+                                                            <div>点击上传</div>
+                                                        </div>
+                                                    </el-upload>
+                                                    <el-divider>或</el-divider>
+                                                    <div @click="generateCharacterView(char, type)" style="cursor: pointer;">
+                                                        <i class="el-icon-magic-stick"></i>
+                                                        <div>AI生成</div>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <div class="character-desc">{{ char.description }}</div>
+                                    </el-card>
+                                </el-col>
+                            </el-row>
                         </el-tab-pane>
 
                         <!-- Shot Tab -->
@@ -445,6 +561,24 @@
                 <div v-else class="settings-content" style="display:flex;align-items:center;justify-content:center;color:#999;">请选择供应商</div>
             </div>
         </el-dialog>
+
+        <!-- Character Dialog -->
+        <el-dialog title="创建角色" :visible.sync="characterDialogVisible" width="500px">
+            <el-form :model="characterForm" label-width="80px">
+                <el-form-item label="角色名称" required>
+                    <el-input v-model="characterForm.name" placeholder="请输入角色名称"></el-input>
+                </el-form-item>
+                <el-form-item label="角色描述">
+                    <el-input type="textarea" v-model="characterForm.description" 
+                        :rows="4" placeholder="请描述角色的外貌、性格、服装等特征"></el-input>
+                </el-form-item>
+            </el-form>
+            <div slot="footer" class="dialog-footer">
+                <el-button @click="characterDialogVisible = false">取 消</el-button>
+                <el-button type="primary" @click="submitCharacter">确 定</el-button>
+            </div>
+        </el-dialog>
+
     </div>
 
     <script src="https://unpkg.com/vue@2.6.14/dist/vue.min.js"></script>
@@ -473,7 +607,13 @@
                 generatingVoice: false, 
                 previewVisible: false, previewUrl: '',
                 scriptSortable: null, shotSortable: null,
-                batchDialogVisible: false, batchConfig: { target: '', scope: 'all' } 
+                batchDialogVisible: false, batchConfig: { target: '', scope: 'all' },
+                characterList: [],
+                characterDialogVisible: false,
+                characterForm: {
+                    name: '',
+                    description: ''
+                }
             },
             computed: {
                 getModelsByProviderId() {
@@ -719,7 +859,7 @@
                 async deleteSelectedShots() { this.$confirm('删除？').then(async () => { const ids = this.multipleShotSelection.map(s => s.id); await this.request('POST', `/api/projects/${this.currentProjectId}/shots/batch_delete`, { ids }); this.fetchShots(this.currentProjectId); }); },
                 async deleteAllShots() { this.$confirm('清空？').then(async () => { const ids = this.shotList.map(s => s.id); if(ids.length) await this.request('POST', `/api/projects/${this.currentProjectId}/shots/batch_delete`, { ids }); this.fetchShots(this.currentProjectId); }); },
 
-                handleTabClick(tab) { if (tab.name === 'script') this.fetchScript(); else if (tab.name === 'shots') this.fetchShots(this.currentProjectId); },
+                handleTabClick(tab) { if (tab.name === 'script') this.fetchScript(); else if (tab.name === 'shots') this.fetchShots(this.currentProjectId); else if (tab.name === 'characters') this.fetchCharacters(); },
                 initScriptSortable() {
                     const el = this.$refs.scriptListRef; if (!el || this.scriptSortable) return;
                     this.scriptSortable = Sortable.create(el, { animation: 150, handle: '.script-section-block', onEnd: (evt) => { const { oldIndex, newIndex } = evt; if (oldIndex === newIndex) return; const item = this.scriptSections.splice(oldIndex, 1)[0]; this.scriptSections.splice(newIndex, 0, item); this.saveScript(); } });
@@ -926,9 +1066,192 @@
                 editShot(row) { this.shotForm = JSON.parse(JSON.stringify(row)); this.videoUrl=row.video_url||''; this.shotDialogVisible = true; },
                 async submitShot() { if(!this.shotForm.shot_number) return; if(this.videoUrl) this.shotForm.video_url = this.videoUrl; const method = this.shotForm.id ? 'PUT' : 'POST'; const url = this.shotForm.id ? `/api/projects/${this.currentProjectId}/shots/${this.shotForm.id}` : `/api/projects/${this.currentProjectId}/shots`; await this.request(method, url, this.shotForm); this.fetchShots(this.currentProjectId); this.shotDialogVisible = false; },
                 async deleteShot(row) { await this.request('DELETE', `/api/projects/${this.currentProjectId}/shots/${row.id}`); this.fetchShots(this.currentProjectId); },
-                removeImage() {}, previewImage(url) { this.previewUrl = url; this.previewVisible = true; }
+                removeImage() {}, previewImage(url) { this.previewUrl = url; this.previewVisible = true; },
+                async fetchCharacters() {
+                    if (!this.currentProjectId) return;
+                    try {
+                        this.characterList = await this.request('GET', `/api/projects/${this.currentProjectId}/characters`);
+                    } catch (e) {
+                        console.error(e);
+                    }
+                },
+
+                openCreateCharacter() {
+                    this.characterForm = {
+                        name: '',
+                        description: ''
+                    };
+                    this.characterDialogVisible = true;
+                },
+
+                async submitCharacter() {
+                    if (!this.characterForm.name) {
+                        this.$message.warning('请输入角色名称');
+                        return;
+                    }
+                    try {
+                        const res = await this.request('POST', `/api/projects/${this.currentProjectId}/characters`, this.characterForm);
+                        this.characterList.push(res);
+                        this.characterDialogVisible = false;
+                        this.$message.success('角色创建成功');
+                    } catch (e) {
+                        console.error(e);
+                    }
+                },
+
+                async generateCharacterView(character, viewType) {
+                    this.startGlobalLoading('生成角色视图...', '请稍候');
+                    try {
+                        const res = await this.request('POST', '/api/generate/character_views', {
+                            character_description: character.description,
+                            provider_id: this.genOptions.imageProviderId,
+                            model_name: this.genOptions.imageModelName
+                        });
+
+                        if (res.success) {
+                            const charIndex = this.characterList.findIndex(c => c.id === character.id);
+                            if (charIndex !== -1) {
+                                this.$set(this.characterList[charIndex].images, viewType, res.images[viewType]);
+                                await this.request('PUT', `/api/projects/${this.currentProjectId}/characters/${character.id}`, {
+                                    images: this.characterList[charIndex].images
+                                });
+                            }
+                        }
+                    } catch (e) {
+                        console.error(e);
+                    } finally {
+                        this.stopGlobalLoading();
+                    }
+                },
+
+                getViewTitle(type) {
+                    const titles = {
+                        'portrait': '肖像',
+                        'front_view': '正面',
+                        'side_view': '侧面',
+                        'back_view': '背面'
+                    };
+                    return titles[type] || type;
+                },
+
+                async deleteCharacter(id) {
+                    try {
+                        await this.$confirm('确定删除该角色？');
+                        await this.request('DELETE', `/api/projects/${this.currentProjectId}/characters/${id}`);
+                        this.characterList = this.characterList.filter(c => c.id !== id);
+                        this.$message.success('删除成功');
+                    } catch (e) {
+                        if (e !== 'cancel') console.error(e);
+                    }
+                },
+
+                // 根据视觉统一字段生成角色列表
+                async generateCharactersFromPrompt() {
+                    if (!this.currentProject || !this.currentProject.visual_consistency_prompt) {
+                        this.$message.warning('请先在项目设置中填写视觉统一设定');
+                        return;
+                    }
+                    
+                    if (!this.genOptions.textProviderId || !this.genOptions.textModelName) {
+                        this.$message.warning('请先选择文本模型');
+                        return;
+                    }
+                    
+                    this.startGlobalLoading('生成角色列表...', '请稍候');
+                    try {
+                        const res = await this.request('POST', '/api/generate/character_list', {
+                            visual_consistency_prompt: this.currentProject.visual_consistency_prompt,
+                            provider_id: this.genOptions.textProviderId,
+                            model_name: this.genOptions.textModelName
+                        });
+                        
+                        if (res.success && res.characters) {
+                            for (const char of res.characters) {
+                                const charData = await this.request('POST', `/api/projects/${this.currentProjectId}/characters`, char);
+                                this.characterList.push(charData);
+                            }
+                            this.$message.success(`成功生成 ${res.characters.length} 个角色`);
+                        } else {
+                            this.$message.error('生成角色列表失败');
+                        }
+                    } catch (e) {
+                        console.error(e);
+                        this.$message.error('生成角色列表失败');
+                    } finally {
+                        this.stopGlobalLoading();
+                    }
+                },
+
+                // 图片上传前检查
+                beforeImageUpload(file) {
+                    const isImage = file.type.indexOf('image/') === 0;
+                    const isLt5M = file.size / 1024 / 1024 < 5;
+                    
+                    if (!isImage) {
+                        this.$message.error('只能上传图片文件!');
+                        return false;
+                    }
+                    if (!isLt5M) {
+                        this.$message.error('图片大小不能超过 5MB!');
+                        return false;
+                    }
+                    return true;
+                },
+
+                // 图片上传成功处理
+                async handleImageUploadSuccess(res, character, viewType) {
+                    if (res.success) {
+                        const charIndex = this.characterList.findIndex(c => c.id === character.id);
+                        if (charIndex !== -1) {
+                            this.$set(this.characterList[charIndex].images, viewType, res.url);
+                            await this.request('PUT', `/api/projects/${this.currentProjectId}/characters/${character.id}`, {
+                                images: this.characterList[charIndex].images
+                            });
+                            this.$message.success('图片上传成功');
+                        }
+                    } else {
+                        this.$message.error(res.error || '图片上传失败');
+                    }
+                },
+
+                // 替换角色图片
+                uploadCharacterImage(character, viewType) {
+                    // 创建一个隐藏的文件输入元素
+                    const input = document.createElement('input');
+                    input.type = 'file';
+                    input.accept = 'image/*';
+                    input.onchange = async (e) => {
+                        const file = e.target.files[0];
+                        if (!file) return;
+                        
+                        if (!this.beforeImageUpload(file)) return;
+                        
+                        const formData = new FormData();
+                        formData.append('file', file);
+                        formData.append('character_id', character.id);
+                        formData.append('view_type', viewType);
+                        
+                        try {
+                            this.startGlobalLoading('上传图片...', '请稍候');
+                            const res = await this.request('POST', '/api/upload/character_image', formData, {
+                                headers: {
+                                    'Content-Type': 'multipart/form-data'
+                                }
+                            });
+                            
+                            await this.handleImageUploadSuccess(res, character, viewType);
+                        } catch (e) {
+                            console.error(e);
+                            this.$message.error('图片上传失败');
+                        } finally {
+                            this.stopGlobalLoading();
+                        }
+                    };
+                    input.click();
+                }
             }
         });
-    </script>
-</body>
-</html>
+                </script>
+    </body>
+    
+    </html>

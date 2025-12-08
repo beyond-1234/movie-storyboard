@@ -359,6 +359,187 @@ def export_jianying(project_id):
     result = export_draft(project_info, shots, STATIC_FOLDER, EXPORT_DIR)
     return jsonify(result) if result['success'] else (jsonify(result), 500)
 
+@app.route('/api/projects/<project_id>/characters', methods=['GET'])
+def get_characters(project_id):
+    """获取项目角色列表"""
+    characters = read_json(os.path.join(get_project_path(project_id), 'characters.json'), default=[])
+    return jsonify(characters)
+
+@app.route('/api/projects/<project_id>/characters', methods=['POST'])
+def create_character(project_id):
+    """创建新角色"""
+    data = request.json
+    characters = read_json(os.path.join(get_project_path(project_id), 'characters.json'), default=[])
+    character = {
+        'id': str(uuid.uuid4()),
+        'name': data.get('name'),
+        'description': data.get('description'),
+        'images': {
+            'portrait': '',
+            'front_view': '',
+            'side_view': '',
+            'back_view': ''
+        },
+        'created_time': datetime.now().isoformat()
+    }
+    characters.append(character)
+    write_json(os.path.join(get_project_path(project_id), 'characters.json'), characters)
+    return jsonify(character), 201
+
+@app.route('/api/projects/<project_id>/characters/<character_id>', methods=['DELETE'])
+def delete_character(project_id, character_id):
+    """删除角色"""
+    path = os.path.join(get_project_path(project_id), 'characters.json')
+    characters = read_json(path, default=[])
+    new_characters = [c for c in characters if c['id'] != character_id]
+    write_json(path, new_characters)
+    return jsonify({"message": "Deleted"})
+
+@app.route('/api/generate/character_views', methods=['POST'])
+def generate_character_views():
+    """生成角色三视图"""
+    data = request.json
+    config = get_provider_config(data.get('provider_id'))
+    if data.get('model_name'):
+        config['model_name'] = data.get('model_name')
+    
+    character_desc = data.get('character_description')
+    save_dir = os.path.join(STATIC_FOLDER, IMG_SAVE_DIR)
+    web_prefix = f"/{IMG_SAVE_DIR}"
+    
+    views = {}
+    view_types = ['portrait', 'front_view', 'side_view', 'back_view']
+    
+    for view_type in view_types:
+        prompt = build_character_prompt(character_desc, view_type)
+        result, used_prompt = ai_service.run_image_generation(  # 修改：解包返回值
+            prompt, 
+            "",  # style_desc
+            "",  # consistency_text
+            view_type,
+            config,
+            save_dir,
+            web_prefix
+        )
+        if result.get('success'):  # 修改：使用解包后的result
+            views[view_type] = result['url']
+    
+    return jsonify({'success': True, 'images': views})
+
+
+@app.route('/api/generate/character_list', methods=['POST'])
+def generate_character_list():
+    """根据视觉统一设定生成角色列表"""
+    data = request.json
+    config = get_provider_config(data.get('provider_id'))
+    if data.get('model_name'):
+        config['model_name'] = data.get('model_name')
+
+    visual_prompt = data.get('visual_consistency_prompt', '')
+    if not visual_prompt:
+        return jsonify({'success': False, 'error': '视觉统一设定不能为空'}), 400
+
+    sys = "你是一个专业的电影角色设计师。请根据提供的视觉统一设定，生成3-5个主要角色列表，每个角色包含名称和详细描述。"
+    msgs = [{'role': 'system', 'content': sys}, 
+            {'role': 'user', 'content': f"视觉统一设定：{visual_prompt}\n\n请生成JSON格式的角色列表，格式如下：\n{{\n  \"characters\": [\n    {{\"name\": \"角色名称\", \"description\": \"角色详细描述\"}},\n    ...\n  ]\n}}"}]
+
+    result = ai_service.run_text_generation(msgs, config)
+    
+    if result.get('success'):
+        try:
+            # 清理AI返回的文本，提取JSON部分
+            content = result.get('content', '')
+            # 尝试查找JSON部分
+            json_match = re.search(r'\{.*\}', content, re.DOTALL)
+            if json_match:
+                json_str = json_match.group(0)
+                character_data = json.loads(json_str)
+                return jsonify({'success': True, 'characters': character_data.get('characters', [])})
+            else:
+                return jsonify({'success': False, 'error': '无法解析角色列表'}), 500
+        except Exception as e:
+            return jsonify({'success': False, 'error': f'解析角色列表失败: {str(e)}'}), 500
+    else:
+        return jsonify(result), 500
+
+
+@app.route('/api/upload/character_image', methods=['POST'])
+def upload_character_image():
+    """上传角色图片"""
+    if 'file' not in request.files:
+        return jsonify({'success': False, 'error': '没有文件'}), 400
+    
+    file = request.files['file']
+    if file.filename == '':
+        return jsonify({'success': False, 'error': '没有选择文件'}), 400
+    
+    character_id = request.form.get('character_id')
+    view_type = request.form.get('view_type')
+    
+    if not character_id or not view_type:
+        return jsonify({'success': False, 'error': '缺少必要参数'}), 400
+    
+    if file and allowed_file(file.filename):
+        # 生成唯一文件名
+        ext = os.path.splitext(file.filename)[1]
+        filename = f"character_{character_id}_{view_type}_{uuid.uuid4().hex[:8]}{ext}"
+        
+        # 确保目录存在
+        save_dir = os.path.join(STATIC_FOLDER, IMG_SAVE_DIR)
+        os.makedirs(save_dir, exist_ok=True)
+        
+        # 保存文件
+        file_path = os.path.join(save_dir, filename)
+        file.save(file_path)
+        
+        # 返回文件URL
+        file_url = f"/{IMG_SAVE_DIR}/{filename}"
+        return jsonify({'success': True, 'url': file_url})
+    
+    return jsonify({'success': False, 'error': '不支持的文件类型'}), 400
+
+
+def allowed_file(filename):
+    """检查文件类型是否允许"""
+    ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'bmp'}
+    return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+
+
+@app.route('/api/projects/<project_id>/characters/<character_id>', methods=['PUT'])
+def update_character(project_id, character_id):
+    """更新角色信息"""
+    data = request.json
+    path = os.path.join(get_project_path(project_id), 'characters.json')
+    characters = read_json(path, default=[])
+    
+    for i, char in enumerate(characters):
+        if char['id'] == character_id:
+            # 更新角色信息
+            updated_char = {**char, **data}
+            characters[i] = updated_char
+            write_json(path, characters)
+            return jsonify(updated_char)
+    
+    return jsonify({"error": "Not found"}), 404
+
+
+def build_character_prompt(character_desc, view_type):
+    """构建角色视图的prompt"""
+    view_prompts = {
+        'portrait': "角色正面肖像特写，展示面部特征和表情",
+        'front_view': "角色正面全身视图，展示完整体型和正面服装",
+        'side_view': "角色侧面全身视图，展示体型轮廓和侧面特征",
+        'back_view': "角色背面全身视图，展示背面服装和轮廓"
+    }
+    
+    return f"""电影角色设计图，{character_desc}，{view_prompts[view_type]}。
+要求：
+1. 纯白背景，专业角色设计图风格
+2. 清晰的线条和细节
+3. 准确的人体比例
+4. 精致的服装和配饰细节
+5. 无水印，无文字，纯角色展示图"""
+
 if __name__ == '__main__':
     ensure_dirs()
     print(f"Server started on http://127.0.0.1:5000")
