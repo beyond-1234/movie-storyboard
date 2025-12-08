@@ -374,12 +374,7 @@ def create_character(project_id):
         'id': str(uuid.uuid4()),
         'name': data.get('name'),
         'description': data.get('description'),
-        'images': {
-            'portrait': '',
-            'front_view': '',
-            'side_view': '',
-            'back_view': ''
-        },
+        'image_url': '',  # 改为单张图片URL
         'created_time': datetime.now().isoformat()
     }
     characters.append(character)
@@ -397,34 +392,51 @@ def delete_character(project_id, character_id):
 
 @app.route('/api/generate/character_views', methods=['POST'])
 def generate_character_views():
-    """生成角色三视图"""
+    """生成角色视图（包含正面特写和多视图的单张图片）"""
     data = request.json
     config = get_provider_config(data.get('provider_id'))
     if data.get('model_name'):
         config['model_name'] = data.get('model_name')
-    
+
     character_desc = data.get('character_description')
     save_dir = os.path.join(STATIC_FOLDER, IMG_SAVE_DIR)
     web_prefix = f"/{IMG_SAVE_DIR}"
+
+    # 构建包含正面特写和多视图的prompt
+    prompt = build_comprehensive_character_prompt(character_desc)
     
-    views = {}
-    view_types = ['portrait', 'front_view', 'side_view', 'back_view']
+    result, used_prompt = ai_service.run_image_generation(
+        prompt,
+        "",  # style_desc
+        "",  # consistency_text
+        "character_view",  # 自定义类型
+        config,
+        save_dir,
+        web_prefix
+    )
     
-    for view_type in view_types:
-        prompt = build_character_prompt(character_desc, view_type)
-        result, used_prompt = ai_service.run_image_generation(  # 修改：解包返回值
-            prompt, 
-            "",  # style_desc
-            "",  # consistency_text
-            view_type,
-            config,
-            save_dir,
-            web_prefix
-        )
-        if result.get('success'):  # 修改：使用解包后的result
-            views[view_type] = result['url']
+    if result.get('success'):
+        return jsonify({'success': True, 'url': result['url']})
     
-    return jsonify({'success': True, 'images': views})
+    return jsonify({'success': False, 'error': '生成失败'}), 500
+
+def build_comprehensive_character_prompt(character_desc):
+    """构建包含正面特写和多视图的角色prompt"""
+    return f"""电影角色设计图，{character_desc}。
+请生成一张包含以下内容的角色设计图：
+1. 左上角：角色正面特写肖像，清晰展示面部特征和表情
+2. 右上角：角色正面全身视图，展示完整体型和服装
+3. 左下角：角色侧面全身视图，展示体型轮廓和侧面特征
+4. 右下角：角色背面全身视图，展示背面服装和轮廓
+
+要求：
+1. 纯白背景，专业角色设计图风格
+2. 清晰的线条和细节
+3. 准确的人体比例
+4. 精致的服装和配饰细节
+5. 无水印，无文字，纯角色展示图
+6. 四个视图均匀分布，布局合理
+7. 每个视图都有足够的空间展示细节"""
 
 
 @app.route('/api/generate/character_list', methods=['POST'])
@@ -474,15 +486,15 @@ def upload_character_image():
         return jsonify({'success': False, 'error': '没有选择文件'}), 400
     
     character_id = request.form.get('character_id')
-    view_type = request.form.get('view_type')
+    # 不再需要view_type，因为只有一张图片
     
-    if not character_id or not view_type:
+    if not character_id:
         return jsonify({'success': False, 'error': '缺少必要参数'}), 400
     
     if file and allowed_file(file.filename):
         # 生成唯一文件名
         ext = os.path.splitext(file.filename)[1]
-        filename = f"character_{character_id}_{view_type}_{uuid.uuid4().hex[:8]}{ext}"
+        filename = f"character_{character_id}_{uuid.uuid4().hex[:8]}{ext}"
         
         # 确保目录存在
         save_dir = os.path.join(STATIC_FOLDER, IMG_SAVE_DIR)
@@ -522,23 +534,6 @@ def update_character(project_id, character_id):
     
     return jsonify({"error": "Not found"}), 404
 
-
-def build_character_prompt(character_desc, view_type):
-    """构建角色视图的prompt"""
-    view_prompts = {
-        'portrait': "角色正面肖像特写，展示面部特征和表情",
-        'front_view': "角色正面全身视图，展示完整体型和正面服装",
-        'side_view': "角色侧面全身视图，展示体型轮廓和侧面特征",
-        'back_view': "角色背面全身视图，展示背面服装和轮廓"
-    }
-    
-    return f"""电影角色设计图，{character_desc}，{view_prompts[view_type]}。
-要求：
-1. 纯白背景，专业角色设计图风格
-2. 清晰的线条和细节
-3. 准确的人体比例
-4. 精致的服装和配饰细节
-5. 无水印，无文字，纯角色展示图"""
 
 if __name__ == '__main__':
     ensure_dirs()

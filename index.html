@@ -56,57 +56,117 @@
         .config-selects { flex: 1; display: flex; gap: 10px; }
         .header-actions { float: right; display: flex; align-items: center; height: 100%; gap: 15px; }
         .character-views {
+            flex: 1;
             display: grid;
             grid-template-columns: 1fr 1fr;
-            gap: 10px;
-            margin-bottom: 10px;
+            gap: 15px;
+            margin-bottom: 15px;
+        }
+        
+        .character-view {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            margin-bottom: 15px;
         }
 
         .view-item {
-            text-align: center;
+            display: flex;
+            flex-direction: column;
         }
 
         .view-title {
-            font-size: 12px;
+            font-size: 14px;
             color: #666;
-            margin-bottom: 5px;
+            margin-bottom: 10px;
+            text-align: center;
+            font-weight: bold;
         }
 
         .view-image {
-            width: 100%;
-            height: 120px;
+            position: relative;
+            height: 400px; /* 增加高度以适应四视图布局 */
+            border-radius: 4px;
+            overflow: hidden;
+            border: 1px solid #eee;
+            background-color: #f9f9f9; /* 设置背景颜色 */
         }
 
-        .view-image img {
+        .view-image .el-image {
             width: 100%;
             height: 100%;
-            object-fit: cover;
-            border-radius: 4px;
+        }
+
+        .image-actions {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            background: rgba(0, 0, 0, 0.5);
+            padding: 5px;
+            text-align: center;
+            opacity: 0;
+            transition: opacity 0.3s;
+        }
+
+        .view-image:hover .image-actions {
+            opacity: 1;
+        }
+
+        .image-actions .el-button {
+            color: #fff;
+            padding: 0;
         }
 
         .view-placeholder {
-            width: 100%;
-            height: 120px;
+            height: 400px;
             border: 1px dashed #dcdfe6;
             border-radius: 4px;
             display: flex;
             flex-direction: column;
             align-items: center;
             justify-content: center;
-            cursor: pointer;
             color: #909399;
+            background-color: #fafafa;
+            transition: all 0.3s;
+            padding: 20px;
         }
 
         .view-placeholder:hover {
             border-color: #409EFF;
             color: #409EFF;
+            background-color: #f0f9ff;
         }
 
-        .character-desc {
-            font-size: 13px;
-            color: #666;
-            margin-top: 10px;
-            line-height: 1.4;
+        .placeholder-content {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            margin-bottom: 20px;
+        }
+
+        .placeholder-content i {
+            font-size: 48px;
+            margin-bottom: 10px;
+        }
+
+        .placeholder-content div {
+            font-size: 16px;
+        }
+
+        .action-buttons {
+            display: flex;
+            gap: 15px;
+            margin-top: 20px;
+        }
+
+        .action-buttons .el-button {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 5px;
+            padding: 10px 15px;
         }
         ::-webkit-scrollbar { width: 8px; height: 8px; }
         ::-webkit-scrollbar-thumb { background: #ccc; border-radius: 4px; }
@@ -232,45 +292,43 @@
                         
                             <!-- 角色列表 -->
                             <el-row :gutter="20">
-                                <el-col :span="6" v-for="char in characterList" :key="char.id">
-                                    <el-card style="margin-bottom: 20px;">
-                                        <div slot="header">
-                                            <span>{{ char.name }}</span>
-                                            <el-button style="float: right; padding: 3px 0" type="text" icon="el-icon-delete"
+                                <el-col :span="8" v-for="char in characterList" :key="char.id">
+                                    <el-card class="character-card" style="margin-bottom: 20px; height: 100%;">
+                                        <div slot="header" class="character-header">
+                                            <span class="character-name">{{ char.name }}</span>
+                                            <el-button class="delete-btn" type="text" icon="el-icon-delete"
                                                 @click="deleteCharacter(char.id)"></el-button>
                                         </div>
-                                        <div class="character-views">
-                                            <div class="view-item" v-for="(url, type) in char.images" :key="type">
-                                                <div class="view-title">{{ getViewTitle(type) }}</div>
-                                                <div class="view-image" v-if="url">
-                                                    <el-image :src="url" :preview-src-list="[url]"></el-image>
-                                                    <div style="margin-top: 5px; text-align: center;">
-                                                        <el-button type="text" size="mini" @click="uploadCharacterImage(char, type)">替换图片</el-button>
+                                        <!-- 将原来的多张图片显示改为单张图片显示 -->
+                                        <div class="character-content">
+                                            <div class="character-view">
+                                                <div class="view-title">角色设计图（含正面特写与多视图）</div>
+                                                <div class="view-image" v-if="char.image_url">
+                                                    <el-image :src="char.image_url" :preview-src-list="[char.image_url]" fit="contain"></el-image>
+                                                    <div class="image-actions">
+                                                        <el-button type="text" size="mini" @click="uploadCharacterImage(char)">替换图片</el-button>
                                                     </div>
                                                 </div>
                                                 <div class="view-placeholder" v-else>
-                                                    <el-upload
-                                                        action="/api/upload/character_image"
-                                                        :show-file-list="false"
-                                                        :on-success="(res) => handleImageUploadSuccess(res, char, type)"
-                                                        :before-upload="beforeImageUpload"
-                                                        :data="{character_id: char.id, view_type: type}"
-                                                        accept="image/*"
-                                                    >
-                                                        <div style="cursor: pointer;">
-                                                            <i class="el-icon-picture-outline"></i>
-                                                            <div>点击上传</div>
-                                                        </div>
-                                                    </el-upload>
-                                                    <el-divider>或</el-divider>
-                                                    <div @click="generateCharacterView(char, type)" style="cursor: pointer;">
-                                                        <i class="el-icon-magic-stick"></i>
-                                                        <div>AI生成</div>
+                                                    <div class="placeholder-content">
+                                                        <i class="el-icon-picture-outline"></i>
+                                                        <div>暂无角色设计图</div>
+                                                    </div>
+                                                    <div class="action-buttons">
+                                                        <el-button type="primary" size="small" @click="uploadCharacterImage(char)">
+                                                            <i class="el-icon-upload2"></i>
+                                                            上传角色设计图
+                                                        </el-button>
+                                                        <el-button type="success" size="small" @click="generateCharacterView(char)">
+                                                            <i class="el-icon-magic-stick"></i>
+                                                            AI生成角色设计图
+                                                        </el-button>
                                                     </div>
                                                 </div>
                                             </div>
+                                            <div class="character-desc">{{ char.description }}</div>
                                         </div>
-                                        <div class="character-desc">{{ char.description }}</div>
+
                                     </el-card>
                                 </el-col>
                             </el-row>
@@ -1108,8 +1166,8 @@
                     }
                 },
 
-                async generateCharacterView(character, viewType) {
-                    this.startGlobalLoading('生成角色视图...', '请稍候');
+                async generateCharacterView(character) {
+                    this.startGlobalLoading('生成角色设计图...', '请稍候');
                     try {
                         const res = await this.request('POST', '/api/generate/character_views', {
                             character_description: character.description,
@@ -1120,9 +1178,9 @@
                         if (res.success) {
                             const charIndex = this.characterList.findIndex(c => c.id === character.id);
                             if (charIndex !== -1) {
-                                this.$set(this.characterList[charIndex].images, viewType, res.images[viewType]);
+                                this.$set(this.characterList[charIndex], 'image_url', res.url);
                                 await this.request('PUT', `/api/projects/${this.currentProjectId}/characters/${character.id}`, {
-                                    images: this.characterList[charIndex].images
+                                    image_url: res.url
                                 });
                             }
                         }
@@ -1208,13 +1266,13 @@
                 },
 
                 // 图片上传成功处理
-                async handleImageUploadSuccess(res, character, viewType) {
+                async handleImageUploadSuccess(res, character) {
                     if (res.success) {
                         const charIndex = this.characterList.findIndex(c => c.id === character.id);
                         if (charIndex !== -1) {
-                            this.$set(this.characterList[charIndex].images, viewType, res.url);
+                            this.$set(this.characterList[charIndex], 'image_url', res.url);
                             await this.request('PUT', `/api/projects/${this.currentProjectId}/characters/${character.id}`, {
-                                images: this.characterList[charIndex].images
+                                image_url: res.url
                             });
                             this.$message.success('图片上传成功');
                         }
@@ -1224,7 +1282,7 @@
                 },
 
                 // 替换角色图片
-                uploadCharacterImage(character, viewType) {
+                uploadCharacterImage(character) {
                     // 创建一个隐藏的文件输入元素
                     const input = document.createElement('input');
                     input.type = 'file';
@@ -1238,7 +1296,6 @@
                         const formData = new FormData();
                         formData.append('file', file);
                         formData.append('character_id', character.id);
-                        formData.append('view_type', viewType);
                         
                         try {
                             this.startGlobalLoading('上传图片...', '请稍候');
@@ -1248,7 +1305,7 @@
                                 }
                             });
                             
-                            await this.handleImageUploadSuccess(res, character, viewType);
+                            await this.handleImageUploadSuccess(res, character);
                         } catch (e) {
                             console.error(e);
                             this.$message.error('图片上传失败');
