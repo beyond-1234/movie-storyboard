@@ -239,6 +239,7 @@
                                         <el-select v-model="genOptions.textModelName" size="mini" placeholder="模型" style="width: 150px;">
                                             <el-option v-for="m in availableTextModels" :key="m.name" :label="m.name" :value="m.name"></el-option>
                                         </el-select>
+                                        <span>建议选参数量大的模型，比如qwen3-max</span>
                                     </div>
                                 </div>
                                 <div><el-button type="danger" size="small" icon="el-icon-delete" plain :disabled="selectedScriptCount === 0" @click="deleteSelectedScripts">批量删除</el-button><el-button type="danger" size="small" icon="el-icon-delete-solid" @click="deleteAllScripts">清空全部</el-button></div>
@@ -361,6 +362,7 @@
                                     <el-button type="danger" size="small" icon="el-icon-delete" plain :disabled="multipleSceneSelection.length === 0" @click="deleteSelectedScenes">批量删除</el-button>
                                     <el-button type="danger" size="small" icon="el-icon-delete-solid" @click="deleteAllScenes">清空全部</el-button>
                                     <el-button type="success" size="small" icon="el-icon-magic-stick" @click="batchGenerateScenePrompts">批量生成场景提示词</el-button>
+                                    <el-button type="primary" size="small" icon="el-icon-picture" @click="batchGenerateSceneImages">批量生成场景图片</el-button>
                                 </div>
                                 <div>
                                     <el-button type="primary" size="small" icon="el-icon-plus" @click="openCreateScene">添加场景</el-button>
@@ -381,7 +383,7 @@
                                 </el-table-column>
                                 <el-table-column prop="characters" label="出席人物" width="150">
                                     <template slot-scope="scope">
-                                        <el-tag v-for="charId in scope.row.characters" :key="charId" size="mini" style="margin-right: 5px;">{{ getCharacterName(charId) }}</el-tag>
+                                        <el-tag v-for="char in scope.row.characters" :key="char.id" size="mini" style="margin-right: 5px;">{{ char.name }}</el-tag>
                                     </template>
                                 </el-table-column>
                                 <el-table-column label="操作" width="180">
@@ -1506,13 +1508,14 @@
                         return;
                     }
                     try {
-                        this.$message.info('正在生成场景图片...');
+                        // 使用全局加载弹框
+                        this.startGlobalLoading('正在生成场景图片...', '请稍候');
                         const result = await this.request('POST', '/api/generate/scene_image', {
                             scene_id: shot.id,
                             scene_prompt: shot.scene_prompt,
                             provider_id: this.genOptions.imageProviderId,
                             model_name: this.genOptions.imageModelName
-                        });
+                        }, { signal: this.currentAbortController.signal });
                         if(result.success) {
                             // 更新分镜数据中的场景图片
                             await this.request('PUT', `/api/projects/${this.currentProjectId}/shots/${shot.id}`, {
@@ -1527,8 +1530,12 @@
                             this.$message.error(result.error || '生成失败');
                         }
                     } catch(e) {
-                        console.error('生成场景图片失败', e);
-                        this.$message.error('生成场景图片失败');
+                        if (e.message !== '已取消') {
+                            console.error('生成场景图片失败', e);
+                            this.$message.error('生成场景图片失败');
+                        }
+                    } finally {
+                        this.stopGlobalLoading();
                     }
                 },
                 handleSceneImageSuccess(res) {
@@ -1645,6 +1652,75 @@
                         }
                     };
                     input.click();
+                },
+
+                // 批量生成场景图片
+                async batchGenerateSceneImages() {
+                    if (!this.genOptions.imageProviderId || !this.genOptions.imageModelName) {
+                        this.$message.warning('请先选择图片生成模型');
+                        return;
+                    }
+
+                    const tasks = this.shotList.filter(s => !s.scene_image || s.scene_image.trim() === '');
+                    if (tasks.length === 0) {
+                        this.$message.info('所有场景都已有图片');
+                        return;
+                    }
+
+                    const total = tasks.length;
+                    let successCount = 0;
+                    let failCount = 0;
+
+                    this.startGlobalLoading(`批量生成场景图片... (0/${total})`, `共 ${total} 个任务，请勿关闭页面`);
+
+                    for (let i = 0; i < total; i++) {
+                        const shot = tasks[i];
+                        this.loadingTitle = `正在生成第 ${i + 1}/${total} 个场景图片...`;
+
+                        try {
+                            if (this.currentAbortController.signal.aborted) break;
+
+                            if (!shot.scene_prompt) {
+                                console.warn(`场景 ${shot.shot_number} 没有提示词，跳过`);
+                                continue;
+                            }
+
+                            const res = await this.request('POST', '/api/generate/scene_image', {
+                                scene_id: shot.id,
+                                scene_prompt: shot.scene_prompt,
+                                provider_id: this.genOptions.imageProviderId,
+                                model_name: this.genOptions.imageModelName
+                            }, { signal: this.currentAbortController.signal });
+
+                            if (res.success) {
+                                await this.request('PUT', `/api/projects/${this.currentProjectId}/shots/${shot.id}`, {
+                                    scene_image: res.url
+                                });
+
+                                const idx = this.shotList.findIndex(s => s.id === shot.id);
+                                if (idx !== -1) {
+                                    this.$set(this.shotList, idx, { ...this.shotList[idx], scene_image: res.url });
+                                }
+
+                                successCount++;
+                            } else {
+                                failCount++;
+                            }
+
+                            // 短暂延迟，避免API限流
+                            await new Promise(resolve => setTimeout(resolve, 500));
+
+                        } catch (e) {
+                            console.error(`场景图片生成失败 shot ${shot.shot_number}:`, e);
+                            failCount++;
+                        }
+                    }
+
+                    this.stopGlobalLoading();
+                    this.$message({
+                        type: failCount === 0 ? 'success' : 'warning',
+                        message: `批量任务完成！成功: ${successCount}, 失败: ${failCount}`
+                    });
                 }
             }
         });

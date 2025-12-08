@@ -330,9 +330,37 @@ def analyze_script():
     if result.get('success'):
         try:
             cleaned = re.sub(r'^```json\s*|\s*```$', '', result['content'].strip(), flags=re.MULTILINE | re.DOTALL)
-            return jsonify({'shots': json.loads(cleaned)})
-        except: return jsonify({'error': 'Invalid JSON from AI'}), 500
+            shots_data = json.loads(cleaned)
+        
+            # 映射角色信息
+            for shot in shots_data:
+                if 'characters' in shot:
+                    shot['characters'] = map_character_names(shot['characters'], character_list)
+                    
+            return jsonify({'shots': shots_data})
+        except Exception as e:
+            print(f"Error parsing analyze_script JSON: {e}")
+            return jsonify({'error': 'Invalid JSON from AI'}), 500
     return jsonify(result), 500
+
+# 在返回结果前添加角色映射逻辑
+def map_character_names(characters_list, character_data):
+    """将角色名称映射为完整角色信息"""
+    mapped = []
+    for name in characters_list:
+        # 在已有角色列表中查找
+        found = next((char for char in character_data if char.get('name') == name), None)
+        if found:
+            mapped.append(found)
+        else:
+            # 如果是新角色，创建基础信息
+            mapped.append({
+                'name': name,
+                'description': '新角色',
+                'id': str(uuid.uuid4())
+            })
+    return mapped
+
 
 @app.route('/api/generate/image', methods=['POST'])
 def generate_image():
