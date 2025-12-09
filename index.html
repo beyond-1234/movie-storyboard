@@ -326,7 +326,21 @@
                                                     </div>
                                                 </div>
                                             </div>
-                                            <div class="character-desc">{{ char.description }}</div>
+                                            <div class="character-desc">
+                                                <div v-if="!char._editing">
+                                                    {{ char.description || '暂无描述' }}
+                                                    <el-button type="text" size="mini" style="float: right;" @click="editCharacterDescription(char)">
+                                                        <i class="el-icon-edit"></i> 编辑
+                                                    </el-button>
+                                                </div>
+                                                <div v-else>
+                                                    <el-input type="textarea" v-model="char._tempDescription" :rows="3" placeholder="请输入角色描述"></el-input>
+                                                    <div style="margin-top: 5px; text-align: right;">
+                                                        <el-button size="mini" @click="cancelEditCharacterDescription(char)">取消</el-button>
+                                                        <el-button type="primary" size="mini" @click="saveCharacterDescription(char)">保存</el-button>
+                                                    </div>
+                                                </div>
+                                            </div>
                                         </div>
 
                                     </el-card>
@@ -1602,6 +1616,43 @@
 
                     // 调用原有的生成函数，传入updateForm=true参数以更新表单
                     this.generateSceneImage(this.sceneForm, true);
+                },
+                // 编辑角色描述
+                editCharacterDescription(char) {
+                    // 设置编辑状态
+                    this.$set(char, '_editing', true);
+                    // 保存当前描述作为临时值
+                    this.$set(char, '_tempDescription', char.description || '');
+                },
+                // 取消编辑角色描述
+                cancelEditCharacterDescription(char) {
+                    // 取消编辑状态
+                    this.$set(char, '_editing', false);
+                    // 删除临时值
+                    this.$delete(char, '_tempDescription');
+                },
+                // 保存角色描述
+                async saveCharacterDescription(char) {
+                    try {
+                        // 更新角色描述
+                        await this.request('PUT', `/api/projects/${this.currentProjectId}/characters/${char.id}`, {
+                            description: char._tempDescription
+                        });
+
+                        // 更新本地数据
+                        char.description = char._tempDescription;
+
+                        // 取消编辑状态
+                        this.$set(char, '_editing', false);
+
+                        // 删除临时值
+                        this.$delete(char, '_tempDescription');
+
+                        this.$message.success('角色描述已更新');
+                    } catch (e) {
+                        console.error(e);
+                        this.$message.error('更新角色描述失败');
+                    }
                 },
                 getCharacterName(id) {
                     const char = this.characterList.find(c => c.id === id);
