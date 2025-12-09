@@ -836,7 +836,52 @@
                 <el-button type="primary" @click="submitCharacter">确 定</el-button>
             </div>
         </el-dialog>
+        <!-- 3. 添加元素对话框 -->
+        <el-dialog title="添加元素" :visible.sync="elementDialogVisible" width="500px">
+            <el-form :model="elementForm" label-width="80px">
+                <el-form-item label="元素名称" required>
+                    <el-input v-model="elementForm.name" placeholder="请输入元素名称"></el-input>
+                </el-form-item>
 
+                <el-form-item label="添加方式">
+                    <el-radio-group v-model="elementForm.type">
+                        <el-radio label="upload">上传图片</el-radio>
+                        <el-radio label="generate">AI生成</el-radio>
+                        <el-radio label="character">选择角色</el-radio>
+                    </el-radio-group>
+                </el-form-item>
+
+                <!-- 上传图片 -->
+                <el-form-item v-if="elementForm.type === 'upload'" label="选择图片">
+                    <el-upload class="element-uploader" action="/api/upload/element_image" :show-file-list="false"
+                        :on-success="handleElementUploadSuccess" :before-upload="beforeElementUpload">
+                        <img v-if="elementForm.image_url" :src="elementForm.image_url" class="element-image">
+                        <i v-else class="el-icon-plus element-uploader-icon"></i>
+                    </el-upload>
+                </el-form-item>
+
+                <!-- AI生成 -->
+                <el-form-item v-if="elementForm.type === 'generate'" label="生成提示词">
+                    <el-input type="textarea" v-model="elementForm.prompt" :rows="4" placeholder="描述你想要生成的图片内容..."></el-input>
+                    <el-button type="primary" size="small" style="margin-top: 10px;" @click="generateElementImage"
+                        :loading="generatingElement">
+                        生成图片
+                    </el-button>
+                </el-form-item>
+
+                <!-- 选择角色 -->
+                <el-form-item v-if="elementForm.type === 'character'" label="选择角色">
+                    <el-select v-model="elementForm.character_id" placeholder="请选择角色" style="width: 100%">
+                        <el-option v-for="char in characterList" :key="char.id" :label="char.name" :value="char.id"></el-option>
+                    </el-select>
+                </el-form-item>
+            </el-form>
+
+            <div slot="footer" class="dialog-footer">
+                <el-button @click="elementDialogVisible = false">取 消</el-button>
+                <el-button type="primary" @click="submitElement">确 定</el-button>
+            </div>
+        </el-dialog>
     </div>
 
     <script src="https://unpkg.com/vue@2.6.14/dist/vue.min.js"></script>
@@ -902,10 +947,10 @@
                 elementForm: {
                     id: '',
                     name: '',
-                    image: '',
                     type: 'upload', // upload 或 generate
-                    prompt: '' // 生成提示词
-                }
+                    prompt: '', // 生成提示词
+                    image_url: '' // 元素图片URL
+                },
             },
             computed: {
                 getModelsByProviderId() {
@@ -2161,33 +2206,15 @@
                 },
                 // 添加融图功能的场景元素
                 addElement(fusion) {
-                    // 打开一个对话框让用户选择角色
-                    this.$prompt('请选择要添加的角色', '添加元素', {
-                        confirmButtonText: '确定',
-                        cancelButtonText: '取消',
-                        inputType: 'select',
-                        inputOptions: this.characterList.map(char => ({
-                            value: char.id,
-                            label: char.name
-                        }))
-                    }).then(({ value }) => {
-                        const char = this.characterList.find(c => c.id === value);
-                        if (char && char.image_url) {
-                            const element = {
-                                id: `element_${char.id}`,
-                                name: char.name,
-                                image_url: char.image_url
-                            };
-                            if (!fusion.elements) {
-                                this.$set(fusion, 'elements', []);
-                            }
-                            fusion.elements.push(element);
-                            // 保存更新
-                            this.saveFusionData(fusion);
-                        } else {
-                            this.$message.warning('该角色没有图片');
-                        }
-                    }).catch(() => { });
+                    this.elementForm = {
+                        id: '',
+                        name: '',
+                        type: 'upload',
+                        prompt: '',
+                        image_url: ''
+                    };
+                    this.currentFusion = fusion;
+                    this.elementDialogVisible = true;
                 },
 
                 // 删除融图功能的场景元素
@@ -2205,6 +2232,101 @@
                         console.error(e);
                         this.$message.error('保存失败');
                     }
+                },
+                // 处理元素图片上传
+                handleElementUploadSuccess(res) {
+                    if (res.success) {
+                        this.elementForm.image_url = res.url;
+                    } else {
+                        this.$message.error(res.error || '上传失败');
+                    }
+                },
+
+                // 上传前检查
+                beforeElementUpload(file) {
+                    const isImage = file.type.indexOf('image/') === 0;
+                    const isLt5M = file.size / 1024 / 1024 < 5;
+
+                    if (!isImage) {
+                        this.$message.error('只能上传图片文件!');
+                        return false;
+                    }
+                    if (!isLt5M) {
+                        this.$message.error('图片大小不能超过 5MB!');
+                        return false;
+                    }
+                    return true;
+                },
+
+                // 生成元素图片
+                async generateElementImage() {
+                    if (!this.elementForm.prompt) {
+                        this.$message.warning('请输入生成提示词');
+                        return;
+                    }
+
+                    this.generatingElement = true;
+                    try {
+                        const res = await this.request('POST', '/api/generate/element_image', {
+                            prompt: this.elementForm.prompt,
+                            provider_id: this.genOptions.imageProviderId,
+                            model_name: this.genOptions.imageModelName
+                        });
+
+                        if (res.success) {
+                            this.elementForm.image_url = res.url;
+                        } else {
+                            this.$message.error(res.error || '生成失败');
+                        }
+                    } catch (e) {
+                        console.error(e);
+                        this.$message.error('生成失败');
+                    } finally {
+                        this.generatingElement = false;
+                    }
+                },
+
+                // 提交元素
+                async submitElement() {
+                    if (!this.elementForm.name) {
+                        this.$message.warning('请输入元素名称');
+                        return;
+                    }
+
+                    let imageUrl = this.elementForm.image_url;
+
+                    // 如果是选择角色，使用角色的图片
+                    if (this.elementForm.type === 'character') {
+                        const char = this.characterList.find(c => c.id === this.elementForm.character_id);
+                        if (!char || !char.image_url) {
+                            this.$message.warning('该角色没有图片');
+                            return;
+                        }
+                        imageUrl = char.image_url;
+                    }
+
+                    if (!imageUrl) {
+                        this.$message.warning('请添加图片');
+                        return;
+                    }
+
+                    const element = {
+                        id: `element_${Date.now()}`,
+                        name: this.elementForm.name,
+                        image_url: imageUrl,
+                        type: this.elementForm.type
+                    };
+
+                    if (!this.currentFusion.elements) {
+                        this.$set(this.currentFusion, 'elements', []);
+                    }
+                    this.currentFusion.elements.push(element);
+
+                    // 保存更新
+                    await this.saveFusionData(this.currentFusion);
+
+                    this.elementDialogVisible = false;
+                    this.$message.success('元素添加成功');
                 }
 
             }
