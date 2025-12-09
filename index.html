@@ -464,7 +464,7 @@
                                                 @close="removeElement(scope.row, element)">
                                                 {{ element.name }}
                                             </el-tag>
-                                            <el-button type="text" size="mini" icon="el-icon-plus" @click="addElement(scope.row)"></el-button>
+                                            <el-button type="text" size="mini" icon="el-icon-plus" @click="addElement(scope.row)">添加元素</el-button>
                                         </div>
                                         <div v-else>
                                             <el-button type="text" size="mini" icon="el-icon-plus" @click="addElement(scope.row)">添加元素</el-button>
@@ -836,7 +836,68 @@
                 <el-button type="primary" @click="submitCharacter">确 定</el-button>
             </div>
         </el-dialog>
-        <!-- 3. 添加元素对话框 -->
+        
+        <!-- 融图任务编辑/创建对话框 -->
+        <el-dialog :title="fusionDialogTitle" :visible.sync="fusionDialogVisible" width="60%">
+            <el-form :model="fusionForm" label-width="100px" size="small">
+                <el-row :gutter="20">
+                    <el-col :span="8">
+                        <el-form-item label="场次">
+                            <el-input v-model="fusionForm.scene"></el-input>
+                        </el-form-item>
+                    </el-col>
+                    <el-col :span="8">
+                        <el-form-item label="镜号">
+                            <el-input v-model="fusionForm.shot_number"></el-input>
+                        </el-form-item>
+                    </el-col>
+                    <el-col :span="8">
+                        <el-form-item label="关联分镜 ID" :title="fusionForm.shot_id || '无'">
+                            <el-tag size="mini">{{ fusionForm.shot_id ? fusionForm.shot_id.slice(0, 8) + '...' : '未关联' }}</el-tag>
+                        </el-form-item>
+                    </el-col>
+                </el-row>
+                
+                <el-form-item label="基础图片 (底图)" required>
+                    <div style="display: flex; align-items: center; gap: 15px;">
+                        <div v-if="fusionForm.base_image" style="position: relative; width: 150px; height: 100px; border-radius: 4px; overflow: hidden; border: 1px solid #eee;">
+                            <el-image :src="fusionForm.base_image" :preview-src-list="[fusionForm.base_image]" fit="cover" style="width: 100%; height: 100%;"></el-image>
+                            <i class="el-icon-close" style="position: absolute; top: 5px; right: 5px; color: #fff; background: rgba(0,0,0,0.5); border-radius: 50%; padding: 3px; cursor: pointer;" @click="fusionForm.base_image = ''"></i>
+                        </div>
+                        <el-button size="mini" icon="el-icon-upload2" @click="$refs.baseUploadInput.click()">上传底图</el-button>
+                        <input type="file" ref="baseUploadInput" style="display: none;" @change="handleBaseUpload" accept="image/*">
+                    </div>
+                </el-form-item>
+                
+                <el-form-item label="融合提示词" required>
+                    <el-input type="textarea" v-model="fusionForm.fusion_prompt" :rows="3" placeholder="描述你希望图片如何与元素融合以及最终的视觉效果"></el-input>
+                </el-form-item>
+
+                <el-form-item label="元素列表">
+                    <div style="margin-bottom: 10px;">
+                        <el-tag v-for="element in fusionForm.elements" :key="element.id" size="medium" closable
+                            @close="removeElement(fusionForm, element)" style="margin-right: 8px; margin-bottom: 8px;">
+                            {{ element.name }}
+                        </el-tag>
+                        <el-button type="text" size="small" icon="el-icon-plus" @click="addElement(fusionForm)">添加新元素</el-button>
+                    </div>
+                </el-form-item>
+                
+                <el-form-item label="结果图片">
+                    <div v-if="fusionForm.result_image" style="width: 200px; height: 150px; border-radius: 4px; overflow: hidden; border: 1px solid #eee;">
+                        <el-image :src="fusionForm.result_image" :preview-src-list="[fusionForm.result_image]" fit="cover" style="width: 100%; height: 100%;"></el-image>
+                    </div>
+                    <div v-else style="color: #ccc; font-size: 14px; height: 150px; display: flex; align-items: center;">未生成</div>
+                </el-form-item>
+            </el-form>
+            <div slot="footer" class="dialog-footer">
+                <el-button @click="fusionDialogVisible = false">取 消</el-button>
+                <el-button type="warning" icon="el-icon-magic-stick" :disabled="!fusionForm.base_image || !fusionForm.fusion_prompt" @click="generateFusionImage(fusionForm)">生成融合图</el-button>
+                <el-button type="primary" @click="saveFusion">保 存</el-button>
+            </div>
+        </el-dialog>
+
+        <!-- 元素对话框 -->
         <el-dialog title="添加元素" :visible.sync="elementDialogVisible" width="500px">
             <el-form :model="elementForm" label-width="80px">
                 <el-form-item label="元素名称" required>
@@ -853,11 +914,14 @@
 
                 <!-- 上传图片 -->
                 <el-form-item v-if="elementForm.type === 'upload'" label="选择图片">
-                    <el-upload class="element-uploader" action="/api/upload/element_image" :show-file-list="false"
-                        :on-success="handleElementUploadSuccess" :before-upload="beforeElementUpload">
-                        <img v-if="elementForm.image_url" :src="elementForm.image_url" class="element-image">
-                        <i v-else class="el-icon-plus element-uploader-icon"></i>
-                    </el-upload>
+                    <!-- 使用 axios 上传，不使用 el-upload 的 action，因为需要 custom logic -->
+                    <div style="display: flex; align-items: center; gap: 10px;">
+                        <div v-if="elementForm.image_url" style="width: 80px; height: 80px; border: 1px dashed #dcdfe6; border-radius: 4px; overflow: hidden;">
+                            <el-image :src="elementForm.image_url" fit="cover" style="width: 100%; height: 100%;"></el-image>
+                        </div>
+                        <el-button size="mini" icon="el-icon-upload2" @click="$refs.elementUploadInput.click()">上传图片</el-button>
+                        <input type="file" ref="elementUploadInput" style="display: none;" @change="handleElementUpload" accept="image/*">
+                    </div>
                 </el-form-item>
 
                 <!-- AI生成 -->
@@ -874,6 +938,10 @@
                     <el-select v-model="elementForm.character_id" placeholder="请选择角色" style="width: 100%">
                         <el-option v-for="char in characterList" :key="char.id" :label="char.name" :value="char.id"></el-option>
                     </el-select>
+                    <div v-if="elementForm.character_id" style="margin-top: 10px;">
+                        <el-image v-if="getCharacterImage(elementForm.character_id)" :src="getCharacterImage(elementForm.character_id)" style="width: 80px; height: 80px; border-radius: 4px;" fit="cover"></el-image>
+                        <el-tag v-else type="warning" size="small">该角色暂无设计图</el-tag>
+                    </div>
                 </el-form-item>
             </el-form>
 
@@ -947,10 +1015,13 @@
                 elementForm: {
                     id: '',
                     name: '',
-                    type: 'upload', // upload 或 generate
+                    type: 'upload', // upload, generate, or character
                     prompt: '', // 生成提示词
-                    image_url: '' // 元素图片URL
+                    image_url: '', // 元素图片URL
+                    character_id: '' // 选中的角色 ID
                 },
+                currentFusion: null, // 当前正在编辑元素的融图任务对象
+                generatingElement: false,
             },
             computed: {
                 getModelsByProviderId() {
@@ -1201,7 +1272,11 @@
                     // 确保在切换到场景列表标签页时也能加载数据
                     if (tab.name === "scenes" && this.currentProjectId) {
                         this.fetchShots(this.currentProjectId);
-                    } else if (tab.name === 'script') this.fetchScript(); else if (tab.name === 'shots') this.fetchShots(this.currentProjectId); else if (tab.name === 'characters') this.fetchCharacters(); },
+                    } else if (tab.name === 'script') this.fetchScript(); 
+                    else if (tab.name === 'shots') this.fetchShots(this.currentProjectId); 
+                    else if (tab.name === 'characters') this.fetchCharacters();
+                    else if (tab.name === 'image-fusion') this.fetchFusions(); 
+                },
                 initScriptSortable() {
                     const el = this.$refs.scriptListRef; if (!el || this.scriptSortable) return;
                     this.scriptSortable = Sortable.create(el, { animation: 150, handle: '.script-section-block', onEnd: (evt) => { const { oldIndex, newIndex } = evt; if (oldIndex === newIndex) return; const item = this.scriptSections.splice(oldIndex, 1)[0]; this.scriptSections.splice(newIndex, 0, item); this.saveScript(); } });
@@ -1404,7 +1479,7 @@
                 handleProviderChange() { this.initDefaultSelections(); },
 
                 async fetchProjects() { const list = await this.request('GET', '/api/projects'); this.projectList = list; if(list.length && !this.currentProjectId) { this.currentProjectId = list[0].id; this.handleProjectChange(list[0].id); } },
-                async handleProjectChange(pid) { this.currentProject = this.projectList.find(p => p.id === pid); this.activeTab='script'; this.fetchScript(); this.fetchCharacters(); },
+                async handleProjectChange(pid) { this.currentProject = this.projectList.find(p => p.id === pid); this.activeTab='script'; this.fetchScript(); this.fetchCharacters(); this.fetchFusions(); },
                 openCreateProject() { 
     this.projectForm = { 
         film_name: '',
@@ -1809,6 +1884,10 @@
                     const char = this.characterList.find(c => c.id === id);
                     return char ? char.name : '未知角色';
                 },
+                getCharacterImage(id) {
+                    const char = this.characterList.find(c => c.id === id);
+                    return char ? char.image_url : null;
+                },
 
                 // 根据人物设定字段生成角色列表
                 async generateCharactersFromPrompt() {
@@ -2051,7 +2130,7 @@
                 },
                 
                 openCreateFusion() {
-                    this.fusionForm = { id: '', scene: '', shot_number: '', base_image: '', fusion_prompt: '', result_image: '' };
+                    this.fusionForm = { id: '', scene: '', shot_number: '', base_image: '', fusion_prompt: '', result_image: '', elements: [] };
                     this.fusionDialogTitle = '新建融图任务';
                     this.fusionDialogVisible = true;
                 },
@@ -2129,6 +2208,7 @@
                     }
                 },
 
+                // --- 修改后的核心生成接口调用 ---
                 async generateFusionImage(row) {
                     // 如果是在列表点击，row有值；如果在弹窗点击，row可能是事件对象，使用 this.fusionForm
                     const target = (row && row.id) ? row : this.fusionForm;
@@ -2136,10 +2216,19 @@
                     if (!target.base_image) return this.$message.warning('请先设置底图');
                     if (!target.fusion_prompt) return this.$message.warning('请填写提示词');
                     
-                    this.startGlobalLoading('正在生成...', 'AI 正在基于底图进行重绘融合...');
+                    // 确保任务已保存，否则后端无法通过ID获取到elements
+                    if (!target.id) {
+                        this.fusionDialogVisible = false;
+                        await this.saveFusion(); // 强制保存以获取ID
+                        this.fusionDialogVisible = true;
+                    }
+                    
+                    this.startGlobalLoading('正在生成...', 'AI 正在基于底图和元素进行重绘融合...');
                     try {
+                        // *** UPDATED PAYLOAD with ID and project ID ***
                         const res = await this.request('POST', '/api/generate/fusion_image', {
-                            base_image: target.base_image,
+                            fusion_id: target.id, // 传递任务ID，后端用它来获取elements和base_image
+                            project_id: this.currentProjectId, 
                             fusion_prompt: target.fusion_prompt,
                             provider_id: this.genOptions.imageProviderId,
                             model_name: this.genOptions.imageModelName
@@ -2158,6 +2247,7 @@
                         }
                     } catch (e) {
                         console.error(e);
+                        this.$message.error('生成失败');
                     } finally {
                         this.stopGlobalLoading();
                     }
@@ -2181,11 +2271,17 @@
                         // 创建融图任务列表
                         this.fusionList = this.shotList.map(shot => {
                             // 获取场景中的角色图片
-                            const elements = shot.characters.map(char => ({
-                                id: `element_${char.id}`,
-                                name: char.name,
-                                image_url: char.image_url || ''
-                            })).filter(el => el.image_url); // 只保留有图片的角色
+                            const elements = shot.characters.map(charId => {
+                                const char = this.characterList.find(c => c.id === charId);
+                                if (char && char.image_url) {
+                                    return {
+                                        id: `element_${char.id}`,
+                                        name: char.name,
+                                        image_url: char.image_url
+                                    };
+                                }
+                                return null;
+                            }).filter(el => el); // 只保留有图片的角色
 
                             return {
                                 id: `fusion_${shot.id}`,
@@ -2195,9 +2291,12 @@
                                 base_image: shot.scene_image || '',
                                 elements: elements, // 角色图片作为元素
                                 result_image: '',
-                                fusion_prompt: ''
+                                fusion_prompt: shot.visual_description || '' // 使用分镜描述作为初始提示词
                             };
                         });
+                        
+                        // 批量保存到后端 (可选, 暂时只更新前端以避免大量请求)
+                        // TODO: Implement batch save or force save on first edit/generate
 
                         this.$message.success('已从场景列表复制数据');
                     }).catch(() => {
@@ -2209,9 +2308,10 @@
                     this.elementForm = {
                         id: '',
                         name: '',
-                        type: 'upload',
-                        prompt: '',
-                        image_url: ''
+                        type: 'upload', // upload, generate, or character
+                        prompt: '', // 生成提示词
+                        image_url: '', // 元素图片URL
+                        character_id: '' // 选中的角色 ID
                     };
                     this.currentFusion = fusion;
                     this.elementDialogVisible = true;
@@ -2227,35 +2327,63 @@
                 // 保存融图功能的场景融图数据
                 async saveFusionData(fusion) {
                     try {
-                        await this.request('PUT', `/api/projects/${this.currentProjectId}/fusions/${fusion.id}`, fusion);
+                        const method = fusion.id ? 'PUT' : 'POST';
+                        const url = fusion.id 
+                            ? `/api/projects/${this.currentProjectId}/fusions/${fusion.id}`
+                            : `/api/projects/${this.currentProjectId}/fusions`;
+
+                        const res = await this.request(method, url, fusion);
+                        
+                        // 如果是新创建的任务，更新ID
+                        if (!fusion.id) {
+                            fusion.id = res.id;
+                            this.fusionList.push(res);
+                        } else {
+                             // 更新列表中的数据
+                             const idx = this.fusionList.findIndex(f => f.id === fusion.id);
+                             if (idx !== -1) {
+                                 this.$set(this.fusionList, idx, res);
+                             }
+                        }
                     } catch (e) {
                         console.error(e);
                         this.$message.error('保存失败');
                     }
                 },
+                
                 // 处理元素图片上传
-                handleElementUploadSuccess(res) {
-                    if (res.success) {
-                        this.elementForm.image_url = res.url;
-                    } else {
-                        this.$message.error(res.error || '上传失败');
-                    }
-                },
+                async handleElementUpload(e) {
+                    const file = e.target.files[0];
+                    if (!file) return;
 
-                // 上传前检查
-                beforeElementUpload(file) {
-                    const isImage = file.type.indexOf('image/') === 0;
-                    const isLt5M = file.size / 1024 / 1024 < 5;
+                    if (!this.beforeImageUpload(file)) return;
+                    
+                    const formData = new FormData();
+                    formData.append('file', file);
+                    
+                    try {
+                        this.generatingElement = true; // 使用 element loading indicator if available
+                        this.startGlobalLoading('上传元素图片...', '请稍候');
+                        
+                        // 调用新的元素上传接口
+                        const res = await this.request('POST', '/api/upload/element_image', formData, {
+                            headers: { 'Content-Type': 'multipart/form-data' }
+                        });
 
-                    if (!isImage) {
-                        this.$message.error('只能上传图片文件!');
-                        return false;
+                        if (res.success) {
+                            this.elementForm.image_url = res.url;
+                            this.$message.success('上传成功');
+                        } else {
+                            this.$message.error(res.error || '上传失败');
+                        }
+                    } catch (e) {
+                        console.error('Element upload error:', e);
+                        this.$message.error('上传失败');
+                    } finally {
+                        this.generatingElement = false;
+                        this.stopGlobalLoading();
+                        e.target.value = '';
                     }
-                    if (!isLt5M) {
-                        this.$message.error('图片大小不能超过 5MB!');
-                        return false;
-                    }
-                    return true;
                 },
 
                 // 生成元素图片
@@ -2267,6 +2395,7 @@
 
                     this.generatingElement = true;
                     try {
+                        // 调用新的元素生成接口
                         const res = await this.request('POST', '/api/generate/element_image', {
                             prompt: this.elementForm.prompt,
                             provider_id: this.genOptions.imageProviderId,
@@ -2275,6 +2404,7 @@
 
                         if (res.success) {
                             this.elementForm.image_url = res.url;
+                            this.$message.success('元素图片生成成功');
                         } else {
                             this.$message.error(res.error || '生成失败');
                         }
@@ -2299,15 +2429,19 @@
                     if (this.elementForm.type === 'character') {
                         const char = this.characterList.find(c => c.id === this.elementForm.character_id);
                         if (!char || !char.image_url) {
-                            this.$message.warning('该角色没有图片');
+                            this.$message.warning('该角色没有设计图，请先生成或上传');
                             return;
                         }
                         imageUrl = char.image_url;
                     }
 
-                    if (!imageUrl) {
+                    if (!imageUrl && this.elementForm.type !== 'character') {
                         this.$message.warning('请添加图片');
                         return;
+                    } else if (!imageUrl) {
+                         // Should not happen if the check above passes for 'character'
+                         this.$message.warning('无法获取图片URL');
+                         return;
                     }
 
                     const element = {

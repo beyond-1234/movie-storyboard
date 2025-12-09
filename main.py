@@ -878,33 +878,107 @@ def delete_fusion(project_id, fusion_id):
     write_json(path, new_fusions)
     return jsonify({"message": "Deleted"})
 
+# === 融图功能：AI 生成元素图片 (新增) ===
+@app.route('/api/generate/element_image', methods=['POST'])
+def generate_element_image():
+    """AI生成融图元素图片"""
+    data = request.json
+    prompt = data.get('prompt')
+    provider_id = data.get('provider_id')
+    model_name = data.get('model_name')
+
+    if not prompt:
+        return jsonify({'success': False, 'error': '提示词不能为空'}), 400
+    
+    # 获取配置
+    config = get_provider_config(provider_id)
+    if model_name: config['model_name'] = model_name
+
+    # 设置保存路径
+    save_dir = os.path.join(STATIC_FOLDER, IMG_SAVE_DIR)
+    web_prefix = f"/{IMG_SAVE_DIR}"
+
+    # 使用 run_simple_image_generation 生成元素图片
+    result = ai_service.run_simple_image_generation(
+        prompt,
+        config,
+        save_dir,
+        web_prefix
+    )
+
+    if result.get('success'):
+        return jsonify({'success': True, 'url': result['url']})
+    else:
+        return jsonify({'success': False, 'error': result.get('error_msg', '生成失败')}), 500
+
+# === 融图功能：上传元素图片 (新增) ===
+@app.route('/api/upload/element_image', methods=['POST'])
+def upload_element_image():
+    """上传融图元素图片"""
+    if 'file' not in request.files: return jsonify({'success': False, 'error': 'No file'}), 400
+    file = request.files['file']
+    if file.filename == '': return jsonify({'success': False, 'error': 'No selected file'}), 400
+    ext = os.path.splitext(file.filename)[1].lower()
+    if not allowed_file(file.filename): return jsonify({'success': False, 'error': 'Invalid file type'}), 400
+    
+    filename = f"fusion_element_{uuid.uuid4()}{ext}"
+    path = os.path.join(STATIC_FOLDER, IMG_SAVE_DIR, filename)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    file.save(path)
+    return jsonify({'success': True, 'url': f"/{IMG_SAVE_DIR}/{filename}"})
+
+
+# === 融图功能：核心生成接口 (修改) ===
 @app.route('/api/generate/fusion_image', methods=['POST'])
 def generate_fusion_image():
     """
     真正的融图生成接口
-    使用 base_image 作为底图，调用 AI 的图生图接口
+    使用 base_image 作为底图，调用 AI 的图生图接口，并传入元素图片
     """
     data = request.json
-    base_image_url = data.get('base_image') # 图片 URL
+    fusion_id = data.get('fusion_id')
     fusion_prompt = data.get('fusion_prompt')
     provider_id = data.get('provider_id')
     model_name = data.get('model_name')
+    project_id = data.get('project_id')
+
+    if not project_id or not fusion_id:
+        return jsonify({'success': False, 'error': '缺少项目或任务ID，请先保存任务'}), 400
+    
+    # 1. 获取完整的 FusionTask 数据
+    fusions_path = os.path.join(get_project_path(project_id), 'fusions.json')
+    fusions = read_json(fusions_path, default=[])
+    current_fusion = next((f for f in fusions if f['id'] == fusion_id), None)
+    
+    if not current_fusion:
+        return jsonify({'success': False, 'error': '融图任务不存在'}), 404
+        
+    base_image_url = current_fusion.get('base_image')
     
     if not base_image_url:
         return jsonify({'success': False, 'error': '请设置基础图片'}), 400
     
-    # 将 URL 转换为本地路径
+    # 2. 处理 base_image 路径
     if base_image_url.startswith('/'):
         base_image_path = os.path.join(STATIC_FOLDER, base_image_url.lstrip('/'))
     else:
-        # 如果是 http 链接，可能需要下载，这里简化处理，假设都是本地上传的图片
-        base_image_path = None 
-        # TODO: 生产环境可以加上 requests.get 下载远程图片存为临时文件
+        # 假设所有图片都是通过上传保存的本地路径
+        base_image_path = None
     
     if not base_image_path or not os.path.exists(base_image_path):
         return jsonify({'success': False, 'error': '基础图片文件不存在'}), 404
 
-    # 调用 AI Service
+    # 3. 处理 elements 路径
+    element_image_paths = []
+    element_images = current_fusion.get('elements', [])
+    for element in element_images:
+        url = element.get('image_url')
+        if url and url.startswith('/'):
+            path = os.path.join(STATIC_FOLDER, url.lstrip('/'))
+            if os.path.exists(path):
+                element_image_paths.append(path)
+
+    # 4. 调用 AI Service (假设 ai_service.run_fusion_generation 接受 element_image_paths)
     config = get_provider_config(provider_id)
     if model_name: config['model_name'] = model_name
     
@@ -916,7 +990,9 @@ def generate_fusion_image():
         fusion_prompt=fusion_prompt,
         config=config,
         save_dir=save_dir,
-        url_prefix=web_prefix
+        url_prefix=web_prefix,
+        # *** 关键：传入元素图片路径列表 ***
+        element_image_paths=element_image_paths
     )
     
     if result.get('success'):
@@ -933,6 +1009,7 @@ def upload_base_image():
     if ext not in ['.jpg', '.jpeg', '.png', '.webp']: return jsonify({'success': False, 'error': 'Invalid file type'}), 400
     filename = f"fusion_base_{uuid.uuid4()}{ext}"
     path = os.path.join(STATIC_FOLDER, IMG_SAVE_DIR, filename)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
     file.save(path)
     return jsonify({'success': True, 'url': f"/{IMG_SAVE_DIR}/{filename}"})
 
