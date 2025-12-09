@@ -115,6 +115,8 @@ class FusionTask:
     fusion_prompt: str = ""  # 融合提示词
     shot_id: str = ""        # 关联分镜 ID
     created_time: str = field(default_factory=lambda: datetime.now().isoformat())
+    # 增加 updated_time 字段，便于追踪更新
+    updated_time: str = field(default_factory=lambda: datetime.now().isoformat()) 
     @classmethod
     def from_dict(cls, data): return cls(**{k: v for k, v in data.items() if k in cls.__dataclass_fields__})
     def to_dict(self): return asdict(self)
@@ -843,42 +845,56 @@ def update_character(project_id, character_id):
 
 @app.route('/api/projects/<project_id>/fusions', methods=['GET'])
 def get_fusions(project_id):
+    """获取项目融图任务列表"""
     path = os.path.join(get_project_path(project_id), 'fusions.json')
+    # 确保返回列表，即使文件不存在或为空
     fusions = read_json(path, default=[])
     return jsonify(fusions)
 
 @app.route('/api/projects/<project_id>/fusions', methods=['POST'])
 def create_fusion(project_id):
+    """创建新的融图任务"""
     data = request.json
-    fusions = read_json(os.path.join(get_project_path(project_id), 'fusions.json'), default=[])
-    if not data.get('id'): data['id'] = f"fusion_{uuid.uuid4()}"
-    new_fusion = FusionTask.from_dict({**data}) 
+    path = os.path.join(get_project_path(project_id), 'fusions.json')
+    fusions = read_json(path, default=[])
+    
+    # 确保生成唯一的ID
+    data['id'] = str(uuid.uuid4())
+    data['created_time'] = datetime.now().isoformat()
+    data['updated_time'] = datetime.now().isoformat()
+    
+    new_fusion = FusionTask.from_dict(data) 
     fusions.append(new_fusion.to_dict())
-    write_json(os.path.join(get_project_path(project_id), 'fusions.json'), fusions)
+    write_json(path, fusions)
     return jsonify(new_fusion.to_dict()), 201
 
 @app.route('/api/projects/<project_id>/fusions/<fusion_id>', methods=['PUT'])
 def update_fusion(project_id, fusion_id):
+    """更新融图任务"""
     path = os.path.join(get_project_path(project_id), 'fusions.json')
     fusions = read_json(path, default=[])
+    
     for i, f in enumerate(fusions):
         if f['id'] == fusion_id:
-            merged_data = {**f, **request.json, 'id': fusion_id}
+            # 合并数据并更新时间
+            merged_data = {**f, **request.json, 'id': fusion_id, 'updated_time': datetime.now().isoformat()}
             new_fusion = FusionTask.from_dict(merged_data)
             fusions[i] = new_fusion.to_dict()
             write_json(path, fusions)
             return jsonify(new_fusion.to_dict())
+            
     return jsonify({"error": "Not found"}), 404
 
 @app.route('/api/projects/<project_id>/fusions/<fusion_id>', methods=['DELETE'])
 def delete_fusion(project_id, fusion_id):
+    """删除融图任务"""
     path = os.path.join(get_project_path(project_id), 'fusions.json')
     fusions = read_json(path, default=[])
     new_fusions = [f for f in fusions if f['id'] != fusion_id]
     write_json(path, new_fusions)
     return jsonify({"message": "Deleted"})
 
-# === 融图功能：AI 生成元素图片 (新增) ===
+# --- 融图功能：AI 生成元素图片 (新增) ---
 @app.route('/api/generate/element_image', methods=['POST'])
 def generate_element_image():
     """AI生成融图元素图片"""
@@ -911,7 +927,7 @@ def generate_element_image():
     else:
         return jsonify({'success': False, 'error': result.get('error_msg', '生成失败')}), 500
 
-# === 融图功能：上传元素图片 (新增) ===
+# --- 融图功能：上传元素图片 (新增) ---
 @app.route('/api/upload/element_image', methods=['POST'])
 def upload_element_image():
     """上传融图元素图片"""
@@ -928,7 +944,7 @@ def upload_element_image():
     return jsonify({'success': True, 'url': f"/{IMG_SAVE_DIR}/{filename}"})
 
 
-# === 融图功能：核心生成接口 (修改) ===
+# --- 融图功能：核心生成接口 (修改) ---
 @app.route('/api/generate/fusion_image', methods=['POST'])
 def generate_fusion_image():
     """
@@ -985,13 +1001,14 @@ def generate_fusion_image():
     save_dir = os.path.join(STATIC_FOLDER, IMG_SAVE_DIR)
     web_prefix = f"/{IMG_SAVE_DIR}"
     
+    # Note: ai_service.run_fusion_generation needs to be updated in a hypothetical ai_service.py to accept element_image_paths
+    # We pass it here assuming the service supports it.
     result = ai_service.run_fusion_generation(
         base_image_path=base_image_path,
         fusion_prompt=fusion_prompt,
         config=config,
         save_dir=save_dir,
         url_prefix=web_prefix,
-        # *** 关键：传入元素图片路径列表 ***
         element_image_paths=element_image_paths
     )
     

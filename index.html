@@ -2115,11 +2115,12 @@
                         message: `批量任务完成！成功: ${successCount}, 失败: ${failCount}`
                     });
                 },
-                // --- 融图功能方法 ---
+// --- 融图功能方法 ---
                 async fetchFusions() {
                     if (!this.currentProjectId) return;
                     this.loadingFusions = true;
                     try { 
+                        // 从后端获取融图任务列表
                         this.fusionList = await this.request('GET', `/api/projects/${this.currentProjectId}/fusions`) || []; 
                     } catch (e) {
                         console.error(e);
@@ -2144,23 +2145,9 @@
                 async saveFusion() {
                     if (!this.currentProjectId) return this.$message.error("未选择项目");
                     
-                    const method = this.fusionForm.id ? 'PUT' : 'POST';
-                    const url = this.fusionForm.id 
-                        ? `/api/projects/${this.currentProjectId}/fusions/${this.fusionForm.id}`
-                        : `/api/projects/${this.currentProjectId}/fusions`;
+                    // 调用 saveFusionData 来处理 POST (创建) 或 PUT (更新)
+                    await this.saveFusionData(this.fusionForm);
                     
-                    const res = await this.request(method, url, this.fusionForm);
-                    
-                    if (!this.fusionForm.id) {
-                        this.fusionList.push(res);
-                        // 更新表单ID以防重复提交创建
-                        this.fusionForm.id = res.id;
-                    } else {
-                        const idx = this.fusionList.findIndex(f => f.id === res.id);
-                        if (idx !== -1) {
-                            this.$set(this.fusionList, idx, res);
-                        }
-                    }
                     this.fusionDialogVisible = false;
                     this.$message.success('任务保存成功');
                 },
@@ -2198,6 +2185,10 @@
                         if (res.data.success) {
                             this.fusionForm.base_image = res.data.url;
                             this.$message.success('上传成功');
+                            // 自动保存，确保 base_image 持久化
+                            if (this.fusionForm.id) {
+                                await this.saveFusionData(this.fusionForm);
+                            }
                         }
                     } catch(e) { 
                         this.$message.error('上传失败'); 
@@ -2218,9 +2209,10 @@
                     
                     // 确保任务已保存，否则后端无法通过ID获取到elements
                     if (!target.id) {
-                        this.fusionDialogVisible = false;
-                        await this.saveFusion(); // 强制保存以获取ID
-                        this.fusionDialogVisible = true;
+                        this.$message.info("任务尚未保存，正在自动保存...");
+                        await this.saveFusionData(target); // 强制保存以获取ID
+                        // 更新 row 引用，以便后续操作
+                        row = target;
                     }
                     
                     this.startGlobalLoading('正在生成...', 'AI 正在基于底图和元素进行重绘融合...');
@@ -2241,7 +2233,10 @@
                                 await this.request('PUT', `/api/projects/${this.currentProjectId}/fusions/${target.id}`, { result_image: res.url });
                                 // 如果是在列表中操作，更新列表数据
                                 const idx = this.fusionList.findIndex(f => f.id === target.id);
-                                if(idx !== -1) this.$set(this.fusionList, idx, { ...target, result_image: res.url });
+                                if(idx !== -1) {
+                                    // 确保更新后的数据能反映到列表上
+                                    this.$set(this.fusionList, idx, { ...this.fusionList[idx], result_image: res.url });
+                                }
                             }
                             this.$message.success('生成成功！');
                         }
@@ -2267,38 +2262,47 @@
                         confirmButtonText: '确定',
                         cancelButtonText: '取消',
                         type: 'warning'
-                    }).then(() => {
-                        // 创建融图任务列表
-                        this.fusionList = this.shotList.map(shot => {
-                            // 获取场景中的角色图片
-                            const elements = shot.characters.map(charId => {
-                                const char = this.characterList.find(c => c.id === charId);
-                                if (char && char.image_url) {
-                                    return {
-                                        id: `element_${char.id}`,
-                                        name: char.name,
-                                        image_url: char.image_url
-                                    };
-                                }
-                                return null;
-                            }).filter(el => el); // 只保留有图片的角色
+                    }).then(async () => {
+                        this.startGlobalLoading('正在复制场景任务...', '请稍候');
+                        try {
+                            const newFusions = [];
+                            for (const shot of this.shotList) {
+                                // 获取场景中的角色图片
+                                const elements = (shot.characters || []).map(charId => {
+                                    const char = this.characterList.find(c => c.id === charId);
+                                    if (char && char.image_url) {
+                                        return {
+                                            id: `element_${char.id}`,
+                                            name: char.name,
+                                            image_url: char.image_url
+                                        };
+                                    }
+                                    return null;
+                                }).filter(el => el); // 只保留有图片的角色
 
-                            return {
-                                id: `fusion_${shot.id}`,
-                                scene: shot.scene,
-                                shot_number: shot.shot_number,
-                                shot_id: shot.id,
-                                base_image: shot.scene_image || '',
-                                elements: elements, // 角色图片作为元素
-                                result_image: '',
-                                fusion_prompt: shot.visual_description || '' // 使用分镜描述作为初始提示词
-                            };
-                        });
-                        
-                        // 批量保存到后端 (可选, 暂时只更新前端以避免大量请求)
-                        // TODO: Implement batch save or force save on first edit/generate
+                                const tempFusion = {
+                                    scene: shot.scene || '',
+                                    shot_number: shot.shot_number || '',
+                                    shot_id: shot.id,
+                                    base_image: shot.scene_image || '',
+                                    elements: elements,
+                                    result_image: '',
+                                    fusion_prompt: ''
+                                };
+                                
+                                // 调用 POST 接口创建任务并获取完整数据（包含ID）
+                                const res = await this.request('POST', `/api/projects/${this.currentProjectId}/fusions`, tempFusion);
+                                newFusions.push(res);
+                            }
 
-                        this.$message.success('已从场景列表复制数据');
+                            this.fusionList = newFusions;
+                            this.$message.success(`已从场景列表复制 ${newFusions.length} 个任务`);
+                        } catch (e) {
+                            this.$message.error('复制失败');
+                            console.error('Copy from scenes failed:', e);
+                        } finally {
+                            this.stopGlobalLoading();
+                        }
                     }).catch(() => {
                         // 用户取消操作
                     });
@@ -2324,7 +2328,7 @@
                     this.saveFusionData(fusion);
                 },
 
-                // 保存融图功能的场景融图数据
+                // 保存融图功能的场景融图数据 (通用保存函数)
                 async saveFusionData(fusion) {
                     try {
                         const method = fusion.id ? 'PUT' : 'POST';
@@ -2334,20 +2338,25 @@
 
                         const res = await this.request(method, url, fusion);
                         
-                        // 如果是新创建的任务，更新ID
-                        if (!fusion.id) {
+                        // 如果是新创建的任务 (POST)
+                        if (method === 'POST') {
                             fusion.id = res.id;
                             this.fusionList.push(res);
                         } else {
-                             // 更新列表中的数据
+                             // 更新列表中的数据 (PUT)
                              const idx = this.fusionList.findIndex(f => f.id === fusion.id);
                              if (idx !== -1) {
                                  this.$set(this.fusionList, idx, res);
                              }
                         }
+                        
+                        // 返回最新的任务对象
+                        return res;
+
                     } catch (e) {
                         console.error(e);
                         this.$message.error('保存失败');
+                        throw e;
                     }
                 },
                 
