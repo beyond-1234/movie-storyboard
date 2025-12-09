@@ -409,10 +409,10 @@
                                 </el-table-column>
                                 <el-table-column label="操作" width="180">
                                     <template slot-scope="scope">
-                                        <el-button type="text" size="small" icon="el-icon-edit" @click="openEditScene(scope.row)">编辑</el-button>
-                                        <el-button type="text" size="small" icon="el-icon-magic-stick" @click="generateScenePrompt(scope.row)">生成提示词</el-button>
-                                        <el-button type="text" size="small" icon="el-icon-picture" @click="generateSceneImage(scope.row)">生成图片</el-button>
-                                        <el-button type="text" size="small" icon="el-icon-picture" @click="uploadSceneImage(scope.row)">替换图片</el-button>
+                                        <el-tooltip content="编辑" placement="top"><el-button size="mini" icon="el-icon-edit" circle @click="openEditScene(scope.row)"></el-button></el-tooltip>
+                                        <el-tooltip content="生成提示词" placement="top"><el-button size="mini" type="success" icon="el-icon-magic-stick" circle plain @click="generateScenePrompt(scope.row)"></el-button></el-tooltip>
+                                        <el-tooltip content="生成图片" placement="top"><el-button size="mini" type="primary" icon="el-icon-picture" circle plain @click="generateSceneImage(scope.row)"></el-button></el-tooltip>
+                                        <el-tooltip content="替换图片" placement="top"><el-button size="mini" type="info" icon="el-icon-upload2" circle plain @click="uploadSceneImage(scope.row)"></el-button></el-tooltip>
                                     </template>
                                 </el-table-column>
                             </el-table>
@@ -486,9 +486,9 @@
                                 </el-table-column>
                                 <el-table-column label="操作" width="220" fixed="right">
                                     <template slot-scope="scope">
-                                        <el-button size="mini" type="primary" icon="el-icon-edit" @click="editFusion(scope.row)">编辑</el-button>
-                                        <el-button size="mini" type="success" icon="el-icon-magic-stick" @click="generateFusionImage(scope.row)">生成</el-button>
-                                        <el-button size="mini" type="danger" icon="el-icon-delete" @click="deleteFusion(scope.row)">删除</el-button>
+                                        <el-tooltip content="编辑任务" placement="top"><el-button size="mini" icon="el-icon-edit" circle @click="editFusion(scope.row)"></el-button></el-tooltip>
+                                        <el-tooltip content="生成融合图" placement="top"><el-button size="mini" type="success" icon="el-icon-magic-stick" circle plain @click="generateFusionImage(scope.row)"></el-button></el-tooltip>
+                                        <el-tooltip content="删除" placement="top"><el-button size="mini" type="danger" icon="el-icon-delete" circle plain @click="deleteFusion(scope.row)"></el-button></el-tooltip>
                                     </template>
                                 </el-table-column>
                             </el-table>
