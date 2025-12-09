@@ -422,7 +422,7 @@
                             <!-- 融图生成配置 -->
                             <div style="margin-bottom: 15px; background: #f5f7fa; padding: 10px; border-radius: 4px;">
                                 <div style="display:flex; align-items:center; gap: 15px;">
-                                    <span style="font-size:13px; color:#606266; font-weight:bold;">图片生成模型:</span>
+                                    <span style="font-size:13px; color:#606266; font-weight:bold;">图片融合模型:</span>
                                     <el-select v-model="genOptions.imageProviderId" size="mini" placeholder="供应商" style="width: 120px;" @change="updateImageModelDefault">
                                         <el-option v-for="p in providers" :key="p.id" :label="p.name" :value="p.id"></el-option>
                                     </el-select>
@@ -455,6 +455,20 @@
                                             <el-image :src="scope.row.base_image" :preview-src-list="[scope.row.base_image]" fit="cover" style="width: 100%; height: 100%;"></el-image>
                                         </div>
                                         <div v-else style="color: #ccc; font-size: 12px;">未设置</div>
+                                    </template>
+                                </el-table-column>
+                                <el-table-column label="元素" width="200">
+                                    <template slot-scope="scope">
+                                        <div v-if="scope.row.elements && scope.row.elements.length">
+                                            <el-tag v-for="element in scope.row.elements" :key="element.id" size="mini" closable
+                                                @close="removeElement(scope.row, element)">
+                                                {{ element.name }}
+                                            </el-tag>
+                                            <el-button type="text" size="mini" icon="el-icon-plus" @click="addElement(scope.row)"></el-button>
+                                        </div>
+                                        <div v-else>
+                                            <el-button type="text" size="mini" icon="el-icon-plus" @click="addElement(scope.row)">添加元素</el-button>
+                                        </div>
                                     </template>
                                 </el-table-column>
                                 <el-table-column label="融合提示词" prop="fusion_prompt">
@@ -2104,7 +2118,11 @@
                     }
                 },
                 // 从场景列表复制数据
-                copyFromScenes() {
+                async copyFromScenes() {
+                    // 先尝试获取场景数据
+                    if (!this.shotList || this.shotList.length === 0) {
+                        await this.fetchShots(this.currentProjectId);
+                    }
                     if (!this.shotList || this.shotList.length === 0) {
                         this.$message.warning('场景列表为空，无法复制');
                         return;
@@ -2116,21 +2134,77 @@
                         type: 'warning'
                     }).then(() => {
                         // 创建融图任务列表
-                        this.fusionList = this.shotList.map(shot => ({
-                            id: `fusion_${shot.id}`,
-                            scene: shot.scene,
-                            shot_number: shot.shot_number,
-                            shot_id: shot.id, // 保持与场景的关联
-                            base_image: shot.scene_image || '', // 使用场景图片作为基础图片
-                            elements: [], // 初始为空，需要用户添加
-                            result_image: '', // 初始为空，需要生成
-                            fusion_prompt: '' // 初始为空，需要用户填写
-                        }));
+                        this.fusionList = this.shotList.map(shot => {
+                            // 获取场景中的角色图片
+                            const elements = shot.characters.map(char => ({
+                                id: `element_${char.id}`,
+                                name: char.name,
+                                image_url: char.image_url || ''
+                            })).filter(el => el.image_url); // 只保留有图片的角色
+
+                            return {
+                                id: `fusion_${shot.id}`,
+                                scene: shot.scene,
+                                shot_number: shot.shot_number,
+                                shot_id: shot.id,
+                                base_image: shot.scene_image || '',
+                                elements: elements, // 角色图片作为元素
+                                result_image: '',
+                                fusion_prompt: ''
+                            };
+                        });
 
                         this.$message.success('已从场景列表复制数据');
                     }).catch(() => {
                         // 用户取消操作
                     });
+                },
+                // 添加融图功能的场景元素
+                addElement(fusion) {
+                    // 打开一个对话框让用户选择角色
+                    this.$prompt('请选择要添加的角色', '添加元素', {
+                        confirmButtonText: '确定',
+                        cancelButtonText: '取消',
+                        inputType: 'select',
+                        inputOptions: this.characterList.map(char => ({
+                            value: char.id,
+                            label: char.name
+                        }))
+                    }).then(({ value }) => {
+                        const char = this.characterList.find(c => c.id === value);
+                        if (char && char.image_url) {
+                            const element = {
+                                id: `element_${char.id}`,
+                                name: char.name,
+                                image_url: char.image_url
+                            };
+                            if (!fusion.elements) {
+                                this.$set(fusion, 'elements', []);
+                            }
+                            fusion.elements.push(element);
+                            // 保存更新
+                            this.saveFusionData(fusion);
+                        } else {
+                            this.$message.warning('该角色没有图片');
+                        }
+                    }).catch(() => { });
+                },
+
+                // 删除融图功能的场景元素
+                removeElement(fusion, element) {
+                    fusion.elements = fusion.elements.filter(el => el.id !== element.id);
+                    // 保存更新
+                    this.saveFusionData(fusion);
+                },
+
+                // 保存融图功能的场景融图数据
+                async saveFusionData(fusion) {
+                    try {
+                        await this.request('PUT', `/api/projects/${this.currentProjectId}/fusions/${fusion.id}`, fusion);
+                    } catch (e) {
+                        console.error(e);
+                        this.$message.error('保存失败');
+                    }
                 }
 
             }
