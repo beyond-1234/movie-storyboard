@@ -103,7 +103,23 @@ class StoryboardShot:
     def from_dict(cls, data): 
         return cls(**{k: v for k, v in data.items() if k in cls.__dataclass_fields__})
     def to_dict(self): return asdict(self)
-
+    
+@dataclass
+class FusionTask:
+    id: str
+    scene: str
+    shot_number: str
+    base_image: str = ""     # 底图 URL
+    elements: List[Dict] = field(default_factory=list) # 预留字段
+    result_image: str = ""   # 结果图 URL
+    fusion_prompt: str = ""  # 融合提示词
+    shot_id: str = ""        # 关联分镜 ID
+    created_time: str = field(default_factory=lambda: datetime.now().isoformat())
+    @classmethod
+    def from_dict(cls, data): return cls(**{k: v for k, v in data.items() if k in cls.__dataclass_fields__})
+    def to_dict(self): return asdict(self)
+    
+    
 # --- 路由 ---
 @app.route('/')
 def index(): return send_file('index.html')
@@ -825,6 +841,100 @@ def update_character(project_id, character_id):
     
     return jsonify({"error": "Not found"}), 404
 
+@app.route('/api/projects/<project_id>/fusions', methods=['GET'])
+def get_fusions(project_id):
+    path = os.path.join(get_project_path(project_id), 'fusions.json')
+    fusions = read_json(path, default=[])
+    return jsonify(fusions)
+
+@app.route('/api/projects/<project_id>/fusions', methods=['POST'])
+def create_fusion(project_id):
+    data = request.json
+    fusions = read_json(os.path.join(get_project_path(project_id), 'fusions.json'), default=[])
+    if not data.get('id'): data['id'] = f"fusion_{uuid.uuid4()}"
+    new_fusion = FusionTask.from_dict({**data}) 
+    fusions.append(new_fusion.to_dict())
+    write_json(os.path.join(get_project_path(project_id), 'fusions.json'), fusions)
+    return jsonify(new_fusion.to_dict()), 201
+
+@app.route('/api/projects/<project_id>/fusions/<fusion_id>', methods=['PUT'])
+def update_fusion(project_id, fusion_id):
+    path = os.path.join(get_project_path(project_id), 'fusions.json')
+    fusions = read_json(path, default=[])
+    for i, f in enumerate(fusions):
+        if f['id'] == fusion_id:
+            merged_data = {**f, **request.json, 'id': fusion_id}
+            new_fusion = FusionTask.from_dict(merged_data)
+            fusions[i] = new_fusion.to_dict()
+            write_json(path, fusions)
+            return jsonify(new_fusion.to_dict())
+    return jsonify({"error": "Not found"}), 404
+
+@app.route('/api/projects/<project_id>/fusions/<fusion_id>', methods=['DELETE'])
+def delete_fusion(project_id, fusion_id):
+    path = os.path.join(get_project_path(project_id), 'fusions.json')
+    fusions = read_json(path, default=[])
+    new_fusions = [f for f in fusions if f['id'] != fusion_id]
+    write_json(path, new_fusions)
+    return jsonify({"message": "Deleted"})
+
+@app.route('/api/generate/fusion_image', methods=['POST'])
+def generate_fusion_image():
+    """
+    真正的融图生成接口
+    使用 base_image 作为底图，调用 AI 的图生图接口
+    """
+    data = request.json
+    base_image_url = data.get('base_image') # 图片 URL
+    fusion_prompt = data.get('fusion_prompt')
+    provider_id = data.get('provider_id')
+    model_name = data.get('model_name')
+    
+    if not base_image_url:
+        return jsonify({'success': False, 'error': '请设置基础图片'}), 400
+    
+    # 将 URL 转换为本地路径
+    if base_image_url.startswith('/'):
+        base_image_path = os.path.join(STATIC_FOLDER, base_image_url.lstrip('/'))
+    else:
+        # 如果是 http 链接，可能需要下载，这里简化处理，假设都是本地上传的图片
+        base_image_path = None 
+        # TODO: 生产环境可以加上 requests.get 下载远程图片存为临时文件
+    
+    if not base_image_path or not os.path.exists(base_image_path):
+        return jsonify({'success': False, 'error': '基础图片文件不存在'}), 404
+
+    # 调用 AI Service
+    config = get_provider_config(provider_id)
+    if model_name: config['model_name'] = model_name
+    
+    save_dir = os.path.join(STATIC_FOLDER, IMG_SAVE_DIR)
+    web_prefix = f"/{IMG_SAVE_DIR}"
+    
+    result = ai_service.run_fusion_generation(
+        base_image_path=base_image_path,
+        fusion_prompt=fusion_prompt,
+        config=config,
+        save_dir=save_dir,
+        url_prefix=web_prefix
+    )
+    
+    if result.get('success'):
+        return jsonify({'success': True, 'url': result['url']})
+    else:
+        return jsonify({'success': False, 'error': result.get('error_msg', '生成失败')}), 500
+
+@app.route('/api/upload/base_image', methods=['POST'])
+def upload_base_image():
+    if 'file' not in request.files: return jsonify({'success': False, 'error': 'No file'}), 400
+    file = request.files['file']
+    if file.filename == '': return jsonify({'success': False, 'error': 'No selected file'}), 400
+    ext = os.path.splitext(file.filename)[1].lower()
+    if ext not in ['.jpg', '.jpeg', '.png', '.webp']: return jsonify({'success': False, 'error': 'Invalid file type'}), 400
+    filename = f"fusion_base_{uuid.uuid4()}{ext}"
+    path = os.path.join(STATIC_FOLDER, IMG_SAVE_DIR, filename)
+    file.save(path)
+    return jsonify({'success': True, 'url': f"/{IMG_SAVE_DIR}/{filename}"})
 
 if __name__ == '__main__':
     ensure_dirs()

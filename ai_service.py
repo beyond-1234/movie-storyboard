@@ -1113,3 +1113,14 @@ def run_simple_image_generation(prompt, config, save_dir, url_prefix):
 def run_voice_generation(text, config, save_dir, url_prefix):
     handler = get_handler(config.get('type'))
     return handler.generate_voice(text, save_dir, url_prefix, config)
+
+def run_fusion_generation(base_image_path, fusion_prompt, config, save_dir, url_prefix):
+    """
+    融图/图生图逻辑入口
+    """
+    logger.info(f"[Fusion Gen] Starting fusion. Base: {base_image_path}, Prompt: {fusion_prompt[:30]}...")
+    handler = get_handler(config.get('type', 'mock'))
+    
+    # 传入 ref_image_path 参数，Handler 内部会判断是否调用图生图接口
+    result = handler.generate_image(fusion_prompt, save_dir, url_prefix, config, ref_image_path=base_image_path)
+    return result

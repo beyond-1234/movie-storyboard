@@ -417,6 +417,68 @@
                                 </el-table-column>
                             </el-table>
                         </el-tab-pane>
+                        <!-- 5. 融图功能 Tab -->
+                        <el-tab-pane label="融图功能" name="image-fusion">
+                            <!-- 融图生成配置 -->
+                            <div style="margin-bottom: 15px; background: #f5f7fa; padding: 10px; border-radius: 4px;">
+                                <div style="display:flex; align-items:center; gap: 15px;">
+                                    <span style="font-size:13px; color:#606266; font-weight:bold;">图片生成模型:</span>
+                                    <el-select v-model="genOptions.imageProviderId" size="mini" placeholder="供应商" style="width: 120px;" @change="updateImageModelDefault">
+                                        <el-option v-for="p in providers" :key="p.id" :label="p.name" :value="p.id"></el-option>
+                                    </el-select>
+                                    <el-select v-model="genOptions.imageModelName" size="mini" placeholder="模型" style="width: 150px;">
+                                        <el-option v-for="m in availableImageModels" :key="m.name" :label="m.name" :value="m.name"></el-option>
+                                    </el-select>
+                                    <div style="font-size: 12px; color: #E6A23C; margin-left: 10px;"><i class="el-icon-info"></i> 提示：推荐使用支持图生图的模型 (如 Wanx)</div>
+                                </div>
+                            </div>
+
+                            <!-- 工具栏 -->
+                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+                                <div><span style="margin-right: 20px;">共 {{ fusionList.length }} 个融图任务</span>
+                                    <el-button type="danger" size="small" icon="el-icon-delete" plain :disabled="multipleFusionSelection.length === 0" @click="deleteSelectedFusions">批量删除</el-button>
+                                    <el-button type="success" size="small" icon="el-icon-copy-document" @click="copyFromScenes">从场景列表复制数据</el-button>
+                                </div>
+                                <div>
+                                    <el-button type="primary" size="small" icon="el-icon-plus" @click="openCreateFusion">添加融图任务</el-button>
+                                </div>
+                            </div>
+
+                            <!-- 任务列表 -->
+                            <el-table :data="fusionList" border stripe style="width: 100%" v-loading="loadingFusions" @selection-change="handleFusionSelectionChange" row-key="id">
+                                <el-table-column type="selection" width="55"></el-table-column>
+                                <el-table-column prop="scene" label="场次" width="80"></el-table-column>
+                                <el-table-column prop="shot_number" label="镜号" width="80"></el-table-column>
+                                <el-table-column label="基础图片 (底图)" width="150">
+                                    <template slot-scope="scope">
+                                        <div v-if="scope.row.base_image" style="position: relative; width: 100px; height: 70px; background: #f0f0f0; display: flex; align-items: center; justify-content: center; border-radius: 4px; overflow: hidden;">
+                                            <el-image :src="scope.row.base_image" :preview-src-list="[scope.row.base_image]" fit="cover" style="width: 100%; height: 100%;"></el-image>
+                                        </div>
+                                        <div v-else style="color: #ccc; font-size: 12px;">未设置</div>
+                                    </template>
+                                </el-table-column>
+                                <el-table-column label="融合提示词" prop="fusion_prompt">
+                                    <template slot-scope="scope">
+                                        {{ scope.row.fusion_prompt || '未设置' }}
+                                    </template>
+                                </el-table-column>
+                                <el-table-column label="结果图片" width="150">
+                                    <template slot-scope="scope">
+                                        <div v-if="scope.row.result_image" style="position: relative; width: 100px; height: 70px; background: #f0f0f0; display: flex; align-items: center; justify-content: center; border-radius: 4px; overflow: hidden;">
+                                            <el-image :src="scope.row.result_image" :preview-src-list="[scope.row.result_image]" fit="cover" style="width: 100%; height: 100%;"></el-image>
+                                        </div>
+                                        <div v-else style="color: #ccc; font-size: 12px;">未生成</div>
+                                    </template>
+                                </el-table-column>
+                                <el-table-column label="操作" width="220" fixed="right">
+                                    <template slot-scope="scope">
+                                        <el-button size="mini" type="primary" icon="el-icon-edit" @click="editFusion(scope.row)">编辑</el-button>
+                                        <el-button size="mini" type="success" icon="el-icon-magic-stick" @click="generateFusionImage(scope.row)">生成</el-button>
+                                        <el-button size="mini" type="danger" icon="el-icon-delete" @click="deleteFusion(scope.row)">删除</el-button>
+                                    </template>
+                                </el-table-column>
+                            </el-table>
+                        </el-tab-pane>
 
                         <!-- Shot Tab -->
                         <el-tab-pane label="分镜列表" name="shots">
@@ -805,6 +867,30 @@
                     scene_prompt: '',
                     scene_image: '',
                     characters: []
+                },
+                // 融图功能相关数据
+                loadingFusions: false,
+                fusionList: [],
+                multipleFusionSelection: [],
+                fusionDialogVisible: false,
+                fusionDialogTitle: '编辑融图任务',
+                fusionForm: {
+                    id: '',
+                    scene: '',
+                    shot_number: '',
+                    shot_id: '', // 关联的分镜ID
+                    base_image: '', // 基础图片
+                    elements: [], // 融合元素列表
+                    result_image: '', // 结果图片
+                    fusion_prompt: '' // 融合提示词
+                },
+                elementDialogVisible: false,
+                elementForm: {
+                    id: '',
+                    name: '',
+                    image: '',
+                    type: 'upload', // upload 或 generate
+                    prompt: '' // 生成提示词
                 }
             },
             computed: {
@@ -1890,7 +1976,163 @@
                         type: failCount === 0 ? 'success' : 'warning',
                         message: `批量任务完成！成功: ${successCount}, 失败: ${failCount}`
                     });
+                },
+                // --- 融图功能方法 ---
+                async fetchFusions() {
+                    if (!this.currentProjectId) return;
+                    this.loadingFusions = true;
+                    try { 
+                        this.fusionList = await this.request('GET', `/api/projects/${this.currentProjectId}/fusions`) || []; 
+                    } catch (e) {
+                        console.error(e);
+                        this.fusionList = [];
+                    } finally { 
+                        this.loadingFusions = false; 
+                    }
+                },
+                
+                openCreateFusion() {
+                    this.fusionForm = { id: '', scene: '', shot_number: '', base_image: '', fusion_prompt: '', result_image: '' };
+                    this.fusionDialogTitle = '新建融图任务';
+                    this.fusionDialogVisible = true;
+                },
+                
+                editFusion(row) {
+                    this.fusionForm = JSON.parse(JSON.stringify(row));
+                    this.fusionDialogTitle = '编辑融图任务';
+                    this.fusionDialogVisible = true;
+                },
+                
+                async saveFusion() {
+                    if (!this.currentProjectId) return this.$message.error("未选择项目");
+                    
+                    const method = this.fusionForm.id ? 'PUT' : 'POST';
+                    const url = this.fusionForm.id 
+                        ? `/api/projects/${this.currentProjectId}/fusions/${this.fusionForm.id}`
+                        : `/api/projects/${this.currentProjectId}/fusions`;
+                    
+                    const res = await this.request(method, url, this.fusionForm);
+                    
+                    if (!this.fusionForm.id) {
+                        this.fusionList.push(res);
+                        // 更新表单ID以防重复提交创建
+                        this.fusionForm.id = res.id;
+                    } else {
+                        const idx = this.fusionList.findIndex(f => f.id === res.id);
+                        if (idx !== -1) {
+                            this.$set(this.fusionList, idx, res);
+                        }
+                    }
+                    this.fusionDialogVisible = false;
+                    this.$message.success('任务保存成功');
+                },
+                
+                async deleteFusion(row) {
+                    await this.$confirm('确认删除?');
+                    await this.request('DELETE', `/api/projects/${this.currentProjectId}/fusions/${row.id}`);
+                    this.fetchFusions(); // 重新获取列表
+                },
+                
+                handleFusionSelectionChange(val) { 
+                    this.multipleFusionSelection = val; 
+                },
+                
+                async deleteSelectedFusions() {
+                     await this.$confirm(`删除选中的 ${this.multipleFusionSelection.length} 项?`);
+                     for(let f of this.multipleFusionSelection) {
+                         await this.request('DELETE', `/api/projects/${this.currentProjectId}/fusions/${f.id}`);
+                     }
+                     this.fetchFusions();
+                },
+                
+                // 图片上传相关
+                triggerBaseUpload() { 
+                    if(this.$refs.baseUploadInput) this.$refs.baseUploadInput.click(); 
+                },
+                
+                async handleBaseUpload(e) {
+                    const file = e.target.files[0];
+                    if (!file) return;
+                    const fd = new FormData(); fd.append('file', file);
+                    try {
+                        this.startGlobalLoading('上传中...', '正在上传底图');
+                        const res = await axios.post('/api/upload/base_image', fd);
+                        if (res.data.success) {
+                            this.fusionForm.base_image = res.data.url;
+                            this.$message.success('上传成功');
+                        }
+                    } catch(e) { 
+                        this.$message.error('上传失败'); 
+                    } finally {
+                        this.stopGlobalLoading();
+                        // 清空 input value 允许重复上传同一文件
+                        e.target.value = '';
+                    }
+                },
+
+                async generateFusionImage(row) {
+                    // 如果是在列表点击，row有值；如果在弹窗点击，row可能是事件对象，使用 this.fusionForm
+                    const target = (row && row.id) ? row : this.fusionForm;
+                    
+                    if (!target.base_image) return this.$message.warning('请先设置底图');
+                    if (!target.fusion_prompt) return this.$message.warning('请填写提示词');
+                    
+                    this.startGlobalLoading('正在生成...', 'AI 正在基于底图进行重绘融合...');
+                    try {
+                        const res = await this.request('POST', '/api/generate/fusion_image', {
+                            base_image: target.base_image,
+                            fusion_prompt: target.fusion_prompt,
+                            provider_id: this.genOptions.imageProviderId,
+                            model_name: this.genOptions.imageModelName
+                        });
+                        
+                        if (res.success) {
+                            target.result_image = res.url;
+                            // 自动保存结果
+                            if (target.id) {
+                                await this.request('PUT', `/api/projects/${this.currentProjectId}/fusions/${target.id}`, { result_image: res.url });
+                                // 如果是在列表中操作，更新列表数据
+                                const idx = this.fusionList.findIndex(f => f.id === target.id);
+                                if(idx !== -1) this.$set(this.fusionList, idx, { ...target, result_image: res.url });
+                            }
+                            this.$message.success('生成成功！');
+                        }
+                    } catch (e) {
+                        console.error(e);
+                    } finally {
+                        this.stopGlobalLoading();
+                    }
+                },
+                // 从场景列表复制数据
+                copyFromScenes() {
+                    if (!this.shotList || this.shotList.length === 0) {
+                        this.$message.warning('场景列表为空，无法复制');
+                        return;
+                    }
+
+                    this.$confirm('确定要从场景列表复制数据吗？这将覆盖当前的融图任务列表。', '确认操作', {
+                        confirmButtonText: '确定',
+                        cancelButtonText: '取消',
+                        type: 'warning'
+                    }).then(() => {
+                        // 创建融图任务列表
+                        this.fusionList = this.shotList.map(shot => ({
+                            id: `fusion_${shot.id}`,
+                            scene: shot.scene,
+                            shot_number: shot.shot_number,
+                            shot_id: shot.id, // 保持与场景的关联
+                            base_image: shot.scene_image || '', // 使用场景图片作为基础图片
+                            elements: [], // 初始为空，需要用户添加
+                            result_image: '', // 初始为空，需要生成
+                            fusion_prompt: '' // 初始为空，需要用户填写
+                        }));
+
+                        this.$message.success('已从场景列表复制数据');
+                    }).catch(() => {
+                        // 用户取消操作
+                    });
                 }
+
             }
         });
                 </script>
