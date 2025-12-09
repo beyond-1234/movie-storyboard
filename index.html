@@ -206,7 +206,13 @@
                 <el-card class="project-card" v-if="currentProject">
                     <div slot="header" class="clearfix" style="line-height: 32px;">
                         <span style="font-weight: bold; font-size: 18px;">{{ currentProject.film_name }}</span>
-                        <el-tag size="small" type="success" style="margin-left: 10px">核心冲突: {{ currentProject.script_core_conflict || '无' }}</el-tag>
+                        <br>
+                        <div style="vertical-align: middle; margin-top: 5px;">
+                            <span class="core-conflict-label" style="background-color: #f0f9eb; color: #67c23a; padding: 4px 10px; border-radius: 4px; font-size: 12px; display: inline-block; white-space: normal; word-break: break-all; line-height: 1.5;">
+                                核心冲突: {{ currentProject.script_core_conflict || '无' }}
+                            </span>
+                        </div>
+                        <br>
                         <div class="header-actions">
                             <el-button type="text" icon="el-icon-film" style="color: #E6A23C;" @click="exportJianyingDraft">导出剪映草稿</el-button>
                             <el-button type="text" icon="el-icon-edit" @click="openEditProject">编辑详情</el-button>
