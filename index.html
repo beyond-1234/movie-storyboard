@@ -472,10 +472,12 @@
                                 <el-table-column label="元素" width="200">
                                     <template slot-scope="scope">
                                         <div v-if="scope.row.elements && scope.row.elements.length">
-                                            <el-tag v-for="element in scope.row.elements" :key="element.id" size="mini" closable
-                                                @close="removeElement(scope.row, element)">
-                                                {{ element.name }}
-                                            </el-tag>
+                                            <div v-for="element in scope.row.elements" :key="element.id" style="display: inline-block; margin-right: 8px; margin-bottom: 5px; position: relative;">
+                                                <div style="width: 40px; height: 40px; border: 1px solid #eee; border-radius: 4px; overflow: hidden; cursor: pointer;" >
+                                                    <el-image :src="element.image_url" fit="cover" style="width: 100%; height: 100%;" :preview-src-list="[element.image_url]"></el-image>
+                                                </div>
+                                                <i class="el-icon-close" style="position: absolute; top: -5px; right: -5px; color: red; background: white; border-radius: 50%; padding: 2px; cursor: pointer; font-size: 12px;" @click="removeElement(scope.row, element)"></i>
+                                            </div>
                                             <el-button type="text" size="mini" icon="el-icon-plus" @click="addElement(scope.row)">添加元素</el-button>
                                         </div>
                                         <div v-else>
@@ -905,10 +907,13 @@
 
                 <el-form-item label="元素列表">
                     <div style="margin-bottom: 10px;">
-                        <el-tag v-for="element in fusionForm.elements" :key="element.id" size="medium" closable
-                            @close="removeElement(fusionForm, element)" style="margin-right: 8px; margin-bottom: 8px;">
-                            {{ element.name }}
-                        </el-tag>
+                        <div v-for="element in fusionForm.elements" :key="element.id" style="display: inline-block; margin-right: 8px; margin-bottom: 8px; position: relative;">
+                            <div style="width: 60px; height: 60px; border: 1px solid #eee; border-radius: 4px; overflow: hidden; cursor: pointer;">
+                                <el-image :src="element.image_url" fit="cover" style="width: 100%; height: 100%;" :preview-src-list="[element.image_url]"></el-image>
+                            </div>
+                            <div style="text-align: center; margin-top: 4px; font-size: 12px; color: #666;">{{ element.name }}</div>
+                            <i class="el-icon-close" style="position: absolute; top: -5px; right: -5px; color: red; background: white; border-radius: 50%; padding: 2px; cursor: pointer; font-size: 12px;" @click="removeElement(fusionForm, element)"></i>
+                        </div>
                         <el-button type="text" size="small" icon="el-icon-plus" @click="addElement(fusionForm)">添加新元素</el-button>
                     </div>
                 </el-form-item>
@@ -961,6 +966,12 @@
                         :loading="generatingElement">
                         生成图片
                     </el-button>
+                    <div v-if="elementForm.image_url" style="margin-top: 15px;">
+                        <div style="font-size: 14px; margin-bottom: 8px;">预览:</div>
+                        <div style="width: 100px; height: 100px; border: 1px dashed #dcdfe6; border-radius: 4px; overflow: hidden; display: inline-block;">
+                            <el-image :src="elementForm.image_url" fit="cover" style="width: 100%; height: 100%;"></el-image>
+                        </div>
+                    </div>
                 </el-form-item>
 
                 <!-- 选择角色 -->
