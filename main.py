@@ -626,6 +626,58 @@ def upload_character_image():
     return jsonify({'success': False, 'error': '不支持的文件类型'}), 400
 
 
+@app.route('/api/upload/scene_image', methods=['POST'])
+def upload_scene_image():
+    """上传场景图片"""
+    try:
+        # 检查是否有文件
+        if 'file' not in request.files:
+            return jsonify({'success': False, 'error': '没有文件'}), 400
+        
+        file = request.files['file']
+        if file.filename == '':
+            return jsonify({'success': False, 'error': '没有选择文件'}), 400
+
+        # scene_id 可能在 form 或者 json 中
+        scene_id = request.form.get('scene_id')
+        if not scene_id:
+            return jsonify({'success': False, 'error': '缺少 scene_id 参数'}), 400
+
+        # 检查文件类型
+        if not allowed_file(file.filename):
+            return jsonify({'success': False, 'error': '不支持的文件类型，仅支持 png, jpg, jpeg, gif, bmp'}), 400
+
+        # 生成唯一文件名
+        ext = os.path.splitext(file.filename)[1].lower()
+        if not ext:
+            ext = '.png'  # 默认扩展名
+        
+        filename = f"scene_{scene_id}_{uuid.uuid4().hex[:8]}{ext}"
+
+        # 确保目录存在
+        save_dir = os.path.join(STATIC_FOLDER, IMG_SAVE_DIR)
+        os.makedirs(save_dir, exist_ok=True)
+
+        # 保存文件
+        file_path = os.path.join(save_dir, filename)
+        file.save(file_path)
+
+        # 验证文件确实保存成功
+        if not os.path.exists(file_path):
+            return jsonify({'success': False, 'error': '文件保存失败'}), 500
+
+        # 返回文件URL
+        file_url = f"/{IMG_SAVE_DIR}/{filename}"
+        
+        return jsonify({'success': True, 'url': file_url})
+
+    except Exception as e:
+        import traceback
+        error_trace = traceback.format_exc()
+        print(f"Scene image upload error: {error_trace}")
+        return jsonify({'success': False, 'error': f'上传失败: {str(e)}'}), 500
+
+
 def allowed_file(filename):
     """检查文件类型是否允许"""
     ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'bmp'}

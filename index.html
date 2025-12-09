@@ -377,8 +377,9 @@
                                 <el-table-column prop="scene_prompt" label="场景提示词" min-width="200"></el-table-column>
                                 <el-table-column label="场景图片" width="120">
                                     <template slot-scope="scope">
-                                        <el-image v-if="scope.row.scene_image" :src="scope.row.scene_image" style="width: 80px; height: 60px; object-fit: cover;" :preview-src-list="[scope.row.scene_image]"></el-image>
-                                        <span v-else style="color: #999;">暂无图片</span>
+                                        <div v-if="scope.row.scene_image" style="position: relative;">
+                                            <el-image :src="scope.row.scene_image" :preview-src-list="[scope.row.scene_image]" fit="contain"></el-image>
+                                        </div>
                                     </template>
                                 </el-table-column>
                                 <el-table-column prop="characters" label="出席人物" width="150">
@@ -391,6 +392,7 @@
                                         <el-button type="text" size="small" icon="el-icon-edit" @click="openEditScene(scope.row)">编辑</el-button>
                                         <el-button type="text" size="small" icon="el-icon-magic-stick" @click="generateScenePrompt(scope.row)">生成提示词</el-button>
                                         <el-button type="text" size="small" icon="el-icon-picture" @click="generateSceneImage(scope.row)">生成图片</el-button>
+                                        <el-button type="text" size="small" icon="el-icon-picture" @click="uploadSceneImage(scope.row)">替换图片</el-button>
                                     </template>
                                 </el-table-column>
                             </el-table>
@@ -704,9 +706,6 @@
                     <div v-if="sceneForm.scene_image" style="margin-bottom: 10px;">
                         <el-image :src="sceneForm.scene_image" style="width: 200px; height: 150px; object-fit: cover;" :preview-src-list="[sceneForm.scene_image]"></el-image>
                     </div>
-                    <el-upload action="/api/upload" :show-file-list="false" :on-success="handleSceneImageSuccess">
-                        <el-button size="small" type="primary">上传图片</el-button>
-                    </el-upload>
                 </el-form-item>
             </el-form>
             <span slot="footer" class="dialog-footer"><el-button icon="el-icon-close" @click="sceneDialogVisible = false">取 消</el-button><el-button type="primary" icon="el-icon-check" @click="submitScene">确 定</el-button></span>
@@ -1545,6 +1544,25 @@
                         this.$message.error(res.error || '上传失败');
                     }
                 },
+                handleSceneImageUploadSuccess(res, scene) {
+                    if(res.success) {
+                        // 更新分镜数据中的场景图片
+                        this.request('PUT', `/api/projects/${this.currentProjectId}/shots/${scene.id}`, {
+                            scene_image: res.url
+                        }).then(() => {
+                            const idx = this.shotList.findIndex(s => s.id === scene.id);
+                            if (idx !== -1) {
+                                this.$set(this.shotList, idx, { ...this.shotList[idx], scene_image: res.url });
+                            }
+                            this.$message.success('场景图片上传成功');
+                        }).catch(e => {
+                            console.error(e);
+                            this.$message.error('更新场景图片失败');
+                        });
+                    } else {
+                        this.$message.error(res.error || '图片上传失败');
+                    }
+                },
                 getCharacterName(id) {
                     const char = this.characterList.find(c => c.id === id);
                     return char ? char.name : '未知角色';
@@ -1647,6 +1665,56 @@
                         } catch (e) {
                             console.error(e);
                             this.$message.error('图片上传失败');
+                        } finally {
+                            this.stopGlobalLoading();
+                        }
+                    };
+                    input.click();
+                },
+                // 上传场景图片
+                uploadSceneImage(scene) {
+                    const input = document.createElement('input');
+                    input.type = 'file';
+                    input.accept = 'image/*';
+                    input.onchange = async (e) => {
+                        const file = e.target.files[0];
+                        if (!file) return;
+
+                        if (!this.beforeImageUpload(file)) return;
+
+                        const formData = new FormData();
+                        formData.append('file', file);
+                        debugger;
+                        formData.append('scene_id', scene.id);
+
+                        try {
+                            this.startGlobalLoading('上传图片...', '请稍候');
+
+                            const res = await this.request('POST', '/api/upload/scene_image', formData, {
+                                headers: {
+                                    'Content-Type': 'multipart/form-data'
+                                }
+                            });
+
+                            if (res.success) {
+                                // 更新场景图片
+                                await this.request('PUT', `/api/projects/${this.currentProjectId}/shots/${scene.id}`, {
+                                    scene_image: res.url
+                                });
+
+                                // 更新本地数据
+                                const idx = this.shotList.findIndex(s => s.id === scene.id);
+                                if (idx !== -1) {
+                                    this.$set(this.shotList, idx, { ...this.shotList[idx], scene_image: res.url });
+                                }
+
+                                this.$message.success('场景图片上传成功');
+                            } else {
+                                this.$message.error(res.error || '图片上传失败');
+                            }
+                        } catch (e) {
+                            console.error('Upload error:', e);
+                            this.$message.error('图片上传失败: ' + (e.response?.data?.error || e.message));
                         } finally {
                             this.stopGlobalLoading();
                         }
