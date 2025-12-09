@@ -422,7 +422,7 @@
                             <!-- 融图生成配置 -->
                             <div style="margin-bottom: 15px; background: #f5f7fa; padding: 10px; border-radius: 4px;">
                                 <div style="display:flex; align-items:center; gap: 15px;">
-                                    <span style="font-size:13px; color:#606266; font-weight:bold;">图片融合模型:</span>
+                                    <span style="font-size:13px; color:#606266; font-weight:bold;">图片生成模型:</span>
                                     <el-select v-model="genOptions.imageProviderId" size="mini" placeholder="供应商" style="width: 120px;" @change="updateImageModelDefault">
                                         <el-option v-for="p in providers" :key="p.id" :label="p.name" :value="p.id"></el-option>
                                     </el-select>
@@ -438,6 +438,7 @@
                                 <div><span style="margin-right: 20px;">共 {{ fusionList.length }} 个融图任务</span>
                                     <el-button type="danger" size="small" icon="el-icon-delete" plain :disabled="multipleFusionSelection.length === 0" @click="deleteSelectedFusions">批量删除</el-button>
                                     <el-button type="success" size="small" icon="el-icon-copy-document" @click="copyFromScenes">从场景列表复制数据</el-button>
+                                    <el-button type="warning" size="small" icon="el-icon-magic-stick" @click="batchGenerateFusionPrompts">批量生成提示词</el-button>
                                 </div>
                                 <div>
                                     <el-button type="primary" size="small" icon="el-icon-plus" @click="openCreateFusion">添加融图任务</el-button>
@@ -445,28 +446,33 @@
                             </div>
 
                             <!-- 任务列表 -->
-                            <el-table :data="fusionList" border stripe style="width: 100%" v-loading="loadingFusions" @selection-change="handleFusionSelectionChange" row-key="id">
-                                <el-table-column type="selection" width="55"></el-table-column>
-                                <el-table-column prop="scene" label="场次" width="80"></el-table-column>
-                                <el-table-column prop="shot_number" label="镜号" width="80"></el-table-column>
-                                <el-table-column label="场景说明" width="200">
+                            <el-table :data="fusionList" border stripe style="width: 100%" v-loading="loadingFusions"
+                                @selection-change="handleFusionSelectionChange" row-key="id">
+                                <el-table-column type="selection" width="40"></el-table-column>
+                                <el-table-column prop="scene" label="场次" width="60"></el-table-column>
+                                <el-table-column prop="shot_number" label="镜号" width="60"></el-table-column>
+                                <el-table-column label="场景说明" width="150">
                                     <template slot-scope="scope">
-                                        {{ scope.row.scene_description || "无" }}
+                                            <div >
+                                                {{ scope.row.scene_description || "无" }}
+                                            </div>
                                     </template>
                                 </el-table-column>
                                 <el-table-column label="分镜描述" width="200">
                                     <template slot-scope="scope">
-                                        <div><strong>画面:</strong> {{ scope.row.visual_description }}</div>
+                                                <div><strong>画面:</strong> {{ scope.row.visual_description }}</div>
                                         <div style="margin-top: 5px; color: #409EFF;"><i class="el-icon-microphone"></i> {{ scope.row.dialogue }}</div>
                                         <div style="margin-top: 5px; color: #666;"><strong>声音:</strong> {{ scope.row.audio_description }}</div>
                                     </template>
                                 </el-table-column>
-                                <el-table-column label="基础图片 (底图)" width="150">
+                                <el-table-column label="基础图片 (底图)" width="120">
                                     <template slot-scope="scope">
-                                        <div v-if="scope.row.base_image" style="position: relative; width: 100px; height: 70px; background: #f0f0f0; display: flex; align-items: center; justify-content: center; border-radius: 4px; overflow: hidden;">
-                                            <el-image :src="scope.row.base_image" :preview-src-list="[scope.row.base_image]" fit="cover" style="width: 100%; height: 100%;"></el-image>
+                                        <div v-if="scope.row.base_image"
+                                            style="position: relative; width: 80px; height: 80px; background: #f0f0f0; display: flex; align-items: center; justify-content: center; border-radius: 4px; overflow: hidden; margin: 0 auto;">
+                                            <el-image :src="scope.row.base_image" :preview-src-list="[scope.row.base_image]" fit="cover"
+                                                style="width: 100%; height: 100%;"></el-image>
                                         </div>
-                                        <div v-else style="color: #ccc; font-size: 12px;">未设置</div>
+                                        <div v-else style="color: #ccc; font-size: 12px; text-align: center;">未设置</div>
                                     </template>
                                 </el-table-column>
                                 <el-table-column label="元素" width="200">
@@ -476,7 +482,7 @@
                                                 <div style="width: 80px; height: 80px; border: 1px solid #eee; border-radius: 4px; overflow: hidden; cursor: pointer; display: flex; align-items: center; justify-content: center; background-color: #f5f7fa;" @click="element.image_url ? previewImage(element.image_url) : $message.warning('该角色暂无设计图')">
                                                     <el-image v-if="element.image_url" :src="element.image_url" fit="cover" style="width: 100%; height: 100%;" :preview-src-list="[element.image_url]"></el-image>
                                                     <i v-else class="el-icon-user-solid" style="font-size: 20px; color: #c0c4cc;"></i>
-                                                </div>
+                                            </div>
                                                 <div style="text-align: center; margin-top: 2px; font-size: 10px; color: #666; max-width: 40px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">{{ element.name }}</div>
                                                 <i class="el-icon-close" style="position: absolute; top: -5px; right: -5px; color: red; background: white; border-radius: 50%; padding: 2px; cursor: pointer; font-size: 12px;" @click="removeElement(scope.row, element)"></i>
                                             </div>
@@ -487,24 +493,34 @@
                                         </div>
                                     </template>
                                 </el-table-column>
-                                <el-table-column label="融合提示词" prop="fusion_prompt">
+                                <el-table-column label="融合提示词" prop="fusion_prompt" min-width="250">
                                     <template slot-scope="scope">
-                                        {{ scope.row.fusion_prompt || '未设置' }}
+                                            <div
+                                                style="white-space: normal;  ">
+                                                {{ scope.row.fusion_prompt || '未设置' }}
+                                            </div>
                                     </template>
                                 </el-table-column>
-                                <el-table-column label="结果图片" width="150">
+                                <el-table-column label="结果图片" width="120">
                                     <template slot-scope="scope">
-                                        <div v-if="scope.row.result_image" style="position: relative; width: 100px; height: 70px; background: #f0f0f0; display: flex; align-items: center; justify-content: center; border-radius: 4px; overflow: hidden;">
-                                            <el-image :src="scope.row.result_image" :preview-src-list="[scope.row.result_image]" fit="cover" style="width: 100%; height: 100%;"></el-image>
+                                        <div v-if="scope.row.result_image"
+                                            style="position: relative; width: 80px; height: 50px; background: #f0f0f0; display: flex; align-items: center; justify-content: center; border-radius: 4px; overflow: hidden; margin: 0 auto;">
+                                            <el-image :src="scope.row.result_image" :preview-src-list="[scope.row.result_image]" fit="cover"
+                                                style="width: 100%; height: 100%;"></el-image>
                                         </div>
-                                        <div v-else style="color: #ccc; font-size: 12px;">未生成</div>
+                                        <div v-else style="color: #ccc; font-size: 12px; text-align: center;">未生成</div>
                                     </template>
                                 </el-table-column>
-                                <el-table-column label="操作" width="220" fixed="right">
+                                <el-table-column label="操作" width="180" fixed="right">
                                     <template slot-scope="scope">
-                                        <el-tooltip content="编辑任务" placement="top"><el-button size="mini" icon="el-icon-edit" circle @click="editFusion(scope.row)"></el-button></el-tooltip>
-                                        <el-tooltip content="生成融合图" placement="top"><el-button size="mini" type="success" icon="el-icon-magic-stick" circle plain @click="generateFusionImage(scope.row)"></el-button></el-tooltip>
-                                        <el-tooltip content="删除" placement="top"><el-button size="mini" type="danger" icon="el-icon-delete" circle plain @click="deleteFusion(scope.row)"></el-button></el-tooltip>
+                                        <el-tooltip content="编辑任务" placement="top"><el-button size="mini" icon="el-icon-edit" circle
+                                                @click="editFusion(scope.row)"></el-button></el-tooltip>
+                                        <el-tooltip content="生成提示词" placement="top"><el-button size="mini" type="warning" icon="el-icon-magic-stick" circle
+                                                plain @click="generatePrompt(scope.row)"></el-button></el-tooltip>
+                                        <el-tooltip content="生成融合图" placement="top"><el-button size="mini" type="success" icon="el-icon-picture"
+                                                circle plain @click="generateFusionImage(scope.row)"></el-button></el-tooltip>
+                                        <el-tooltip content="删除" placement="top"><el-button size="mini" type="danger" icon="el-icon-delete" circle
+                                                plain @click="deleteFusion(scope.row)"></el-button></el-tooltip>
                                     </template>
                                 </el-table-column>
                             </el-table>
@@ -930,7 +946,10 @@
             </el-form>
             <div slot="footer" class="dialog-footer">
                 <el-button @click="fusionDialogVisible = false">取 消</el-button>
-                <el-button type="warning" icon="el-icon-magic-stick" :disabled="!fusionForm.base_image || !fusionForm.fusion_prompt" @click="generateFusionImage(fusionForm)">生成融合图</el-button>
+                <el-button type="warning" icon="el-icon-magic-stick" @click="generateFusionPrompt(fusionForm)">
+                    生成提示词
+                </el-button>
+                <el-button type="warning" icon="el-icon-picture" :disabled="!fusionForm.base_image || !fusionForm.fusion_prompt" @click="generateFusionImage(fusionForm)">生成融合图</el-button>
                 <el-button type="primary" @click="saveFusion">保 存</el-button>
             </div>
         </el-dialog>
@@ -2517,7 +2536,153 @@
                         this.generatingElement = false;
                     }
                 },
+                async generateFusionPrompt(fusion) {
+                    if (!fusion.scene_description && !fusion.visual_description) {
+                        this.$message.warning('请先从分镜列表复制数据或在编辑任务中手动补充场景和分镜描述');
+                        return;
+                    }
+                    
+                    if (!this.genOptions.textProviderId || !this.genOptions.textModelName) {
+                        this.$message.warning('请先在顶部选择文本生成模型');
+                        return;
+                    }
 
+                    this.startGlobalLoading('生成融图提示词...', 'AI 正在分析分镜和场景信息');
+                    try {
+                        // 1. 确保任务有 ID，否则先保存
+                        if (!fusion.id) {
+                            const savedFusion = await this.saveFusionData(fusion);
+                            // 将引用更新为已保存的任务对象
+                            Object.assign(fusion, savedFusion);
+                        }
+
+                        // 2. 接口请求
+                        const res = await this.request('POST', '/api/generate/fusion_prompt', {
+                            scene_description: fusion.scene_description || '',
+                            shot_description: fusion.visual_description || '',
+                            project_id: this.currentProjectId,
+                            provider_id: this.genOptions.textProviderId,
+                            model_name: this.genOptions.textModelName
+                        }, { signal: this.currentAbortController.signal });
+
+                        if (res.success) {
+                            const newPrompt = res.prompt;
+                            
+                            // 3. 更新后端数据
+                            await this.request('PUT', `/api/projects/${this.currentProjectId}/fusions/${fusion.id}`, {
+                                fusion_prompt: newPrompt
+                            });
+
+                            // 4. 更新本地 Vue 数据
+                            fusion.fusion_prompt = newPrompt;
+                            const idx = this.fusionList.findIndex(f => f.id === fusion.id);
+                            if(idx !== -1) {
+                                this.$set(this.fusionList, idx, { ...this.fusionList[idx], fusion_prompt: newPrompt });
+                            }
+                            
+                            this.$message.success('融图提示词生成成功');
+                        } else {
+                            throw new Error(res.error || '生成失败');
+                        }
+                        
+                    } catch(e) {
+                        if (e.message !== '已取消') {
+                            console.error('生成融图提示词失败', e);
+                            this.$message.error('生成融图提示词失败');
+                        }
+                    } finally {
+                        this.stopGlobalLoading();
+                    }
+                },
+                async batchGenerateFusionPrompts() {
+                    if (this.multipleFusionSelection.length === 0) {
+                        this.$message.warning('请先在列表中勾选要生成提示词的任务');
+                        return;
+                    }
+                    
+                    if (!this.genOptions.textProviderId || !this.genOptions.textModelName) {
+                        this.$message.warning('请先在顶部选择文本生成模型');
+                        return;
+                    }
+                    
+                    // 筛选出已选中且缺少提示词的任务
+                    const tasks = this.multipleFusionSelection.filter(f => !f.fusion_prompt || f.fusion_prompt.trim() === '');
+                    
+                    if (tasks.length === 0) {
+                        this.$message.info('选中的任务都已有提示词，无需生成');
+                        return;
+                    }
+
+                    const total = tasks.length;
+                    let successCount = 0;
+                    let failCount = 0;
+
+                    this.startGlobalLoading(`批量生成融图提示词... (0/${total})`, `共 ${total} 个任务，请勿关闭页面`);
+
+                    for (let i = 0; i < total; i++) {
+                        const fusion = tasks[i];
+                        this.loadingTitle = `正在处理第 ${i + 1}/${total} 个融图提示词...`;
+                        
+                        try {
+                            if (this.currentAbortController.signal.aborted) break;
+                            
+                            // 1. 确保任务有 ID，否则先保存
+                            if (!fusion.id) {
+                                const savedFusion = await this.saveFusionData(fusion);
+                                Object.assign(fusion, savedFusion); 
+                            }
+                            
+                            // 检查是否有描述信息
+                            if (!fusion.scene_description && !fusion.visual_description) {
+                                console.warn(`融图任务 ${fusion.shot_number} 缺少描述，跳过`);
+                                failCount++;
+                                continue;
+                            }
+
+                            // 2. 接口请求
+                            const res = await this.request('POST', '/api/generate/fusion_prompt', {
+                                scene_description: fusion.scene_description || '',
+                                shot_description: fusion.visual_description || '',
+                                project_id: this.currentProjectId,
+                                provider_id: this.genOptions.textProviderId,
+                                model_name: this.genOptions.textModelName
+                            }, { signal: this.currentAbortController.signal });
+
+                            if (res.success) {
+                                const newPrompt = res.prompt;
+                                
+                                // 3. 更新后端数据
+                                await this.request('PUT', `/api/projects/${this.currentProjectId}/fusions/${fusion.id}`, {
+                                    fusion_prompt: newPrompt
+                                });
+                                
+                                // 4. 更新本地 Vue 数据
+                                fusion.fusion_prompt = newPrompt;
+                                const idx = this.fusionList.findIndex(f => f.id === fusion.id);
+                                if(idx !== -1) {
+                                    this.$set(this.fusionList, idx, { ...this.fusionList[idx], fusion_prompt: newPrompt });
+                                }
+
+                                successCount++;
+                            } else {
+                                throw new Error(res.error || '生成失败');
+                            }
+                            
+                            // 短暂延迟，避免API限流
+                            await new Promise(resolve => setTimeout(resolve, 500));
+                            
+                        } catch (e) {
+                            console.error(`融图提示词生成失败 task ${fusion.shot_number}:`, e);
+                            failCount++;
+                        }
+                    }
+                    
+                    this.stopGlobalLoading();
+                    this.$message({ 
+                        type: failCount === 0 ? 'success' : 'warning', 
+                        message: `批量任务完成！成功: ${successCount}, 失败: ${failCount}` 
+                    });
+                },
                 // 提交元素
                 async submitElement() {
                     if (!this.elementForm.name) {

@@ -1030,6 +1030,59 @@ def upload_base_image():
     file.save(path)
     return jsonify({'success': True, 'url': f"/{IMG_SAVE_DIR}/{filename}"})
 
+@app.route('/api/generate/fusion_prompt', methods=['POST'])
+def generate_fusion_prompt():
+    """生成融图提示词"""
+    data = request.json
+    scene_description = data.get('scene_description')
+    shot_description = data.get('shot_description')
+    project_id = data.get('project_id')
+    provider_id = data.get('provider_id')
+    model_name = data.get('model_name')
+
+    if not scene_description:
+        return jsonify({'success': False, 'error': '场景描述不能为空'}), 400
+
+    # 获取配置
+    config = get_provider_config(provider_id)
+    if model_name:
+        config['model_name'] = model_name
+
+    # 获取项目信息
+    project_info = {}
+    if project_id:
+        project_info = read_json(os.path.join(get_project_path(project_id), 'info.json'), default={})
+
+    # 构建系统提示词
+    sys = "你是一个专业的电影分镜设计师。请根据场景描述生成详细的场景及人物和元素图片融合的提示词，用于AI图片融合"
+    
+    # 构建用户提示词，包含场景描述和项目信息
+    user_prompt = f"""场景描述：{scene_description} 分镜描述：{shot_description}
+
+请生成一个详细的融合图片提示词，必须包含以下元素：人物、场景、人物展位、人物朝向、姿态、景别、视角、构图、时间、氛围、人物表情
+例如：人物+场景：1个人物:人物/角色在某场景中所处相对位置，做什么，什么表情/情绪，做什么，额外可对场景增加提示词描述改变场景状态，如光线、夜晚
+两个人物:描述两个人物在场景中所处的相对位置，如棕色衣服小男孩如何，红色衣服女人如何，在场景中做什么互动
+人物+场景+物品+特效：人物/角色在场景中，拿着具体什么物品做什么动作，或描述物品/效果出现的位置
+
+请直接返回提示词内容，不要包含其他解释或说明。"""
+
+    # 如果有项目信息，添加到提示词中
+    if project_info:
+        color_system = project_info.get('visual_color_system', '')
+        
+        if color_system:
+            user_prompt += f"\n\n色彩体系要求：{color_system}"
+
+    msgs = [{'role': 'system', 'content': sys}, {'role': 'user', 'content': user_prompt}]
+
+    result = ai_service.run_text_generation(msgs, config)
+
+    if result.get('success'):
+        return jsonify({'success': True, 'prompt': result['content']})
+    else:
+        return jsonify({'success': False, 'error': result.get('error', '生成失败')}), 500
+    
+    
 if __name__ == '__main__':
     ensure_dirs()
     print(f"Server started on http://127.0.0.1:5000")
