@@ -706,6 +706,19 @@
                     <div v-if="sceneForm.scene_image" style="margin-bottom: 10px;">
                         <el-image :src="sceneForm.scene_image" style="width: 200px; height: 150px; object-fit: cover;" :preview-src-list="[sceneForm.scene_image]"></el-image>
                     </div>
+                    <div v-else>
+                        <div style="margin-bottom: 10px; color: #999;">暂无场景图片</div>
+                    </div>
+                    <div class="action-buttons">
+                        <el-button type="primary" size="small"  @click="handleSceneImageUpload">
+                            <i class="el-icon-upload2"></i>
+                            上传场景图片
+                        </el-button>
+                        <el-button type="success" size="small" @click="handleSceneImageGenerate">
+                            <i class="el-icon-magic-stick"></i>
+                            AI生成场景图片
+                        </el-button>
+                    </div>
                 </el-form-item>
             </el-form>
             <span slot="footer" class="dialog-footer"><el-button icon="el-icon-close" @click="sceneDialogVisible = false">取 消</el-button><el-button type="primary" icon="el-icon-check" @click="submitScene">确 定</el-button></span>
@@ -1501,7 +1514,7 @@
                     }
                     this.sceneDialogVisible = false;
                 },
-                async generateSceneImage(shot) {
+                async generateSceneImage(shot, updateForm = false) {
                     if(!shot.scene_prompt) {
                         this.$message.error('请先设置场景提示词');
                         return;
@@ -1516,6 +1529,11 @@
                             model_name: this.genOptions.imageModelName
                         }, { signal: this.currentAbortController.signal });
                         if(result.success) {
+                            // 如果需要更新表单，则更新表单中的图片
+                            if (updateForm && this.sceneForm && this.sceneForm.id === shot.id) {
+                                this.sceneForm.scene_image = result.url;
+                            }
+
                             // 更新分镜数据中的场景图片
                             await this.request('PUT', `/api/projects/${this.currentProjectId}/shots/${shot.id}`, {
                                 scene_image: result.url
@@ -1562,6 +1580,28 @@
                     } else {
                         this.$message.error(res.error || '图片上传失败');
                     }
+                },
+                // 处理场景编辑对话框中的图片上传
+                handleSceneImageUpload() {
+                    // 确保场景已保存，有ID
+                    if (!this.sceneForm.id) {
+                        this.$message.warning('请先保存场景信息');
+                        return;
+                    }
+
+                    // 调用原有的上传函数，传入updateForm=true参数以更新表单
+                    this.uploadSceneImage(this.sceneForm, true);
+                },
+                // 处理场景编辑对话框中的图片生成
+                handleSceneImageGenerate() {
+                    // 确保场景已保存，有ID
+                    if (!this.sceneForm.id) {
+                        this.$message.warning('请先保存场景信息');
+                        return;
+                    }
+
+                    // 调用原有的生成函数，传入updateForm=true参数以更新表单
+                    this.generateSceneImage(this.sceneForm, true);
                 },
                 getCharacterName(id) {
                     const char = this.characterList.find(c => c.id === id);
@@ -1672,7 +1712,7 @@
                     input.click();
                 },
                 // 上传场景图片
-                uploadSceneImage(scene) {
+                uploadSceneImage(scene, updateForm = false) {
                     const input = document.createElement('input');
                     input.type = 'file';
                     input.accept = 'image/*';
@@ -1684,7 +1724,6 @@
 
                         const formData = new FormData();
                         formData.append('file', file);
-                        debugger;
                         formData.append('scene_id', scene.id);
 
                         try {
@@ -1697,6 +1736,11 @@
                             });
 
                             if (res.success) {
+                                // 如果需要更新表单，则更新表单中的图片
+                                if (updateForm && this.sceneForm && this.sceneForm.id === scene.id) {
+                                    this.sceneForm.scene_image = res.url;
+                                }
+
                                 // 更新场景图片
                                 await this.request('PUT', `/api/projects/${this.currentProjectId}/shots/${scene.id}`, {
                                     scene_image: res.url
