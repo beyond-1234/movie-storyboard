@@ -422,14 +422,14 @@
                             <!-- 融图生成配置 -->
                             <div style="margin-bottom: 15px; background: #f5f7fa; padding: 10px; border-radius: 4px;">
                                 <div style="display:flex; align-items:center; gap: 15px;">
-                                    <span style="font-size:13px; color:#606266; font-weight:bold;">图片生成模型:</span>
+                                    <span style="font-size:13px; color:#606266; font-weight:bold;">元素图片生成模型:</span>
                                     <el-select v-model="genOptions.imageProviderId" size="mini" placeholder="供应商" style="width: 120px;" @change="updateImageModelDefault">
                                         <el-option v-for="p in providers" :key="p.id" :label="p.name" :value="p.id"></el-option>
                                     </el-select>
                                     <el-select v-model="genOptions.imageModelName" size="mini" placeholder="模型" style="width: 150px;">
                                         <el-option v-for="m in availableImageModels" :key="m.name" :label="m.name" :value="m.name"></el-option>
                                     </el-select>
-                                    <div style="font-size: 12px; color: #E6A23C; margin-left: 10px;"><i class="el-icon-info"></i> 提示：推荐使用支持图生图的模型 (如 Wanx)</div>
+                                    <div style="font-size: 12px; color: #E6A23C; margin-left: 10px;"> </div>
                                 </div>
                                 
                                 <div style="display:flex; align-items:center; gap: 15px; margin-top: 10px;">
@@ -440,7 +440,7 @@
                                     <el-select v-model="genOptions.fusionModelName" size="mini" placeholder="模型" style="width: 150px;">
                                         <el-option v-for="m in availableFusionModels" :key="m.name" :label="m.name" :value="m.name"></el-option>
                                     </el-select>
-                                    <div style="font-size: 12px; color: #E6A23C; margin-left: 10px;"><i class="el-icon-info"></i> 提示：用于生成融合图的模型</div>
+                                    <div style="font-size: 12px; color: #E6A23C; margin-left: 10px;"><i class="el-icon-info"></i> 提示：推荐使用支持图生图的模型 (如 Wanx)</div>
                                 </div>
                             </div>
 
@@ -458,10 +458,10 @@
 
                             <!-- 任务列表 -->
                             <el-table :data="fusionList" border stripe style="width: 100%" v-loading="loadingFusions" @selection-change="handleFusionSelectionChange" row-key="id">
-                                <el-table-column type="selection" width="55"></el-table-column>
-                                <el-table-column prop="scene" label="场次" width="80"></el-table-column>
-                                <el-table-column prop="shot_number" label="镜号" width="80"></el-table-column>
-                                <el-table-column label="场景说明" width="200">
+                                <el-table-column type="selection" width="40"></el-table-column>
+                                <el-table-column prop="scene" label="场次" width="60"></el-table-column>
+                                <el-table-column prop="shot_number" label="镜号" width="60"></el-table-column>
+                                <el-table-column label="场景说明" width="150">
                                     <template slot-scope="scope">
                                                 {{ scope.row.scene_description || "无" }}
                                     </template>
@@ -473,7 +473,7 @@
                                         <div style="margin-top: 5px; color: #666;"><strong>声音:</strong> {{ scope.row.audio_description }}</div>
                                     </template>
                                 </el-table-column>
-                                <el-table-column label="基础图片 (底图)" width="150">
+                                <el-table-column label="基础图片 (底图)" width="120">
                                     <template slot-scope="scope">
                                         <div v-if="scope.row.base_image" style="position: relative; width: 100px; height: 70px; background: #f0f0f0; display: flex; align-items: center; justify-content: center; border-radius: 4px; overflow: hidden;">
                                             <el-image :src="scope.row.base_image" :preview-src-list="[scope.row.base_image]" fit="cover" style="width: 100%; height: 100%;"></el-image>
@@ -499,7 +499,7 @@
                                         </div>
                                     </template>
                                 </el-table-column>
-                                <el-table-column label="融合提示词" prop="fusion_prompt">
+                                <el-table-column label="融合提示词" prop="fusion_prompt" min-width="250">
                                     <template slot-scope="scope">
                                                 {{ scope.row.fusion_prompt || '未设置' }}
                                     </template>
@@ -512,11 +512,11 @@
                                         <div v-else style="color: #ccc; font-size: 12px;">未生成</div>
                                     </template>
                                 </el-table-column>
-                                <el-table-column label="操作" width="250" fixed="right">
+                                <el-table-column label="操作" fixed="right">
                                     <template slot-scope="scope">
                                         <el-tooltip content="编辑任务" placement="top"><el-button size="mini" icon="el-icon-edit" circle @click="editFusion(scope.row)"></el-button></el-tooltip>
-                                        <el-tooltip content="生成提示词" placement="top"><el-button size="mini" type="warning" icon="el-icon-edit" circle plain @click="generatePrompt(scope.row)"></el-button></el-tooltip>
-                                        <el-tooltip content="生成融合图" placement="top"><el-button size="mini" type="success" icon="el-icon-magic-stick" circle plain @click="generateFusionImage(scope.row)"></el-button></el-tooltip>
+                                        <el-tooltip content="生成提示词" placement="top"><el-button size="mini" type="warning" icon="el-icon-magic-stick" circle plain @click="generatePrompt(scope.row)"></el-button></el-tooltip>
+                                        <el-tooltip content="生成融合图" placement="top"><el-button size="mini" type="success" icon="el-icon-picture" circle plain @click="generateFusionImage(scope.row)"></el-button></el-tooltip>
                                         <el-tooltip content="删除" placement="top"><el-button size="mini" type="danger" icon="el-icon-delete" circle plain @click="deleteFusion(scope.row)"></el-button></el-tooltip>
                                     </template>
                                 </el-table-column>
@@ -918,7 +918,7 @@
                 </el-form-item>
                 
                 <el-form-item label="融合提示词" required>
-                    <el-input type="textarea" v-model="fusionForm.fusion_prompt" :rows="3" placeholder="描述你希望图片如何与元素融合以及最终的视觉效果"></el-input>
+                    <el-input type="textarea" v-model="fusionForm.fusion_prompt" :rows="6" placeholder="描述你希望图片如何与元素融合以及最终的视觉效果"></el-input>
                 </el-form-item>
 
                 <el-form-item label="元素列表">
@@ -944,7 +944,10 @@
             </el-form>
             <div slot="footer" class="dialog-footer">
                 <el-button @click="fusionDialogVisible = false">取 消</el-button>
-                <el-button type="warning" icon="el-icon-magic-stick" :disabled="!fusionForm.base_image || !fusionForm.fusion_prompt" @click="generateFusionImage(fusionForm)">生成融合图</el-button>
+                <el-button type="warning" icon="el-icon-magic-stick" @click="generateFusionPrompt(fusionForm)">
+                    生成提示词
+                </el-button>
+                <el-button type="warning" icon="el-icon-picture" :disabled="!fusionForm.base_image || !fusionForm.fusion_prompt" @click="generateFusionImage(fusionForm)">生成融合图</el-button>
                 <el-button type="primary" @click="saveFusion">保 存</el-button>
             </div>
         </el-dialog>
