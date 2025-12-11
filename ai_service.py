@@ -1149,6 +1149,110 @@ class MiniMaxHandler:
         
         return {'success': False, 'error_msg': f'Timeout after {max_wait}s waiting for video generation'}
 
+    @staticmethod
+    def fuse_image(prompt, save_dir, url_prefix, config, base_image_path, ref_image_path_list):
+
+        """
+        MiniMax 图生图 API
+        官方文档: https://platform.minimaxi.com/docs/api-reference/image/generation/api/image-to-image
+        当前只支持角色图生图
+        """
+        api_key = config.get('api_key')
+        model = config.get('model_name', 'image-01')
+        base_url = config.get('base_url', 'https://api.minimaxi.com')
+        
+        if not api_key:
+            return {'success': False, 'error_msg': "MiniMax API key is required"}
+        
+        # 海螺AI支持支角色图生图
+        ref_image_path_list.append(base_image_path)
+        
+        # 转换参考图为 base64
+        subject_references = []
+        for image_path in ref_image_path_list:
+            image_b64 = file_to_base64(image_path)
+            if not image_b64:
+                return {'success': False, 'error_msg': f"Failed to encode reference image {image_path} to base64"}
+            
+            subject_references.append({
+                "type": "character",
+                "image_file": image_b64
+            })
+        
+        # 构建请求参数
+        payload = {
+            "model": model,
+            "prompt": prompt,
+            "subject_reference": subject_references,
+            "response_format": "url",
+            "n": 1
+        }
+        
+        # 添加可选参数
+        if config.get('aspect_ratio'):
+            payload["aspect_ratio"] = config.get('aspect_ratio')
+        elif config.get('width') and config.get('height'):
+            if model == 'image-01':
+                payload["width"] = config.get('width')
+                payload["height"] = config.get('height')
+        
+        if model == 'image-01-live' and config.get('style_type'):
+            payload["style"] = {
+                "style_type": config.get('style_type'),
+                "style_weight": config.get('style_weight', 0.8)
+            }
+        
+        if config.get('seed') is not None:
+            payload["seed"] = config.get('seed')
+        if config.get('prompt_optimizer') is not None:
+            payload["prompt_optimizer"] = config.get('prompt_optimizer')
+        if config.get('aigc_watermark') is not None:
+            payload["aigc_watermark"] = config.get('aigc_watermark')
+        
+        try:
+            url = f"{base_url.rstrip('/')}/v1/image_generation"
+            headers = MiniMaxHandler._get_headers(config)
+            
+            logger.info(f"[MiniMax] Generating image from image with model: {model}, prompt: {prompt[:50]}...")
+            
+            resp = requests.post(url, json=payload, headers=headers, timeout=120)
+            
+            if resp.status_code == 200:
+                data = resp.json()
+                base_resp = data.get('base_resp', {})
+                status_code = base_resp.get('status_code')
+                
+                if status_code == 0:
+                    image_urls = data.get('data', {}).get('image_urls', [])
+                    
+                    if image_urls and len(image_urls) > 0:
+                        img_url = image_urls[0]
+                        fname = f"{uuid.uuid4()}.png"
+                        save_path = os.path.join(save_dir, fname)
+                        
+                        if download_file(img_url, save_path):
+                            logger.info(f"[MiniMax] Image saved to: {save_path}")
+                            return {'success': True, 'url': f"{url_prefix.rstrip('/')}/{fname}"}
+                        else:
+                            logger.warning(f"[MiniMax] Download failed, returning remote URL")
+                            return {'success': True, 'url': img_url}
+                    
+                    return {'success': False, 'error_msg': "No image URL in response"}
+                else:
+                    error_msg = base_resp.get('status_msg', 'Unknown error')
+                    logger.error(f"[MiniMax] API Error {status_code}: {error_msg}")
+                    return {'success': False, 'error_msg': f"API Error ({status_code}): {error_msg}"}
+            else:
+                error_msg = resp.text
+                logger.error(f"[MiniMax] HTTP Error {resp.status_code}: {error_msg}")
+                return {'success': False, 'error_msg': f"HTTP Error ({resp.status_code}): {error_msg}"}
+        
+        except requests.exceptions.Timeout:
+            return {'success': False, 'error_msg': 'Request timeout'}
+        except Exception as e:
+            logger.exception("[MiniMax] Image generation from image failed")
+            return {'success': False, 'error_msg': str(e)}
+
 
 class ZhipuHandler:
     @staticmethod
@@ -1387,7 +1491,7 @@ def run_voice_generation(text, config, save_dir, url_prefix):
     handler = get_handler(config.get('type'))
     return handler.generate_voice(text, save_dir, url_prefix, config)
 
-def run_fusion_generation(base_image_path, fusion_prompt, config, save_dir, url_prefix):
+def run_fusion_generation(base_image_path, fusion_prompt, config, save_dir, url_prefix, element_image_paths):
     """
     融图/图生图逻辑入口
     """
@@ -1395,5 +1499,5 @@ def run_fusion_generation(base_image_path, fusion_prompt, config, save_dir, url_
     handler = get_handler(config.get('type', 'mock'))
     
     # 传入 ref_image_path 参数，Handler 内部会判断是否调用图生图接口
-    result = handler.generate_image(fusion_prompt, save_dir, url_prefix, config, ref_image_path=base_image_path)
+    result = handler.fuse_image(fusion_prompt, save_dir, url_prefix, config, base_image_path, element_image_paths=element_image_paths)
     return result
