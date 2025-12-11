@@ -769,6 +769,7 @@
                                         <el-option label="智谱" value="zai"></el-option>
                                         <el-option label="即梦 (Volcengine)" value="jimeng"></el-option>
                                         <el-option label="ComfyUI (Local)" value="comfyui"></el-option>
+                                        <el-option label="海螺AI" value="minimax"></el-option>
                                         <el-option label="Mock Service" value="mock"></el-option>
                                     </el-select>
                                 </el-form-item>
@@ -1484,6 +1485,7 @@
                     if(type==='zai') return '#5683EE';
                     if(type==='jimeng') return '#FF4500';
                     if(type==='comfyui') return '#3CB371';
+                    if(type==='minimax') return '#FFD700';
                     return '#909399';
                 },
                 async fetchSettings() { try { const list = await this.request('GET', '/api/settings'); this.providers = list; if(list.length) { this.initDefaultSelections(); } } catch(e){} },
