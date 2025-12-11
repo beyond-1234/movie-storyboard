@@ -878,6 +878,278 @@ class JimengHandler:
 
 
 
+class MiniMaxHandler:
+    @staticmethod
+    def _get_headers(config):
+        return {
+            "Authorization": f"Bearer {config.get('api_key')}",
+            "Content-Type": "application/json"
+        }
+
+    @staticmethod
+    def generate_image(prompt, save_dir, url_prefix, config):
+        """
+        MiniMax 文生图 API
+        官方文档: https://platform.minimaxi.com/docs/api-reference/image/generation/api/text-to-image
+        """
+        api_key = config.get('api_key')
+        model = config.get('model_name', 'image-01')
+        base_url = config.get('base_url', 'https://api.minimaxi.com')
+        
+        if not api_key:
+            return {'success': False, 'error_msg': "MiniMax API key is required"}
+        
+        # 构建请求参数
+        payload = {
+            "model": model,
+            "prompt": prompt,
+            "response_format": "url",  # 使用URL格式返回图片
+            "n": 1,  # 生成1张图片
+        }
+        
+        # 添加可选参数
+        if config.get('aspect_ratio'):
+            payload["aspect_ratio"] = config.get('aspect_ratio')
+        elif config.get('width') and config.get('height'):
+            # 仅当model为image-01时生效
+            if model == 'image-01':
+                payload["width"] = config.get('width')
+                payload["height"] = config.get('height')
+        
+        # 添加风格参数（仅当model为image-01-live时生效）
+        if model == 'image-01-live' and config.get('style_type'):
+            payload["style"] = {
+                "style_type": config.get('style_type'),
+                "style_weight": config.get('style_weight', 0.8)
+            }
+        
+        # 添加其他可选参数
+        if config.get('seed') is not None:
+            payload["seed"] = config.get('seed')
+        if config.get('prompt_optimizer') is not None:
+            payload["prompt_optimizer"] = config.get('prompt_optimizer')
+        if config.get('aigc_watermark') is not None:
+            payload["aigc_watermark"] = config.get('aigc_watermark')
+        
+        try:
+            url = f"{base_url.rstrip('/')}/v1/image_generation"
+            headers = MiniMaxHandler._get_headers(config)
+            
+            logger.info(f"[MiniMax] Generating image with model: {model}, prompt: {prompt[:50]}...")
+            
+            resp = requests.post(url, json=payload, headers=headers, timeout=120)
+            
+            if resp.status_code == 200:
+                data = resp.json()
+                
+                # 检查API响应
+                base_resp = data.get('base_resp', {})
+                status_code = base_resp.get('status_code')
+                
+                if status_code == 0:  # 成功
+                    # 获取图片URL
+                    image_urls = data.get('data', {}).get('image_urls', [])
+                    
+                    if image_urls and len(image_urls) > 0:
+                        img_url = image_urls[0]
+                        
+                        # 下载图片到本地
+                        fname = f"{uuid.uuid4()}.png"
+                        save_path = os.path.join(save_dir, fname)
+                        
+                        if download_file(img_url, save_path):
+                            logger.info(f"[MiniMax] Image saved to: {save_path}")
+                            return {'success': True, 'url': f"{url_prefix.rstrip('/')}/{fname}"}
+                        else:
+                            # 下载失败，返回远程URL
+                            logger.warning(f"[MiniMax] Download failed, returning remote URL")
+                            return {'success': True, 'url': img_url}
+                    
+                    return {'success': False, 'error_msg': "No image URL in response"}
+                else:
+                    # API返回错误
+                    error_msg = base_resp.get('status_msg', 'Unknown error')
+                    logger.error(f"[MiniMax] API Error {status_code}: {error_msg}")
+                    return {'success': False, 'error_msg': f"API Error ({status_code}): {error_msg}"}
+            else:
+                # HTTP请求失败
+                error_msg = resp.text
+                logger.error(f"[MiniMax] HTTP Error {resp.status_code}: {error_msg}")
+                return {'success': False, 'error_msg': f"HTTP Error ({resp.status_code}): {error_msg}"}
+        
+        except requests.exceptions.Timeout:
+            return {'success': False, 'error_msg': 'Request timeout'}
+        except Exception as e:
+            logger.exception("[MiniMax] Image generation failed")
+            return {'success': False, 'error_msg': str(e)}
+    
+    @staticmethod
+    def generate_text(messages, config):
+        """
+        MiniMax 不支持文本生成，返回错误
+        """
+        return {'success': False, 'error_msg': "MiniMax does not support text generation"}
+    
+    @staticmethod
+    def generate_video(prompt, save_dir, url_prefix, config, start_img=None, end_img=None):
+        """
+        MiniMax 首尾帧生成视频 API
+        官方文档: https://platform.minimaxi.com/docs/api-reference/video/generation/api/start-end-to-video
+        """
+        api_key = config.get('api_key')
+        model = config.get('model_name', 'MiniMax-Hailuo-02')
+        base_url = config.get('base_url', 'https://api.minimaxi.com')
+        
+        if not api_key:
+            return {'success': False, 'error_msg': "MiniMax API key is required"}
+        
+        if not start_img or not end_img:
+            return {'success': False, 'error_msg': "MiniMax video generation requires both start and end frame images"}
+        
+        # 转换图片为 base64
+        start_img_b64 = file_to_base64(start_img)
+        end_img_b64 = file_to_base64(end_img)
+        
+        if not start_img_b64 or not end_img_b64:
+            return {'success': False, 'error_msg': "Failed to encode images to base64"}
+        
+        # 构建请求参数
+        payload = {
+            "model": model,
+            "first_frame_image": start_img_b64,
+            "last_frame_image": end_img_b64,
+            "prompt": prompt,
+            "prompt_optimizer": config.get('prompt_optimizer', True),
+            "duration": config.get('duration', 6),
+            "resolution": config.get('resolution', '768P')
+        }
+        
+        # 添加可选参数
+        if config.get('callback_url'):
+            payload["callback_url"] = config.get('callback_url')
+        if config.get('aigc_watermark') is not None:
+            payload["aigc_watermark"] = config.get('aigc_watermark')
+        
+        try:
+            url = f"{base_url.rstrip('/')}/v1/video_generation"
+            headers = MiniMaxHandler._get_headers(config)
+            
+            logger.info(f"[MiniMax] Creating video task with model: {model}, prompt: {prompt[:50]}...")
+            
+            resp = requests.post(url, json=payload, headers=headers, timeout=60)
+            
+            if resp.status_code == 200:
+                data = resp.json()
+                
+                # 检查API响应
+                base_resp = data.get('base_resp', {})
+                status_code = base_resp.get('status_code')
+                
+                if status_code == 0:  # 成功
+                    task_id = data.get('task_id')
+                    
+                    if not task_id:
+                        return {'success': False, 'error_msg': "No task_id returned from API"}
+                    
+                    logger.info(f"[MiniMax] Video task created: {task_id}")
+                    
+                    # 轮询等待视频生成完成
+                    result = MiniMaxHandler._wait_for_video(task_id, config, max_wait=600)
+                    
+                    if result['success'] and result.get('url'):
+                        video_url = result['url']
+                        
+                        # 下载视频到本地
+                        fname = f"{task_id}.mp4"
+                        save_path = os.path.join(save_dir, fname)
+                        
+                        logger.info(f"[MiniMax] Downloading video from: {video_url}")
+                        
+                        if download_file(video_url, save_path):
+                            logger.info(f"[MiniMax] Video saved to: {save_path}")
+                            return {'success': True, 'url': f"{url_prefix.rstrip('/')}/{fname}"}
+                        else:
+                            # 下载失败，返回远程URL
+                            logger.warning(f"[MiniMax] Download failed, returning remote URL")
+                            return {'success': True, 'url': video_url}
+                    
+                    return result
+                else:
+                    # API返回错误
+                    error_msg = base_resp.get('status_msg', 'Unknown error')
+                    logger.error(f"[MiniMax] API Error {status_code}: {error_msg}")
+                    return {'success': False, 'error_msg': f"API Error ({status_code}): {error_msg}"}
+            else:
+                # HTTP请求失败
+                error_msg = resp.text
+                logger.error(f"[MiniMax] HTTP Error {resp.status_code}: {error_msg}")
+                return {'success': False, 'error_msg': f"HTTP Error ({resp.status_code}): {error_msg}"}
+        
+        except requests.exceptions.Timeout:
+            return {'success': False, 'error_msg': 'Request timeout'}
+        except Exception as e:
+            logger.exception("[MiniMax] Video generation failed")
+            return {'success': False, 'error_msg': str(e)}
+    
+    @staticmethod
+    def _wait_for_video(task_id, config, max_wait=600):
+        """
+        轮询等待视频生成完成
+        max_wait: 最大等待时间(秒)
+        """
+        import time
+        base_url = config.get('base_url', 'https://api.minimaxi.com')
+        url = f"{base_url.rstrip('/')}/v1/query/video_generation?task_id={task_id}"
+        headers = MiniMaxHandler._get_headers(config)
+        
+        start_time = time.time()
+        while time.time() - start_time < max_wait:
+            try:
+                resp = requests.get(url, headers=headers, timeout=30)
+                if resp.status_code == 200:
+                    data = resp.json()
+                    base_resp = data.get('base_resp', {})
+                    status_code = base_resp.get('status_code')
+                    
+                    if status_code == 0:
+                        status = data.get('status')
+                        file_id = data.get('file_id')
+                        
+                        logger.info(f"[MiniMax] Task {task_id} status: {status}")
+                        
+                        if status == 'Success':
+                            # 成功，获取视频URL
+                            video_url = data.get('video_url')
+                            if video_url:
+                                return {'success': True, 'url': video_url, 'data': data}
+                            else:
+                                return {'success': False, 'error_msg': 'No video URL in response'}
+                        
+                        elif status == 'Failed':
+                            error_msg = data.get('error_message', 'Generation failed')
+                            return {'success': False, 'error_msg': error_msg}
+                        
+                        elif status in ['Processing', 'Queueing']:
+                            # 继续等待
+                            time.sleep(10)  # 每10秒查询一次
+                        
+                        else:
+                            logger.warning(f"[MiniMax] Unknown status: {status}")
+                            time.sleep(10)
+                    else:
+                        logger.error(f"[MiniMax] Query failed: {status_code} - {base_resp.get('status_msg')}")
+                        time.sleep(10)
+                else:
+                    logger.error(f"[MiniMax] Query HTTP error: {resp.status_code}")
+                    time.sleep(10)
+            
+            except Exception as e:
+                logger.error(f"[MiniMax] Query error: {e}")
+                time.sleep(10)
+        
+        return {'success': False, 'error_msg': f'Timeout after {max_wait}s waiting for video generation'}
+
+
 class ZhipuHandler:
     @staticmethod
     def generate_text(messages, config):
@@ -1006,6 +1278,7 @@ def get_handler(provider_type):
     if provider_type == 'vidu': return ViduHandler
     if provider_type == 'jimeng': return JimengHandler
     if provider_type == 'zai': return ZhipuHandler
+    if provider_type == 'minimax': return MiniMaxHandler
     return MockHandler
 
 # ============================================================
