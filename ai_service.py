@@ -1397,6 +1397,33 @@ def run_text_generation(messages, config):
 def run_image_generation(visual_desc, style_desc, consistency_text, frame_type, config, save_dir, url_prefix, start_prompt_ref=None, prev_shot_context=""):
     """
     图片生成流程：包含 Prompt 优化逻辑 (Prompt Chaining)
+
+    此方法是生成电影/短剧分镜图片的核心入口。它首先利用大型语言模型（LLM）进行
+    Prompt 工程（提示词优化），然后调用相应的图像生成 API Handler。
+    该方法实现了连续镜头中“起始帧”和“结束帧”提示词的精准生成与控制。
+
+    Args:
+        visual_desc (str): 画面内容的描述。
+            - 如果 frame_type='start'，这是起始帧的主体和动作描述。
+            - 如果 frame_type='end'，这是结束帧的新动作描述。
+        style_desc (str): 画面风格的描述（仅在 frame_type='start' 时使用）。
+        consistency_text (str): 跨镜头一致性描述（如人物、环境、核心氛围）。
+        frame_type (str): 帧类型，必须是 'start' (起始帧) 或 'end' (结束帧)。
+        config (Dict[str, Any]): AI 服务配置字典，用于图像生成 API，包含：
+            - 'type' (str): 服务提供商类型，例如 'aliyun', 'siliconflow', 'zai'。
+            - 'api_key' (str): API 密钥。
+            - 'model_name' (str, optional): 图像生成模型名称。
+            - (LLM 降级配置): 内部会尝试将 'model_name' 替换为适用的文本模型（如 'qwen-plus'）进行 Prompt 优化。
+        save_dir (str): 生成的图片文件存储的本地目录路径。
+        url_prefix (str): 访问生成的图片文件时使用的 URL 前缀。
+        start_prompt_ref (Optional[str]): **仅当 frame_type='end' 时需要。**
+                                          这是由 LLM 为起始帧生成的**优化后**提示词，用于确保结束帧在风格和运镜上100%匹配。
+        prev_shot_context (str): 前一个镜头的简短上下文描述，用于辅助 LLM 在生成起始帧时保持叙事连贯性。
+
+    Returns:
+        Tuple[Dict[str, Any], str]: 包含两部分的元组：
+            - Dict[str, Any]: 图像生成 API 的结果字典（'success', 'url', 'error_msg'）。
+            - str: 最终用于图像生成器（如 Midjourney、Stable Diffusion）的**优化后的**完整 Prompt 文本。
     """
     # 1. 准备 Prompt Engineering 的输入
     consistency_instruction = f"**GLOBAL VISUAL RULES**: {consistency_text}. Maintain consistent characters and environment.\n" if consistency_text else ""
@@ -1467,6 +1494,36 @@ def run_image_generation(visual_desc, style_desc, consistency_text, frame_type, 
     return result, optimized_prompt
 
 def run_video_generation(prompt, start_img_path, end_img_path, config, save_dir, url_prefix):
+    """
+    视频生成逻辑入口 (Video Generation Entry Point)
+
+    此方法根据配置的提供商类型，调用相应的 Handler 来执行“文生视频”或“首尾帧生视频”操作。
+    它负责将用户输入、文件路径和配置传递给具体的 AI 服务实现（如 AliyunHandler, ViduHandler, MiniMaxHandler 等）。
+
+    Args:
+        prompt (str): 用于指导视频内容和风格的文本提示词。
+        start_img_path (str): 视频起始帧图片的本地文件路径。
+                              注意：部分提供商（如 Jimeng, MiniMax, Zhipu, Vidu）要求此参数。
+        end_img_path (str): 视频结束帧图片的本地文件路径。
+                            注意：部分提供商（如 Vidu, MiniMax, Zhipu）要求此参数，而其他提供商可能忽略。
+        config (Dict[str, Any]): AI 服务配置字典，包含以下关键信息：
+            - 'type' (str): 服务提供商类型，例如 'aliyun', 'vidu', 'minimax', 'jimeng', 'zai'。
+            - 'api_key' (str): API 密钥或凭证。
+            - 'model_name' (str, optional): 使用的模型名称。例如 'wanx2.1-kf2v-plus' (Aliyun)。
+            - 'base_url' (str, optional): API 基础 URL (如果不是默认值)。
+            - (视频特有参数，根据提供商不同):
+                - 'duration' (int, optional): 视频时长（秒）。
+                - 'resolution' (str, optional): 视频分辨率（如 '720P', '1080P'）。
+                - 'max_wait' (int, optional): 轮询等待任务完成的最大时间（秒）。
+        save_dir (str): 生成的视频文件存储的本地目录路径。
+        url_prefix (str): 访问生成的视频文件时使用的 URL 前缀。
+
+    Returns:
+        Dict[str, Any]: 包含生成结果的字典：
+            - 'success' (bool): 操作是否成功。
+            - 'url' (str, optional): 生成视频文件的公开访问 URL。
+            - 'error_msg' (str, optional): 错误信息（如果 'success' 为 False）。
+    """
     handler = get_handler(config.get('type'))
     return handler.generate_video(prompt, save_dir, url_prefix, config, start_img=start_img_path, end_img=end_img_path)
 
@@ -1493,7 +1550,37 @@ def run_voice_generation(text, config, save_dir, url_prefix):
 
 def run_fusion_generation(base_image_path, fusion_prompt, config, save_dir, url_prefix, element_image_paths):
     """
-    融图/图生图逻辑入口
+    融图/图生图逻辑入口 (Image Fusion / Image-to-Image Generation)
+
+    此方法根据配置的提供商类型，调用相应的 Handler 来执行图片融合或图生图操作。
+    它主要用于需要一张基础图和/或多张参考图来生成新图片的场景（例如，MiniMax 的角色图生图）。
+
+    Args:
+        base_image_path (str): 基础图片的文件路径。在 MiniMax 角色图生图场景中，它被视为一个额外的角色参考图。
+        fusion_prompt (str): 用于指导图片生成或融合的文本提示词。
+        config (Dict[str, Any]): AI 服务配置字典，包含以下关键信息：
+            - 'type' (str): 服务提供商类型，例如 'minimax'。
+            - 'api_key' (str): API 密钥。
+            - 'model_name' (str, optional): 使用的模型名称。例如 'image-01' (MiniMax)。
+            - 'base_url' (str, optional): API 基础 URL (如果不是默认值)。
+            - 'aspect_ratio' (str, optional): 图像的宽高比（如 '16:9'）。
+            - 'width' (int, optional): 图像宽度（像素）。
+            - 'height' (int, optional): 图像高度（像素）。
+            - (MiniMax 特有):
+                - 'prompt_optimizer' (bool, optional): 是否启用 Prompt 优化 (默认为 True)。
+                - 'aigc_watermark' (bool, optional): 是否添加 AIGC 水印。
+                - 'seed' (int, optional): 随机种子，用于复现结果。
+                - 'style_type' (str, optional): 风格类型（仅部分模型如 'image-01-live' 有效）。
+                - 'style_weight' (float, optional): 风格权重。
+        save_dir (str): 生成的图片文件存储的本地目录路径。
+        url_prefix (str): 访问生成的图片文件时使用的 URL 前缀。
+        element_image_paths (List[str]): 额外的元素/参考图片文件路径列表（例如，在 MiniMax 中作为其他角色参考）。
+
+    Returns:
+        Dict[str, Any]: 包含生成结果的字典：
+            - 'success' (bool): 操作是否成功。
+            - 'url' (str, optional): 生成图片的公开访问 URL。
+            - 'error_msg' (str, optional): 错误信息（如果 'success' 为 False）。
     """
     logger.info(f"[Fusion Gen] Starting fusion. Base: {base_image_path}, Prompt: {fusion_prompt[:30]}...")
     handler = get_handler(config.get('type', 'mock'))
