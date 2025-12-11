@@ -152,6 +152,14 @@ class AliyunHandler:
         except Exception as e:
             return {'success': False, 'error_msg': str(e)}
 
+    @staticmethod
+    def fuse_image(prompt, save_dir, url_prefix, config, base_image_path, ref_image_path_list):
+        """
+        AliyunHandler: 图生图/融合图方法 (目前未实现或DashScope不支持通用 i2i API)
+        目前 DashScope 的文生图 API (MultiModalConversation) 不支持 i2i 或角色融合。
+        """
+        return {'success': False, 'error_msg': "Aliyun (DashScope) does not currently support generic image-to-image or character fusion API through this interface."}
+    
 class OpenAICompatibleHandler:
     @staticmethod
     def _get_headers(config):
@@ -202,11 +210,29 @@ class OpenAICompatibleHandler:
         except Exception as e:
             return {'success': False, 'error_msg': str(e)}
 
+    @staticmethod
+    def fuse_image(prompt, save_dir, url_prefix, config, base_image_path, ref_image_path_list):
+        """
+        OpenAICompatibleHandler (SiliconFlow/RunningHub): 图生图/融合图方法
+        OpenAI API 兼容接口通常通过 images/generations 实现文生图，图生图需要专门的 API 或参数。
+        目前未针对此类平台的 i2i/融合图 API 进行通用实现。
+        """
+        return {'success': False, 'error_msg': "OpenAI Compatible API (SiliconFlow/RunningHub) fusion/i2i generation not implemented or supported via generic endpoints."}
+    
 class ComfyUIHandler:
     @staticmethod
     def generate_image(prompt, save_dir, url_prefix, config):
         return {'success': False, 'error_msg': "ComfyUI generation not implemented yet"}
-
+    
+    @staticmethod
+    def fuse_image(prompt, save_dir, url_prefix, config, base_image_path, ref_image_path_list):
+        """
+        ComfyUIHandler: 图生图/融合图方法
+        ComfyUI 通过工作流可实现强大的 i2i/融合图功能，但这需要解析复杂的工作流 JSON。
+        当前实现仅为占位符。
+        """
+        return {'success': False, 'error_msg': "ComfyUI i2i/fusion generation requires complex workflow logic and is not implemented yet."}
+    
 class MockHandler:
     @staticmethod
     def generate_text(messages, config): return {'success': True, 'content': "Mock Text Response"}
@@ -221,6 +247,16 @@ class MockHandler:
     @staticmethod
     def generate_voice(text, save_dir, url_prefix, config):
         return {'success': True, 'url': "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3"}
+
+    @staticmethod
+    def fuse_image(prompt, save_dir, url_prefix, config, base_image_path, ref_image_path_list):
+        """
+        MockHandler: 图生图/融合图方法 (返回模拟结果)
+        """
+        time.sleep(1)
+        # 模拟返回一个包含 base_image_path 的 fusion 结果
+        mock_url = f"https://placehold.co/600x400/8e44ad/ffffff?text=Mock+Fusion%5B{Path(base_image_path).name}%5D"
+        return {'success': True, 'url': mock_url}
 
 class ViduHandler:
     """
@@ -400,6 +436,14 @@ class ViduHandler:
         VIDU 不支持文本生成，返回错误
         """
         return {'success': False, 'error_msg': "VIDU does not support text generation"}
+    
+    @staticmethod
+    def fuse_image(prompt, save_dir, url_prefix, config, base_image_path, ref_image_path_list):
+        """
+        ViduHandler: 图生图/融合图方法
+        Vidu 主要专注于视频生成，不支持图片生成和融合。
+        """
+        return {'success': False, 'error_msg': "VIDU is a video generation service and does not support image fusion/i2i."}
 
 class JimengHandler:
     """
@@ -876,7 +920,14 @@ class JimengHandler:
         """
         return {'success': False, 'error_msg': "Jimeng does not support text generation"}
 
-
+    @staticmethod
+    def fuse_image(prompt, save_dir, url_prefix, config, base_image_path, ref_image_path_list):
+        """
+        JimengHandler: 图生图/融合图方法
+        即梦平台提供了针对图生图的 req_key，但需要单独实现其 API 逻辑。
+        当前实现为占位符。
+        """
+        return {'success': False, 'error_msg': "Jimeng i2i/fusion generation is not implemented yet."}
 
 class MiniMaxHandler:
     @staticmethod
@@ -1371,6 +1422,16 @@ class ZhipuHandler:
             logger.error(f"[Zhipu] Video generation error: {e}")
             return {'success': False, 'error_msg': str(e)}
 
+    @staticmethod
+    def fuse_image(prompt, save_dir, url_prefix, config, base_image_path, ref_image_path_list):
+        """
+        ZhipuHandler: 图生图/融合图方法
+        智谱 AI (ZhipuAi) SDK 目前主要提供文生图和文生视频 API。
+        通用 i2i 或融合图功能可能需要专门的接口或通过多模态 chat 接口实现。
+        当前实现为占位符。
+        """
+        return {'success': False, 'error_msg': "Zhipu AI generic image fusion/i2i generation is not implemented yet."}
+    
 # ============================================================
 #  Dispatcher
 # ============================================================
