@@ -1430,7 +1430,7 @@ def run_image_generation(visual_desc, style_desc, consistency_text, frame_type, 
     if consistency_text: optimized_prompt += f", {consistency_text}"
 
     # 2. 尝试使用文本模型优化 Prompt
-    handler = get_handler(config.get('type', 'mock'))
+    handler = get_handler('aliyun')
     
     # 检查 handler 是否支持文本生成，并且当前配置是否有效
     if hasattr(handler, 'generate_text'):
