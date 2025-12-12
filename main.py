@@ -1,150 +1,30 @@
 import os
-import json
-import uuid
 import time
 import re
-import random
-from dataclasses import dataclass, field, asdict
-from datetime import datetime
+import uuid
 from typing import List, Optional, Dict, Any
 from flask import Flask, request, jsonify, send_file
 from pathlib import Path
 
 import ai_service 
 from jianying_exporter import export_draft
+from data_manager import DataManager
 
 # --- 配置 ---
-DATA_DIR = "projects"
 STATIC_FOLDER = "."
 IMG_SAVE_DIR = "static/imgs"
 VIDEO_SAVE_DIR = "static/videos"
 AUDIO_SAVE_DIR = "static/audio"
-SETTINGS_FILE = "settings.json"
 EXPORT_DIR = "exports"
-SERIES_FILE = "series.json"
 
 app = Flask(__name__, static_url_path='', static_folder=STATIC_FOLDER)
+db = DataManager() # 初始化数据管理器
 
 # --- 基础工具 ---
-def ensure_dirs():
-    if not os.path.exists(DATA_DIR): os.makedirs(DATA_DIR)
+def ensure_static_dirs():
     for d in [IMG_SAVE_DIR, VIDEO_SAVE_DIR, AUDIO_SAVE_DIR, EXPORT_DIR]:
         Path(d).mkdir(parents=True, exist_ok=True)
 
-def get_project_path(pid): return os.path.join(DATA_DIR, pid)
-
-def read_json(filepath, default=None):
-    if not os.path.exists(filepath): return default if default is not None else {}
-    try:
-        with open(filepath, 'r', encoding='utf-8') as f: return json.load(f)
-    except: return default if default is not None else {}
-
-def write_json(filepath, data):
-    # 修复：只有当路径包含目录时才创建目录，防止 Windows 下 os.makedirs('') 报错
-    directory = os.path.dirname(filepath)
-    if directory:
-        os.makedirs(directory, exist_ok=True)
-        
-    def json_serial(obj):
-        if isinstance(obj, datetime): return obj.isoformat()
-        raise TypeError(f"Type {type(obj)} not serializable")
-    with open(filepath, 'w', encoding='utf-8') as f: json.dump(data, f, default=json_serial, indent=4, ensure_ascii=False)
-
-def get_provider_config(provider_id):
-    settings = read_json(SETTINGS_FILE, default={'providers': []})
-    for p in settings.get('providers', []):
-        if p.get('id') == provider_id: return p
-    return {'type': 'mock'} 
-
-@dataclass
-class Series:
-    id: str
-    name: str
-    description: str = ""
-    cover_image: str = ""
-    script_core_conflict: str = ""
-    script_emotional_keywords: str = ""
-    basic_info: str = "" 
-    visual_color_system: str = ""
-    visual_consistency_prompt: str = ""
-    created_time: str = field(default_factory=lambda: datetime.now().isoformat())
-    updated_time: str = field(default_factory=lambda: datetime.now().isoformat())
-    @classmethod
-    def from_dict(cls, data):
-        return cls(**{k: v for k, v in data.items() if k in cls.__dataclass_fields__})
-    def to_dict(self): return asdict(self)
-    
-# --- 数据模型 ---
-@dataclass
-class MovieProject:
-    film_name: str
-    script_core_conflict: str = ""
-    series_id: str = ""  # [新增] 关联的剧集ID
-    script_emotional_keywords: str = ""
-    # 合并世界观设定的三个字段为一个基础信息字段
-    basic_info: str = ""  # 包含时代背景、空间特质、人物小传
-    visual_color_system: str = ""
-    visual_consistency_prompt: str = "" 
-    id: str = field(default_factory=lambda: str(uuid.uuid4()))
-    created_time: str = field(default_factory=lambda: datetime.now().isoformat())
-    updated_time: str = field(default_factory=lambda: datetime.now().isoformat())
-    @classmethod
-    def from_dict(cls, data): 
-        return cls(**{k: v for k, v in data.items() if k in cls.__dataclass_fields__})
-    def to_dict(self): return asdict(self)
-
-@dataclass
-class StoryboardShot:
-    movie_id: str
-    scene: str
-    shot_number: str
-    visual_description: str
-    # 场景相关字段
-    scene_description: str = ""
-    scene_prompt: str = ""
-    scene_image: str = ""
-    characters: List[str] = field(default_factory=list)
-    id: str = field(default_factory=lambda: str(uuid.uuid4()))
-    audio_description: str = ""
-    special_technique: str = ""
-    duration: str = ""
-    notes: str = ""
-    start_frame: str = ""
-    end_frame: str = ""
-    video_url: str = "" 
-    dialogue: str = "" 
-    audio_url: str = "" 
-    start_frame_prompt: str = ""
-    end_frame_prompt: str = ""
-    images: List[str] = field(default_factory=list) 
-    created_time: str = field(default_factory=lambda: datetime.now().isoformat())
-    updated_time: str = field(default_factory=lambda: datetime.now().isoformat())
-    @classmethod
-    def from_dict(cls, data): 
-        return cls(**{k: v for k, v in data.items() if k in cls.__dataclass_fields__})
-    def to_dict(self): return asdict(self)
-    
-@dataclass
-class FusionTask:
-    id: str
-    scene: str
-    shot_number: str
-    base_image: str = ""     # 底图 URL
-    elements: List[Dict] = field(default_factory=list) # 预留字段
-    result_image: str = ""   # 首帧结果图 URL
-    fusion_prompt: str = ""  # 首帧融合提示词
-    end_frame_image: str = "" # 尾帧结果图
-    end_frame_prompt: str = "" # 尾帧提示词
-    shot_id: str = ""        # 关联分镜 ID
-    video_url: str = ""     # 融合视频 URL
-    created_time: str = field(default_factory=lambda: datetime.now().isoformat())
-    # 增加 updated_time 字段，便于追踪更新
-    updated_time: str = field(default_factory=lambda: datetime.now().isoformat()) 
-    @classmethod
-    def from_dict(cls, data): return cls(**{k: v for k, v in data.items() if k in cls.__dataclass_fields__})
-    def to_dict(self): return asdict(self)
-    
-    
 # --- 路由 ---
 @app.route('/')
 def index(): return send_file('series.html')
@@ -153,73 +33,41 @@ def index(): return send_file('series.html')
 def index_series(): return send_file('series.html')
 
 @app.route('/project')
-def series_page():
-    return send_file('index.html')
+def series_page(): return send_file('index.html')
 
+# === Series API ===
 @app.route('/api/series', methods=['GET'])
 def get_all_series():
-    series_list = read_json(SERIES_FILE, default=[])
-    # 按更新时间倒序
-    series_list.sort(key=lambda x: x.get('updated_time', ''), reverse=True)
-    return jsonify(series_list)
+    return jsonify(db.get_all_series())
 
 @app.route('/api/series', methods=['POST'])
 def create_series():
     data = request.json
     if not data.get('name'): return jsonify({"error": "剧集名称必填"}), 400
-    
-    series_list = read_json(SERIES_FILE, default=[])
-    
-    # 使用 from_dict 自动映射所有字段 (包括新增加的5个字段)
-    # 确保传入 id
-    data['id'] = str(uuid.uuid4())
-    new_series = Series.from_dict(data)
-    
-    series_list.insert(0, new_series.to_dict())
-    write_json(SERIES_FILE, series_list)
-    return jsonify(new_series.to_dict()), 201
+    new_series = db.create_series(data)
+    return jsonify(new_series), 201
 
 @app.route('/api/series/<series_id>', methods=['PUT'])
 def update_series(series_id):
-    data = request.json
-    series_list = read_json(SERIES_FILE, default=[])
-    for i, s in enumerate(series_list):
-        if s['id'] == series_id:
-            merged = {**s, **data, 'updated_time': datetime.now().isoformat()}
-            series_list[i] = merged
-            write_json(SERIES_FILE, series_list)
-            return jsonify(merged)
+    updated = db.update_series(series_id, request.json)
+    if updated: return jsonify(updated)
     return jsonify({"error": "Not found"}), 404
 
 @app.route('/api/series/<series_id>', methods=['DELETE'])
 def delete_series(series_id):
-    series_list = read_json(SERIES_FILE, default=[])
-    new_list = [s for s in series_list if s['id'] != series_id]
-    write_json(SERIES_FILE, new_list)
-    # 注意：这里逻辑上可能需要级联删除该剧集下的所有 Projects，暂且保留项目但解除关联
+    db.delete_series(series_id)
     return jsonify({"success": True})
 
 @app.route('/api/series/<series_id>/episodes', methods=['GET'])
 def get_series_episodes(series_id):
-    """获取指定剧集下的所有分集（Projects）"""
-    ensure_dirs()
-    episodes = []
-    if os.path.exists(DATA_DIR):
-        for pid in os.listdir(DATA_DIR):
-            info_path = os.path.join(DATA_DIR, pid, 'info.json')
-            if os.path.exists(info_path):
-                proj = read_json(info_path)
-                # 筛选属于该剧集的项目，或者为了兼容旧数据，如果 series_id 为空且请求的是 'uncategorized' 也可处理
-                if proj.get('series_id') == series_id:
-                    episodes.append(proj)
-    
-    # 按集数名称排序，或者按创建时间
-    episodes.sort(key=lambda x: x.get('film_name', '')) 
+    episodes = db.get_projects_by_series(series_id)
     return jsonify(episodes)
 
+# === Settings API ===
 @app.route('/api/settings', methods=['GET'])
 def get_settings():
-    data = read_json(SETTINGS_FILE, default={'providers': []})
+    data = db.get_settings()
+    # Mask API keys
     for p in data.get('providers', []):
         if p.get('api_key'): p['api_key'] = p['api_key'][:6] + '******'
     return jsonify(data.get('providers', []))
@@ -227,11 +75,12 @@ def get_settings():
 @app.route('/api/settings/provider', methods=['POST'])
 def save_provider():
     req = request.json
-    settings = read_json(SETTINGS_FILE, default={'providers': []})
+    settings = db.get_settings()
     providers = settings.get('providers', [])
     
+    provider_id = req.get('id') or str(uuid.uuid4())
     new_p = {
-        'id': req.get('id') or str(uuid.uuid4()),
+        'id': provider_id,
         'name': req.get('name', 'New Provider'),
         'type': req.get('type', 'aliyun'),
         'base_url': req.get('base_url', ''),
@@ -251,155 +100,108 @@ def save_provider():
         providers.append(new_p)
         
     settings['providers'] = providers
-    write_json(SETTINGS_FILE, settings)
+    db.save_settings(settings)
     return jsonify({"success": True, "id": new_p['id']})
 
 @app.route('/api/settings/provider/<pid>', methods=['DELETE'])
 def delete_provider(pid):
-    settings = read_json(SETTINGS_FILE)
+    settings = db.get_settings()
     settings['providers'] = [p for p in settings.get('providers', []) if p['id'] != pid]
-    write_json(SETTINGS_FILE, settings)
+    db.save_settings(settings)
     return jsonify({"success": True})
 
-# Project CRUD
+# === Project API ===
 @app.route('/api/projects', methods=['GET'])
 def get_projects():
-    ensure_dirs()
-    projects = []
-    if os.path.exists(DATA_DIR):
-        for pid in os.listdir(DATA_DIR):
-            info_path = os.path.join(DATA_DIR, pid, 'info.json')
-            if os.path.exists(info_path): projects.append(read_json(info_path))
-    projects.sort(key=lambda x: x.get('updated_time', ''), reverse=True)
-    return jsonify(projects)
+    return jsonify(db.get_all_projects())
 
 @app.route('/api/projects', methods=['POST'])
 def create_project():
     data = request.json
     if not data.get('film_name'): return jsonify({"error": "项目名称必填"}), 400
     
-    # [新增] 如果关联了 series_id，尝试继承数据
+    # 继承 Series 数据的业务逻辑
     series_id = data.get('series_id')
     if series_id:
-        series_list = read_json(SERIES_FILE, default=[])
-        series = next((s for s in series_list if s['id'] == series_id), None)
+        series = db.get_series_by_id(series_id)
         if series:
-            # 字段列表
             inherit_fields = [
-                'script_core_conflict', 
-                'script_emotional_keywords', 
-                'basic_info', 
-                'visual_color_system', 
-                'visual_consistency_prompt'
+                'script_core_conflict', 'script_emotional_keywords', 
+                'basic_info', 'visual_color_system', 'visual_consistency_prompt'
             ]
             for field in inherit_fields:
-                # 逻辑：如果前端没传该字段(或为空)，且剧集里有该字段，则继承
                 if not data.get(field) and series.get(field):
                     data[field] = series.get(field)
 
-    project = MovieProject.from_dict(data)
-    write_json(os.path.join(get_project_path(project.id), 'info.json'), project.to_dict())
-    write_json(os.path.join(get_project_path(project.id), 'shot.json'), [])
-    write_json(os.path.join(get_project_path(project.id), 'script.json'), [])
-    return jsonify(project.to_dict()), 201
+    project = db.create_project(data)
+    return jsonify(project), 201
 
 @app.route('/api/projects/<project_id>', methods=['GET'])
 def get_project(project_id):
-    data = read_json(os.path.join(get_project_path(project_id), 'info.json'))
+    data = db.get_project(project_id)
     return jsonify(data) if data else (jsonify({"error": "Not found"}), 404)
 
 @app.route('/api/projects/<project_id>', methods=['PUT'])
 def update_project(project_id):
-    path = os.path.join(get_project_path(project_id), 'info.json')
-    data = read_json(path)
-    if not data: return jsonify({"error": "Not found"}), 404
-    new_data = {**data, **request.json, 'id': project_id, 'updated_time': datetime.now().isoformat()}
-    write_json(path, new_data)
-    return jsonify(new_data)
+    updated = db.update_project(project_id, request.json)
+    if updated: return jsonify(updated)
+    return jsonify({"error": "Not found"}), 404
 
 @app.route('/api/projects/<project_id>', methods=['DELETE'])
 def delete_project(project_id):
-    import shutil
-    if os.path.exists(get_project_path(project_id)): shutil.rmtree(get_project_path(project_id)); return jsonify({"message": "Deleted"})
+    success = db.delete_project(project_id)
+    if success: return jsonify({"message": "Deleted"})
     return jsonify({"error": "Not found"}), 404
 
-# Script CRUD
+# === Script API ===
 @app.route('/api/projects/<project_id>/script', methods=['GET'])
-def get_script(project_id): return jsonify(read_json(os.path.join(get_project_path(project_id), 'script.json'), default=[]))
+def get_script(project_id): 
+    return jsonify(db.get_script(project_id))
 
 @app.route('/api/projects/<project_id>/script', methods=['POST'])
 def save_script(project_id):
-    write_json(os.path.join(get_project_path(project_id), 'script.json'), request.json)
+    db.save_script(project_id, request.json)
     return jsonify({"success": True})
 
-# Shot CRUD
+# === Shot API ===
 @app.route('/api/projects/<project_id>/shots', methods=['GET'])
-def get_shots(project_id): return jsonify(read_json(os.path.join(get_project_path(project_id), 'shot.json'), default=[]))
+def get_shots(project_id): 
+    return jsonify(db.get_shots(project_id))
 
 @app.route('/api/projects/<project_id>/shots', methods=['POST'])
 def create_shot(project_id):
-    data = request.json
-    shots = read_json(os.path.join(get_project_path(project_id), 'shot.json'), default=[])
-    new_shot = StoryboardShot.from_dict({**data, 'movie_id': project_id})
-    
-    # [新增] 处理插入位置
-    insert_index = data.get('insert_index')
-    if insert_index is not None and isinstance(insert_index, int) and 0 <= insert_index <= len(shots):
-        shots.insert(insert_index, new_shot.to_dict())
-    else:
-        shots.append(new_shot.to_dict())
-        
-    write_json(os.path.join(get_project_path(project_id), 'shot.json'), shots)
-    return jsonify(new_shot.to_dict()), 201
+    new_shot = db.create_shot(project_id, request.json)
+    return jsonify(new_shot), 201
 
 @app.route('/api/projects/<project_id>/shots/<shot_id>', methods=['PUT'])
 def update_shot(project_id, shot_id):
-    path = os.path.join(get_project_path(project_id), 'shot.json')
-    shots = read_json(path, default=[])
-    for i, s in enumerate(shots):
-        if s['id'] == shot_id:
-            merged_data = {**s, **request.json, 'id': shot_id, 'updated_time': datetime.now().isoformat()}
-            new_shot = StoryboardShot.from_dict(merged_data)
-            shots[i] = new_shot.to_dict()
-            write_json(path, shots)
-            return jsonify(new_shot.to_dict())
+    updated = db.update_shot(project_id, shot_id, request.json)
+    if updated: return jsonify(updated)
     return jsonify({"error": "Not found"}), 404
 
 @app.route('/api/projects/<project_id>/shots/<shot_id>', methods=['DELETE'])
 def delete_shot(project_id, shot_id):
-    path = os.path.join(get_project_path(project_id), 'shot.json')
-    shots = read_json(path, default=[])
-    new_shots = [s for s in shots if s['id'] != shot_id]
-    write_json(path, new_shots)
+    db.delete_shot(project_id, shot_id)
     return jsonify({"message": "Deleted"})
 
 @app.route('/api/projects/<project_id>/shots/batch_delete', methods=['POST'])
 def batch_delete_shots(project_id):
     ids = request.json.get('ids', [])
-    path = os.path.join(get_project_path(project_id), 'shot.json')
-    shots = read_json(path, default=[])
-    new_shots = [s for s in shots if s['id'] not in ids]
-    write_json(path, new_shots)
+    db.batch_delete_shots(project_id, ids)
     return jsonify({"success": True})
 
 @app.route('/api/projects/<project_id>/shots/reorder', methods=['POST'])
 def reorder_shots(project_id):
     ordered_ids = request.json.get('shot_ids', [])
-    path = os.path.join(get_project_path(project_id), 'shot.json')
-    shots = read_json(path, default=[])
-    shot_map = {s['id']: s for s in shots}
-    new_shots = [shot_map[sid] for sid in ordered_ids if sid in shot_map]
-    new_shots.extend([s for s in shots if s['id'] not in ordered_ids])
-    write_json(path, new_shots)
+    db.reorder_shots(project_id, ordered_ids)
     return jsonify({"success": True})
 
-# === AI & Export (Updated for Text Model) ===
+# === AI & Export Services ===
 
 @app.route('/api/generate/script_continuation', methods=['POST'])
 def generate_script_continuation():
     data = request.json
-    config = get_provider_config(data.get('provider_id'))
-    # 允许前端覆盖模型
+    config = db.get_provider_config(data.get('provider_id'))
     if data.get('model_name'): config['model_name'] = data.get('model_name')
     
     sys = "你是一个专业的中文电影编剧助手。请根据前文续写一段剧本。要求：全中文，画面感强。"
@@ -411,53 +213,29 @@ def generate_script_continuation():
 @app.route('/api/generate/analyze_script', methods=['POST'])
 def analyze_script():
     data = request.json
-    config = get_provider_config(data.get('provider_id'))
-    # 允许前端覆盖模型
+    config = db.get_provider_config(data.get('provider_id'))
     if data.get('model_name'): config['model_name'] = data.get('model_name')
     
-    # 获取项目信息和角色列表
     project_id = data.get('project_id')
-    project_info = {}
-    character_list = []
+    project_info = db.get_project(project_id) if project_id else {}
+    character_list = db.get_characters(project_id) if project_id else []
     
-    if project_id:
-        project_info = read_json(os.path.join(get_project_path(project_id), 'info.json'), default={})
-        character_list = read_json(os.path.join(get_project_path(project_id), 'characters.json'), default=[])
-    
-    # 构建角色信息字符串，供AI参考
     characters_info = ""
     if character_list:
         characters_info = "\n".join([f"- {char.get('name', '')}: {char.get('description', '')}" for char in character_list])
         characters_info = f"\n\n已有角色列表：\n{characters_info}"
     
-    # 获取项目基础信息
-    basic_info = project_info.get('basic_info', '')
-    emotional_keywords = project_info.get('script_emotional_keywords', '')
-    color_system = project_info.get('visual_color_system', '')
-    
-    # 构建系统提示词
     sys = f"""
     你是一个专业的电影分镜设计师。请根据剧本内容，生成详细的分镜列表，每个分镜包含场景说明和角色信息。
     **输出要求**：1. 返回一个纯 JSON 数组。2. **必须使用中文**填写所有描述性字段。3. 不要包含 Markdown 标记。
-     **JSON对象结构**：
-        1. scene: 场次编号
-        2. shot_number: 镜号
-        3. visual_description: 画面描述
-        4. scene_description: 场景说明（详细描述场景环境、时间、地点等）
-        5. characters: 出席角色列表（从已有角色中选择，或根据剧本内容推断新角色）
-        6. dialogue: 台词（如果有）
-        7. audio_description: 声音描述
-        8. special_technique: 特殊拍摄技巧
-        9. duration: 预计时长
+     **JSON对象结构**：scene, shot_number, visual_description, scene_description, characters, dialogue, audio_description, special_technique, duration
     """
-    
-    # 构建用户提示词
     user_prompt = f"""
         剧本内容：{data.get('content', '')}
         人物信息：{characters_info}
-        项目基础信息：{basic_info}
-        情感关键词：{emotional_keywords}
-        色彩体系：{color_system}
+        项目基础信息：{project_info.get('basic_info', '')}
+        情感关键词：{project_info.get('script_emotional_keywords', '')}
+        色彩体系：{project_info.get('visual_color_system', '')}
     """
 
     msgs = [{'role': 'system', 'content': sys}, {'role': 'user', 'content': user_prompt}]
@@ -467,57 +245,38 @@ def analyze_script():
         try:
             cleaned = re.sub(r'^```json\s*|\s*```$', '', result['content'].strip(), flags=re.MULTILINE | re.DOTALL)
             shots_data = json.loads(cleaned)
-        
-            # 映射角色信息
+            # 辅助函数
+            def map_character_names(names, char_data):
+                mapped = []
+                for name in names:
+                    found = next((c for c in char_data if c.get('name') == name), None)
+                    mapped.append(found if found else {'name': name, 'description': '新角色', 'id': str(uuid.uuid4())})
+                return mapped
+
             for shot in shots_data:
                 if 'characters' in shot:
                     shot['characters'] = map_character_names(shot['characters'], character_list)
-                    
             return jsonify({'shots': shots_data})
         except Exception as e:
-            print(f"Error parsing analyze_script JSON: {e}")
             return jsonify({'error': 'Invalid JSON from AI'}), 500
     return jsonify(result), 500
-
-# 在返回结果前添加角色映射逻辑
-def map_character_names(characters_list, character_data):
-    """将角色名称映射为完整角色信息"""
-    mapped = []
-    for name in characters_list:
-        # 在已有角色列表中查找
-        found = next((char for char in character_data if char.get('name') == name), None)
-        if found:
-            mapped.append(found)
-        else:
-            # 如果是新角色，创建基础信息
-            mapped.append({
-                'name': name,
-                'description': '新角色',
-                'id': str(uuid.uuid4())
-            })
-    return mapped
-
 
 @app.route('/api/generate/image', methods=['POST'])
 def generate_image():
     data = request.json
-    config = get_provider_config(data.get('provider_id'))
+    config = db.get_provider_config(data.get('provider_id'))
     if data.get('model_name'): config['model_name'] = data.get('model_name')
     
     shot_id = data.get('shot_id')
     pid = data.get('project_id')
-    shots_path = os.path.join(get_project_path(pid), 'shot.json')
-    shots = read_json(shots_path, default=[])
-    current_shot = next((s for s in shots if s['id'] == shot_id), None)
     
+    current_shot = db.get_shot(pid, shot_id)
     if not current_shot: return jsonify({"error": "Shot not found"}), 404
     
-    prev_shot = next((s for s in shots if s['shot_number'] == current_shot['shot_number'] - 1), None)
-    
-    prev_context = ''
-    if prev_shot:  prev_context = prev_shot['end_frame_prompt']
-    
+    prev_shot = db.get_previous_shot(pid, current_shot.get('shot_number'))
+    prev_context = prev_shot['end_frame_prompt'] if prev_shot else ''
     start_prompt_ref = current_shot.get('start_frame_prompt')
+    
     save_dir = os.path.join(STATIC_FOLDER, IMG_SAVE_DIR)
     web_prefix = f"/{IMG_SAVE_DIR}"
 
@@ -527,16 +286,15 @@ def generate_image():
     )
 
     if result.get('success'):
-        if data.get('frame_type') == 'start': current_shot['start_frame_prompt'] = used_prompt
-        else: current_shot['end_frame_prompt'] = used_prompt
-        write_json(shots_path, shots)
+        update_data = {'start_frame_prompt': used_prompt} if data.get('frame_type') == 'start' else {'end_frame_prompt': used_prompt}
+        db.update_shot(pid, shot_id, update_data)
         return jsonify(result)
     return jsonify(result), 500
 
 @app.route('/api/generate/video', methods=['POST'])
 def generate_video():
     data = request.json
-    config = get_provider_config(data.get('provider_id'))
+    config = db.get_provider_config(data.get('provider_id'))
     if data.get('model_name'): config['model_name'] = data.get('model_name')
     
     s_url = data.get('start_frame', '')
@@ -555,7 +313,7 @@ def generate_video():
 @app.route('/api/generate/voiceover', methods=['POST'])
 def generate_voiceover():
     data = request.json
-    config = get_provider_config(data.get('provider_id'))
+    config = db.get_provider_config(data.get('provider_id'))
     if data.get('model_name'): config['model_name'] = data.get('model_name')
     
     save_dir = os.path.join(STATIC_FOLDER, AUDIO_SAVE_DIR)
@@ -566,733 +324,267 @@ def generate_voiceover():
 
 @app.route('/api/projects/<project_id>/export/jianying', methods=['POST'])
 def export_jianying(project_id):
-    project_info = read_json(os.path.join(get_project_path(project_id), 'info.json'))
-    shots = read_json(os.path.join(get_project_path(project_id), 'shot.json'), default=[])
+    project_info = db.get_project(project_id)
+    shots = db.get_shots(project_id)
     result = export_draft(project_info, shots, STATIC_FOLDER, EXPORT_DIR)
     return jsonify(result) if result['success'] else (jsonify(result), 500)
 
+# === Character API ===
 @app.route('/api/projects/<project_id>/characters', methods=['GET'])
 def get_characters(project_id):
-    """获取项目角色列表"""
-    characters = read_json(os.path.join(get_project_path(project_id), 'characters.json'), default=[])
-    return jsonify(characters)
+    return jsonify(db.get_characters(project_id))
 
 @app.route('/api/projects/<project_id>/characters', methods=['POST'])
 def create_character(project_id):
-    """创建新角色"""
-    data = request.json
-    characters = read_json(os.path.join(get_project_path(project_id), 'characters.json'), default=[])
-    character = {
-        'id': str(uuid.uuid4()),
-        'name': data.get('name'),
-        'description': data.get('description'),
-        'image_url': '',  # 改为单张图片URL
-        'created_time': datetime.now().isoformat()
-    }
-    characters.append(character)
-    write_json(os.path.join(get_project_path(project_id), 'characters.json'), characters)
-    return jsonify(character), 201
+    new_char = db.create_character(project_id, request.json)
+    return jsonify(new_char), 201
+
+@app.route('/api/projects/<project_id>/characters/<character_id>', methods=['PUT'])
+def update_character(project_id, character_id):
+    updated = db.update_character(project_id, character_id, request.json)
+    if updated: return jsonify(updated)
+    return jsonify({"error": "Not found"}), 404
 
 @app.route('/api/projects/<project_id>/characters/<character_id>', methods=['DELETE'])
 def delete_character(project_id, character_id):
-    """删除角色"""
-    path = os.path.join(get_project_path(project_id), 'characters.json')
-    characters = read_json(path, default=[])
-    new_characters = [c for c in characters if c['id'] != character_id]
-    write_json(path, new_characters)
+    db.delete_character(project_id, character_id)
     return jsonify({"message": "Deleted"})
 
 @app.route('/api/generate/character_views', methods=['POST'])
 def generate_character_views():
-    """生成角色视图（包含正面特写和多视图的单张图片）"""
     data = request.json
-    config = get_provider_config(data.get('provider_id'))
-    if data.get('model_name'):
-        config['model_name'] = data.get('model_name')
+    config = db.get_provider_config(data.get('provider_id'))
+    if data.get('model_name'): config['model_name'] = data.get('model_name')
 
-    character_desc = data.get('character_description')
     project_id = data.get('project_id')
     save_dir = os.path.join(STATIC_FOLDER, IMG_SAVE_DIR)
     web_prefix = f"/{IMG_SAVE_DIR}"
     
-    # 获取项目信息，包括色彩体系、情感关键词和基础信息
-    color_system = None
-    emotional_keywords = None
-    basic_info = None
-    if project_id:
-        project_info = read_json(os.path.join(get_project_path(project_id), 'info.json'), default={})
-        color_system = project_info.get('visual_color_system', '')
-        emotional_keywords = project_info.get('script_emotional_keywords', '')
-        basic_info = project_info.get('basic_info', '')
-
-    # 构建包含正面特写和多视图的prompt，并加入色彩体系、情感关键词和基础信息
-    prompt = build_comprehensive_character_prompt(character_desc, color_system, emotional_keywords, basic_info)
+    project_info = db.get_project(project_id) if project_id else {}
     
-    # 使用不带提示词工程的简单图片生成方法
-    result = ai_service.run_simple_image_generation(
-        prompt,
-        config,
-        save_dir,
-        web_prefix
+    prompt = build_comprehensive_character_prompt(
+        data.get('character_description'), 
+        project_info.get('visual_color_system', ''), 
+        project_info.get('script_emotional_keywords', ''), 
+        project_info.get('basic_info', '')
     )
     
-    if result.get('success'):
-        return jsonify({'success': True, 'url': result['url']})
-    
-    return jsonify({'success': False, 'error': '生成失败'}), 500
+    result = ai_service.run_simple_image_generation(prompt, config, save_dir, web_prefix)
+    return jsonify({'success': True, 'url': result['url']}) if result.get('success') else (jsonify({'success': False, 'error': '生成失败'}), 500)
 
-def build_comprehensive_character_prompt(character_desc, color_system=None, emotional_keywords=None, basic_info=None):
-    """构建包含正面特写和多视图的角色prompt，并加入色彩体系、情感关键词和基础信息"""
-    
-    # 基础提示词
-    prompt = f"""电影角色设计图，{character_desc}。
-请生成一张包含以下内容的角色设计图：
-1. 左上角：角色正面特写肖像，清晰展示面部特征和表情
-2. 右上角：角色正面全身视图，展示完整体型和服装
-3. 左下角：角色侧面全身视图，展示体型轮廓和侧面特征
-4. 右下角：角色背面全身视图，展示背面服装和轮廓
-
-重要要求：
-1. 必须包含四个视图：正面特写肖像、正面全身、侧面全身、背面全身
-2. 纯白背景，专业角色设计图风格
-3. 清晰的线条和细节
-4. 准确的人体比例
-5. 精致的服装和配饰细节
-6. 无水印，无文字，纯角色展示图
-7. 四个视图均匀分布，布局合理，每个视图大小相等
-8. 每个视图都有足够的空间展示细节
-9. 角色形象必须保持一致，所有视图展示的是同一个角色"""
-    
-    # 如果有色彩体系，添加到提示词中
-    if color_system and color_system.strip():
-        prompt += f"""
-        
-10. 色彩体系要求：{color_system}
-11. 角色服装和配饰必须严格遵循指定的色彩体系
-12. 整体色调必须与项目的视觉风格保持一致"""
-    
-    # 如果有情感关键词，添加到提示词中
-    if emotional_keywords and emotional_keywords.strip():
-        prompt += f"""
-        
-13. 情感基调：{emotional_keywords}
-14. 角色表情和姿态应体现指定的情感基调
-15. 整体氛围应与项目的情感风格保持一致"""
-    
-    # 如果有基础信息，添加到提示词中
-    if basic_info and basic_info.strip():
-        prompt += f"""
-        
-16. 项目基础信息：{basic_info}
-17. 角色设计应符合项目设定的时代背景、空间环境和人物特点
-18. 角色服装、装备和整体风格应与项目世界观保持一致"""
-    
+def build_comprehensive_character_prompt(character_desc, color_system, emotional_keywords, basic_info):
+    prompt = f"电影角色设计图，{character_desc}。\n请生成一张包含以下内容的角色设计图：\n1. 左上角：角色正面特写\n2. 右上角：角色正面全身\n3. 左下角：角色侧面全身\n4. 右下角：角色背面全身\n重要要求：纯白背景，无水印，人物一致性。"
+    if color_system: prompt += f"\n色彩体系：{color_system}"
+    if emotional_keywords: prompt += f"\n情感基调：{emotional_keywords}"
+    if basic_info: prompt += f"\n背景设定：{basic_info}"
     return prompt
-
 
 @app.route('/api/generate/character_list', methods=['POST'])
 def generate_character_list():
-    """根据视觉统一设定生成角色列表"""
     data = request.json
-    config = get_provider_config(data.get('provider_id'))
-    if data.get('model_name'):
-        config['model_name'] = data.get('model_name')
+    config = db.get_provider_config(data.get('provider_id'))
+    if data.get('model_name'): config['model_name'] = data.get('model_name')
 
     visual_prompt = data.get('visual_consistency_prompt', '')
-    if not visual_prompt:
-        return jsonify({'success': False, 'error': '视觉统一设定不能为空'}), 400
-
     sys = "你是一个专业的电影角色设计师。请根据提供的视觉统一设定，生成3-5个主要角色列表，每个角色包含名称和详细描述。"
     msgs = [{'role': 'system', 'content': sys}, 
-            {'role': 'user', 'content': f"视觉统一设定：{visual_prompt}\n\n请生成JSON格式的角色列表，格式如下：\n{{\n  \"characters\": [\n    {{\"name\": \"角色名称\", \"description\": \"角色详细描述\"}},\n    ...\n  ]\n}}"}]
+            {'role': 'user', 'content': f"视觉统一设定：{visual_prompt}\n\n请生成JSON格式的角色列表: {{ \"characters\": [ {{\"name\": \"...\", \"description\": \"...\"}} ] }}"}]
 
     result = ai_service.run_text_generation(msgs, config)
-    
     if result.get('success'):
         try:
-            # 清理AI返回的文本，提取JSON部分
-            content = result.get('content', '')
-            # 尝试查找JSON部分
-            json_match = re.search(r'\{.*\}', content, re.DOTALL)
+            json_match = re.search(r'\{.*\}', result.get('content', ''), re.DOTALL)
             if json_match:
-                json_str = json_match.group(0)
-                character_data = json.loads(json_str)
+                character_data = json.loads(json_match.group(0))
                 return jsonify({'success': True, 'characters': character_data.get('characters', [])})
-            else:
-                return jsonify({'success': False, 'error': '无法解析角色列表'}), 500
-        except Exception as e:
-            return jsonify({'success': False, 'error': f'解析角色列表失败: {str(e)}'}), 500
-    else:
-        return jsonify(result), 500
+        except: pass
+    return jsonify({'success': False, 'error': '无法解析角色列表'}), 500
 
+# --- File Upload Helpers ---
+def allowed_file(filename):
+    return '.' in filename and filename.rsplit('.', 1)[1].lower() in {'png', 'jpg', 'jpeg', 'gif', 'bmp', 'webp'}
+
+def save_uploaded_file(file, prefix_id, sub_dir=IMG_SAVE_DIR):
+    if not file or not allowed_file(file.filename): return None, "Invalid file"
+    ext = os.path.splitext(file.filename)[1].lower() or '.png'
+    filename = f"{prefix_id}_{uuid.uuid4().hex[:8]}{ext}"
+    save_dir = os.path.join(STATIC_FOLDER, sub_dir)
+    os.makedirs(save_dir, exist_ok=True)
+    file_path = os.path.join(save_dir, filename)
+    file.save(file_path)
+    return f"/{sub_dir}/{filename}", None
 
 @app.route('/api/upload/character_image', methods=['POST'])
 def upload_character_image():
-    """上传角色图片"""
-    if 'file' not in request.files:
-        return jsonify({'success': False, 'error': '没有文件'}), 400
-    
-    file = request.files['file']
-    if file.filename == '':
-        return jsonify({'success': False, 'error': '没有选择文件'}), 400
-    
-    character_id = request.form.get('character_id')
-    # 不再需要view_type，因为只有一张图片
-    
-    if not character_id:
-        return jsonify({'success': False, 'error': '缺少必要参数'}), 400
-    
-    if file and allowed_file(file.filename):
-        # 生成唯一文件名
-        ext = os.path.splitext(file.filename)[1]
-        filename = f"character_{character_id}_{uuid.uuid4().hex[:8]}{ext}"
-        
-        # 确保目录存在
-        save_dir = os.path.join(STATIC_FOLDER, IMG_SAVE_DIR)
-        os.makedirs(save_dir, exist_ok=True)
-        
-        # 保存文件
-        file_path = os.path.join(save_dir, filename)
-        file.save(file_path)
-        
-        # 返回文件URL
-        file_url = f"/{IMG_SAVE_DIR}/{filename}"
-        return jsonify({'success': True, 'url': file_url})
-    
-    return jsonify({'success': False, 'error': '不支持的文件类型'}), 400
-
+    if 'file' not in request.files: return jsonify({'success': False, 'error': 'No file'}), 400
+    cid = request.form.get('character_id') or 'char'
+    url, err = save_uploaded_file(request.files['file'], f"character_{cid}")
+    if err: return jsonify({'success': False, 'error': err}), 400
+    return jsonify({'success': True, 'url': url})
 
 @app.route('/api/upload/scene_image', methods=['POST'])
 def upload_scene_image():
-    """上传场景图片"""
-    try:
-        # 检查是否有文件
-        if 'file' not in request.files:
-            return jsonify({'success': False, 'error': '没有文件'}), 400
-        
-        file = request.files['file']
-        if file.filename == '':
-            return jsonify({'success': False, 'error': '没有选择文件'}), 400
-
-        # scene_id 可能在 form 或者 json 中
-        scene_id = request.form.get('scene_id')
-        if not scene_id:
-            return jsonify({'success': False, 'error': '缺少 scene_id 参数'}), 400
-
-        # 检查文件类型
-        if not allowed_file(file.filename):
-            return jsonify({'success': False, 'error': '不支持的文件类型，仅支持 png, jpg, jpeg, gif, bmp'}), 400
-
-        # 生成唯一文件名
-        ext = os.path.splitext(file.filename)[1].lower()
-        if not ext:
-            ext = '.png'  # 默认扩展名
-        
-        filename = f"scene_{scene_id}_{uuid.uuid4().hex[:8]}{ext}"
-
-        # 确保目录存在
-        save_dir = os.path.join(STATIC_FOLDER, IMG_SAVE_DIR)
-        os.makedirs(save_dir, exist_ok=True)
-
-        # 保存文件
-        file_path = os.path.join(save_dir, filename)
-        file.save(file_path)
-
-        # 验证文件确实保存成功
-        if not os.path.exists(file_path):
-            return jsonify({'success': False, 'error': '文件保存失败'}), 500
-
-        # 返回文件URL
-        file_url = f"/{IMG_SAVE_DIR}/{filename}"
-        
-        return jsonify({'success': True, 'url': file_url})
-
-    except Exception as e:
-        import traceback
-        error_trace = traceback.format_exc()
-        print(f"Scene image upload error: {error_trace}")
-        return jsonify({'success': False, 'error': f'上传失败: {str(e)}'}), 500
-
-
-def allowed_file(filename):
-    """检查文件类型是否允许"""
-    ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'bmp'}
-    return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
-
+    if 'file' not in request.files: return jsonify({'success': False, 'error': 'No file'}), 400
+    sid = request.form.get('scene_id') or 'scene'
+    url, err = save_uploaded_file(request.files['file'], f"scene_{sid}")
+    if err: return jsonify({'success': False, 'error': err}), 400
+    return jsonify({'success': True, 'url': url})
 
 @app.route('/api/generate/scene_prompt', methods=['POST'])
 def generate_scene_prompt():
-    """生成场景提示词"""
     data = request.json
-    scene_description = data.get('scene_description')
-    project_id = data.get('project_id')
-    provider_id = data.get('provider_id')
-    model_name = data.get('model_name')
-
-    if not scene_description:
-        return jsonify({'success': False, 'error': '场景描述不能为空'}), 400
-
-    # 获取配置
-    config = get_provider_config(provider_id)
-    if model_name:
-        config['model_name'] = model_name
-
-    # 获取项目信息
-    project_info = {}
-    if project_id:
-        project_info = read_json(os.path.join(get_project_path(project_id), 'info.json'), default={})
-
-    # 构建系统提示词
-    sys = "你是一个专业的电影场景设计师。请根据场景描述生成详细的场景提示词，用于AI图片生成，不要添加场景描述以外的元素，你只需要描述场景，不要出现前景、人物等内容。"
+    config = db.get_provider_config(data.get('provider_id'))
+    if data.get('model_name'): config['model_name'] = data.get('model_name')
     
-    # 构建用户提示词，包含场景描述和项目信息
-    user_prompt = f"""场景描述：{scene_description}
-
-请生成一个详细的场景提示词，必须包含以下元素：
-1. 精确的时间设定（早晨、中午、下午、傍晚、夜晚等）
-2. 天气状况（晴朗、阴天、雨天、雪天等）
-3. 光源类型和方向（自然光、人造光、逆光等）
-4. 空间类型（室内、室外、半开放空间等）
-5. 空间尺度（狭小、适中、广阔等）
-6. 场景高度（低角度、平视、高角度等）
-7. 场景中的标志性建筑或物体
-8. 背景、前景和氛围的详细框架说明
-9. 整体氛围（宁静、紧张、欢乐等）
-10. 整体风格（写实、卡通、奇幻等）
-11. 景别（从这几个选项中选择：远景、全景、中景、近景）
-12. 视角设定（从这几个选项中选择：平视、俯视、仰视等）
-
-请直接返回提示词内容，不要包含其他解释或说明。"""
-
-    # 如果有项目信息，添加到提示词中
+    project_id = data.get('project_id')
+    project_info = db.get_project(project_id) if project_id else {}
+    
+    sys = "你是一个专业的电影场景设计师。请根据场景描述生成详细的场景提示词。"
+    user_prompt = f"场景描述：{data.get('scene_description')}\n请生成包含时间、天气、光影、空间、风格的详细提示词。"
+    
     if project_info:
-        color_system = project_info.get('visual_color_system', '')
-        emotional_keywords = project_info.get('script_emotional_keywords', '')
-        basic_info = project_info.get('basic_info', '')
-        
-        if color_system:
-            user_prompt += f"\n\n色彩体系要求：{color_system}"
-        if emotional_keywords:
-            user_prompt += f"\n\n情感基调：{emotional_keywords}"
-        if basic_info:
-            user_prompt += f"\n\n项目基础信息：{basic_info}"
+        user_prompt += f"\n色彩：{project_info.get('visual_color_system','')}\n基调：{project_info.get('script_emotional_keywords','')}"
 
-    msgs = [{'role': 'system', 'content': sys}, {'role': 'user', 'content': user_prompt}]
-
-    result = ai_service.run_text_generation(msgs, config)
-
-    if result.get('success'):
-        return jsonify({'success': True, 'prompt': result['content']})
-    else:
-        return jsonify({'success': False, 'error': result.get('error', '生成失败')}), 500
-
+    result = ai_service.run_text_generation([{'role': 'system', 'content': sys}, {'role': 'user', 'content': user_prompt}], config)
+    return jsonify({'success': True, 'prompt': result['content']}) if result.get('success') else (jsonify({'success': False}), 500)
 
 @app.route('/api/generate/scene_image', methods=['POST'])
 def generate_scene_image():
-    """生成场景图片"""
     data = request.json
-    scene_id = data.get('scene_id')
-    scene_prompt = data.get('scene_prompt')
-    provider_id = data.get('provider_id')
-    model_name = data.get('model_name')
+    config = db.get_provider_config(data.get('provider_id'))
+    if data.get('model_name'): config['model_name'] = data.get('model_name')
     
-    if not scene_prompt:
-        return jsonify({'success': False, 'error': '场景提示词不能为空'}), 400
+    prompt = f"电影场景设计图，{data.get('scene_prompt')}。高分辨率，电影质感。"
+    result = ai_service.run_simple_image_generation(prompt, config, os.path.join(STATIC_FOLDER, IMG_SAVE_DIR), f"/{IMG_SAVE_DIR}")
     
-    # 构建场景图片生成的提示词
-    full_prompt = f"""电影场景设计图，{scene_prompt}。
-    请生成一张高质量的场景设计图，包含以下元素：
-    1. 精确的时间设定（早晨、中午、下午、傍晚、夜晚等）
-    2. 天气状况（晴朗、阴天、雨天、雪天等）
-    3. 光源类型和方向（自然光、人造光、逆光等）
-    4. 空间类型（室内、室外、半开放空间等）
-    5. 空间尺度（狭小、适中、广阔等）
-    6. 场景高度（低角度、平视、高角度等）
-    7. 场景中的标志性建筑或物体
-    8. 背景、前景和氛围的详细框架说明
-    9. 整体氛围（宁静、紧张、欢乐等）
-    10. 整体风格（写实、卡通、奇幻等）
-    11. 景别（远景、全景、中景、近景等）
-    12. 视角设定（平视、俯视、仰视等）
-    13. 构图方式（对称、黄金分割、对角线等）
-    
-    图片要求：
-    - 高分辨率，细节丰富
-    - 电影级质感，色彩协调
-    - 光影效果真实自然
-    - 构图均衡，有深度感"""
-    
-    # 获取配置
-    config = get_provider_config(provider_id)
-    if model_name:
-        config['model_name'] = model_name
-    
-    # 设置保存路径
-    save_dir = os.path.join(STATIC_FOLDER, IMG_SAVE_DIR)
-    web_prefix = f"/{IMG_SAVE_DIR}"
-    
-    # 使用AI服务生成图片
-    result = ai_service.run_simple_image_generation(
-        full_prompt,
-        config,
-        save_dir,
-        web_prefix
-    )
-    
-    if result.get('success'):
-        return jsonify({'success': True, 'url': result['url']})
-    else:
-        return jsonify({'success': False, 'error': result.get('error_msg', '生成失败')}), 500
+    return jsonify({'success': True, 'url': result['url']}) if result.get('success') else (jsonify({'success': False}), 500)
 
-@app.route('/api/projects/<project_id>/characters/<character_id>', methods=['PUT'])
-def update_character(project_id, character_id):
-    """更新角色信息"""
-    data = request.json
-    path = os.path.join(get_project_path(project_id), 'characters.json')
-    characters = read_json(path, default=[])
-    
-    for i, char in enumerate(characters):
-        if char['id'] == character_id:
-            # 更新角色信息
-            updated_char = {**char, **data}
-            characters[i] = updated_char
-            write_json(path, characters)
-            return jsonify(updated_char)
-    
-    return jsonify({"error": "Not found"}), 404
-
+# === Fusion API ===
 @app.route('/api/projects/<project_id>/fusions', methods=['GET'])
 def get_fusions(project_id):
-    """获取项目融图任务列表"""
-    path = os.path.join(get_project_path(project_id), 'fusions.json')
-    # 确保返回列表，即使文件不存在或为空
-    fusions = read_json(path, default=[])
-    return jsonify(fusions)
+    return jsonify(db.get_fusions(project_id))
 
 @app.route('/api/projects/<project_id>/fusions', methods=['POST'])
 def create_fusion(project_id):
-    """创建新的融图任务"""
-    data = request.json
-    path = os.path.join(get_project_path(project_id), 'fusions.json')
-    fusions = read_json(path, default=[])
-    
-    # 确保生成唯一的ID
-    data['id'] = str(uuid.uuid4())
-    data['created_time'] = datetime.now().isoformat()
-    data['updated_time'] = datetime.now().isoformat()
-    
-    new_fusion = FusionTask.from_dict(data) 
-    
-    # [新增] 处理插入位置
-    insert_index = data.get('insert_index')
-    if insert_index is not None and isinstance(insert_index, int) and 0 <= insert_index <= len(fusions):
-        fusions.insert(insert_index, new_fusion.to_dict())
-    else:
-        fusions.append(new_fusion.to_dict())
-        
-    write_json(path, fusions)
-    return jsonify(new_fusion.to_dict()), 201
+    return jsonify(db.create_fusion(project_id, request.json)), 201
 
 @app.route('/api/projects/<project_id>/fusions/<fusion_id>', methods=['PUT'])
 def update_fusion(project_id, fusion_id):
-    """更新融图任务"""
-    path = os.path.join(get_project_path(project_id), 'fusions.json')
-    fusions = read_json(path, default=[])
-    
-    for i, f in enumerate(fusions):
-        if f['id'] == fusion_id:
-            # 合并数据并更新时间
-            merged_data = {**f, **request.json, 'id': fusion_id, 'updated_time': datetime.now().isoformat()}
-            new_fusion = FusionTask.from_dict(merged_data)
-            fusions[i] = new_fusion.to_dict()
-            write_json(path, fusions)
-            return jsonify(new_fusion.to_dict())
-            
+    updated = db.update_fusion(project_id, fusion_id, request.json)
+    if updated: return jsonify(updated)
     return jsonify({"error": "Not found"}), 404
 
 @app.route('/api/projects/<project_id>/fusions/<fusion_id>', methods=['DELETE'])
 def delete_fusion(project_id, fusion_id):
-    """删除融图任务"""
-    path = os.path.join(get_project_path(project_id), 'fusions.json')
-    fusions = read_json(path, default=[])
-    new_fusions = [f for f in fusions if f['id'] != fusion_id]
-    write_json(path, new_fusions)
+    db.delete_fusion(project_id, fusion_id)
     return jsonify({"message": "Deleted"})
 
-# --- 融图功能：AI 生成元素图片 (新增) ---
 @app.route('/api/generate/element_image', methods=['POST'])
 def generate_element_image():
-    """AI生成融图元素图片"""
     data = request.json
-    prompt = data.get('prompt')
-    provider_id = data.get('provider_id')
-    model_name = data.get('model_name')
-
-    if not prompt:
-        return jsonify({'success': False, 'error': '提示词不能为空'}), 400
+    config = db.get_provider_config(data.get('provider_id'))
+    if data.get('model_name'): config['model_name'] = data.get('model_name')
     
-    # 获取配置
-    config = get_provider_config(provider_id)
-    if model_name: config['model_name'] = model_name
+    result = ai_service.run_simple_image_generation(data.get('prompt'), config, os.path.join(STATIC_FOLDER, IMG_SAVE_DIR), f"/{IMG_SAVE_DIR}")
+    return jsonify({'success': True, 'url': result['url']}) if result.get('success') else (jsonify({'success': False}), 500)
 
-    # 设置保存路径
-    save_dir = os.path.join(STATIC_FOLDER, IMG_SAVE_DIR)
-    web_prefix = f"/{IMG_SAVE_DIR}"
-
-    # 使用 run_simple_image_generation 生成元素图片
-    result = ai_service.run_simple_image_generation(
-        prompt,
-        config,
-        save_dir,
-        web_prefix
-    )
-
-    if result.get('success'):
-        return jsonify({'success': True, 'url': result['url']})
-    else:
-        return jsonify({'success': False, 'error': result.get('error_msg', '生成失败')}), 500
-
-# --- 融图功能：上传元素图片 (新增) ---
 @app.route('/api/upload/element_image', methods=['POST'])
 def upload_element_image():
-    """上传融图元素图片"""
-    if 'file' not in request.files: return jsonify({'success': False, 'error': 'No file'}), 400
-    file = request.files['file']
-    if file.filename == '': return jsonify({'success': False, 'error': 'No selected file'}), 400
-    ext = os.path.splitext(file.filename)[1].lower()
-    if not allowed_file(file.filename): return jsonify({'success': False, 'error': 'Invalid file type'}), 400
-    
-    filename = f"fusion_element_{uuid.uuid4()}{ext}"
-    path = os.path.join(STATIC_FOLDER, IMG_SAVE_DIR, filename)
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    file.save(path)
-    return jsonify({'success': True, 'url': f"/{IMG_SAVE_DIR}/{filename}"})
-
-
-# --- 融图功能：核心生成接口 (修改) ---
-@app.route('/api/generate/fusion_image', methods=['POST'])
-def generate_fusion_image():
-    """
-    真正的融图生成接口
-    使用 base_image 作为底图，调用 AI 的图生图接口，并传入元素图片
-    """
-    data = request.json
-    fusion_id = data.get('fusion_id')
-    fusion_prompt = data.get('fusion_prompt')
-    provider_id = data.get('provider_id')
-    model_name = data.get('model_name')
-    project_id = data.get('project_id')
-
-    if not project_id or not fusion_id:
-        return jsonify({'success': False, 'error': '缺少项目或任务ID，请先保存任务'}), 400
-    
-    # 1. 获取完整的 FusionTask 数据
-    fusions_path = os.path.join(get_project_path(project_id), 'fusions.json')
-    fusions = read_json(fusions_path, default=[])
-    current_fusion = next((f for f in fusions if f['id'] == fusion_id), None)
-    
-    if not current_fusion:
-        return jsonify({'success': False, 'error': '融图任务不存在'}), 404
-        
-    base_image_url = current_fusion.get('base_image')
-    
-    if not base_image_url:
-        return jsonify({'success': False, 'error': '请设置基础图片'}), 400
-    
-    # 2. 处理 base_image 路径
-    if base_image_url.startswith('/'):
-        base_image_path = os.path.join(STATIC_FOLDER, base_image_url.lstrip('/'))
-    else:
-        # 假设所有图片都是通过上传保存的本地路径
-        base_image_path = None
-    
-    if not base_image_path or not os.path.exists(base_image_path):
-        return jsonify({'success': False, 'error': '基础图片文件不存在'}), 404
-
-    # 3. 处理 elements 路径
-    element_image_paths = []
-    element_images = current_fusion.get('elements', [])
-    for element in element_images:
-        url = element.get('image_url')
-        if url and url.startswith('/'):
-            path = os.path.join(STATIC_FOLDER, url.lstrip('/'))
-            if os.path.exists(path):
-                element_image_paths.append(path)
-
-    # 4. 调用 AI Service (假设 ai_service.run_fusion_generation 接受 element_image_paths)
-    config = get_provider_config(provider_id)
-    if model_name: config['model_name'] = model_name
-    
-    save_dir = os.path.join(STATIC_FOLDER, IMG_SAVE_DIR)
-    web_prefix = f"/{IMG_SAVE_DIR}"
-    
-    # Note: ai_service.run_fusion_generation needs to be updated in a hypothetical ai_service.py to accept element_image_paths
-    # We pass it here assuming the service supports it.
-    result = ai_service.run_fusion_generation(
-        base_image_path=base_image_path,
-        fusion_prompt=fusion_prompt,
-        config=config,
-        save_dir=save_dir,
-        url_prefix=web_prefix,
-        element_image_paths=element_image_paths
-    )
-    
-    if result.get('success'):
-        return jsonify({'success': True, 'url': result['url']})
-    else:
-        return jsonify({'success': False, 'error': result.get('error_msg', '生成失败')}), 500
+    if 'file' not in request.files: return jsonify({'success': False}), 400
+    url, err = save_uploaded_file(request.files['file'], f"fusion_element")
+    if err: return jsonify({'success': False, 'error': err}), 400
+    return jsonify({'success': True, 'url': url})
 
 @app.route('/api/upload/base_image', methods=['POST'])
 def upload_base_image():
-    if 'file' not in request.files: return jsonify({'success': False, 'error': 'No file'}), 400
-    file = request.files['file']
-    if file.filename == '': return jsonify({'success': False, 'error': 'No selected file'}), 400
-    ext = os.path.splitext(file.filename)[1].lower()
-    if ext not in ['.jpg', '.jpeg', '.png', '.webp']: return jsonify({'success': False, 'error': 'Invalid file type'}), 400
-    filename = f"fusion_base_{uuid.uuid4()}{ext}"
-    path = os.path.join(STATIC_FOLDER, IMG_SAVE_DIR, filename)
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    file.save(path)
-    return jsonify({'success': True, 'url': f"/{IMG_SAVE_DIR}/{filename}"})
+    if 'file' not in request.files: return jsonify({'success': False}), 400
+    url, err = save_uploaded_file(request.files['file'], f"fusion_base")
+    if err: return jsonify({'success': False, 'error': err}), 400
+    return jsonify({'success': True, 'url': url})
 
-@app.route('/api/generate/fusion_prompt', methods=['POST'])
-def generate_fusion_prompt():
-    """生成融图提示词"""
-    data = request.json
-    scene_description = data.get('scene_description')
-    shot_description = data.get('shot_description')
-    project_id = data.get('project_id')
-    provider_id = data.get('provider_id')
-    model_name = data.get('model_name')
-    # 接收前端传来的素材映射描述字符串 (例如："图1:男主角, 图2:女主角, 图3:背景底图")
-    element_mapping = data.get('element_mapping', '')
-    
-    if not scene_description:
-        return jsonify({'success': False, 'error': '场景描述不能为空'}), 400
-
-    # 获取配置
-    config = get_provider_config(provider_id)
-    if model_name:
-        config['model_name'] = model_name
-
-    # 获取项目信息
-    project_info = {}
-    if project_id:
-        project_info = read_json(os.path.join(get_project_path(project_id), 'info.json'), default={})
-
-    # 构建系统提示词
-    sys = "你是一个专业的电影分镜设计师。请根据场景描述生成详细的场景及人物和元素图片融合的提示词，用于AI图片融合，作为电影分镜的一部分；"
-    
-    # 构建用户提示词，包含场景描述和项目信息
-    user_prompt = f"""【输入图片列表 (必须在提示词中引用)】：{element_mapping} 【场景环境】：{scene_description} 【画面/动作描述】：{shot_description}
-
-请生成一个详细的融合图片提示词，必须包含以下元素：人物、场景、人物展位、人物朝向、姿态、景别、视角、构图、时间、氛围、人物表情。
-例如：人物+场景：1个人物:人物/角色在某场景中所处相对位置，做什么，什么表情/情绪，做什么，额外可对场景增加提示词描述改变场景状态，如光线、夜晚。
-两个人物:描述两个人物在场景中所处的相对位置，如棕色衣服小男孩如何，红色衣服女人如何，在场景中做什么互动。
-人物+场景+物品+特效：人物/角色在场景中，拿着具体什么物品做什么动作，或描述物品/效果出现的位置。
-
-输入图片的顺序时人物等前景元素图片在前，最后是场景底图，在提示词描述时请注意顺序。
-
-请直接返回提示词内容，不要包含其他解释或说明。"""
-
-    # 如果有项目信息，添加到提示词中
-    if project_info:
-        color_system = project_info.get('visual_color_system', '')
-        
-        if color_system:
-            user_prompt += f"\n\n色彩体系要求：{color_system}"
-
-    msgs = [{'role': 'system', 'content': sys + "你要根据场景描述生成第1秒的画面"}, {'role': 'user', 'content': user_prompt}]
-
-    result = ai_service.run_text_generation(msgs, config)
-    
-    end_frame_result = ai_service.run_text_generation([{'role': 'system', 'content': sys + "你要根据场景描述生成最后秒的画面"}, {'role': 'user', 'content': user_prompt}], config)
-
-    if result.get('success'):
-        return jsonify({'success': True, 'prompt': result['content'], 'end_frame_prompt': end_frame_result['content']})
-    else:
-        return jsonify({'success': False, 'error': result.get('error', '生成失败')}), 500
-    
-# --- 融图功能：生成视频 (新增) ---
-@app.route('/api/generate/fusion_video', methods=['POST'])
-def generate_fusion_video():
-    """
-    融图视频生成接口
-    使用 result_image 作为首帧，end_frame_image 作为尾帧 (如果存在)
-    """
+@app.route('/api/generate/fusion_image', methods=['POST'])
+def generate_fusion_image():
     data = request.json
     fusion_id = data.get('fusion_id')
     project_id = data.get('project_id')
-    provider_id = data.get('provider_id')
-    model_name = data.get('model_name')
     
-    # 1. 获取任务数据
-    fusions_path = os.path.join(get_project_path(project_id), 'fusions.json')
-    fusions = read_json(fusions_path, default=[])
-    current_fusion = next((f for f in fusions if f['id'] == fusion_id), None)
+    current_fusion = db.get_fusion(project_id, fusion_id)
+    if not current_fusion: return jsonify({'success': False, 'error': 'Fusion not found'}), 404
     
-    if not current_fusion:
-        return jsonify({'success': False, 'error': '融图任务不存在'}), 404
+    base_image_url = current_fusion.get('base_image')
+    if not base_image_url: return jsonify({'success': False, 'error': 'No base image'}), 400
+    
+    base_image_path = os.path.join(STATIC_FOLDER, base_image_url.lstrip('/'))
+    
+    element_paths = []
+    for el in current_fusion.get('elements', []):
+        if el.get('image_url'): element_paths.append(os.path.join(STATIC_FOLDER, el['image_url'].lstrip('/')))
         
-    # 2. 准备首尾帧路径
-    start_url = current_fusion.get('result_image')
-    end_url = current_fusion.get('end_frame_image') # 目前可能为空，但逻辑预留
+    config = db.get_provider_config(data.get('provider_id'))
+    if data.get('model_name'): config['model_name'] = data.get('model_name')
     
-    if not start_url:
-        return jsonify({'success': False, 'error': '缺少首帧图片 (Result Image)'}), 400
-        
-    # 将 URL 转换为本地绝对路径供 AI Service 读取
-    start_path = os.path.abspath(os.path.join(STATIC_FOLDER, start_url.lstrip('/')))
-    end_path = os.path.abspath(os.path.join(STATIC_FOLDER, end_url.lstrip('/'))) if end_url else None
+    result = ai_service.run_fusion_generation(
+        base_image_path=base_image_path,
+        fusion_prompt=data.get('fusion_prompt'),
+        config=config,
+        save_dir=os.path.join(STATIC_FOLDER, IMG_SAVE_DIR),
+        url_prefix=f"/{IMG_SAVE_DIR}",
+        element_image_paths=element_paths
+    )
     
-    # 3. 准备 Prompt (使用融图提示词或分镜描述)
-    prompt = current_fusion.get('fusion_prompt') or current_fusion.get('visual_description') or "High quality video"
+    return jsonify({'success': True, 'url': result['url']}) if result.get('success') else (jsonify({'success': False, 'error': result.get('error_msg')}), 500)
+
+@app.route('/api/generate/fusion_prompt', methods=['POST'])
+def generate_fusion_prompt():
+    data = request.json
+    config = db.get_provider_config(data.get('provider_id'))
+    if data.get('model_name'): config['model_name'] = data.get('model_name')
     
-    # 4. 获取配置
-    config = get_provider_config(provider_id)
-    if model_name: config['model_name'] = model_name
+    project_info = db.get_project(data.get('project_id')) if data.get('project_id') else {}
     
-    save_dir = os.path.join(STATIC_FOLDER, VIDEO_SAVE_DIR)
-    web_prefix = f"/{VIDEO_SAVE_DIR}"
+    sys = "你是一个专业的电影分镜设计师。请根据场景描述生成详细的融合图片提示词。"
+    user_prompt = f"【元素】：{data.get('element_mapping')} 【场景】：{data.get('scene_description')} 【动作】：{data.get('shot_description')}\n需包含：位置、朝向、景别、光影。"
+    if project_info: user_prompt += f"\n色彩：{project_info.get('visual_color_system','')}"
     
-    # 5. 调用 AI Service
-    try:
-        result = ai_service.run_video_generation(
-            prompt, 
-            start_path, 
-            end_path, 
-            config, 
-            save_dir, 
-            web_prefix
-        )
-        
-        if result.get('success'):
-            video_url = result['url']
-            
-            # 更新数据
-            current_fusion['video_url'] = video_url
-            current_fusion['updated_time'] = datetime.now().isoformat()
-            
-            # 保存回文件
-            # 注意：我们需要更新 fusions 列表中的这个对象，上面的 current_fusion 是引用，直接修改即可
-            # 但为了安全起见，重新找索引赋值
-            for i, f in enumerate(fusions):
-                if f['id'] == fusion_id:
-                    fusions[i] = current_fusion
-                    break
-            
-            write_json(fusions_path, fusions)
-            
-            return jsonify({'success': True, 'url': video_url})
-        else:
-            return jsonify({'success': False, 'error': result.get('error_msg', '生成失败')}), 500
-            
-    except Exception as e:
-        import traceback
-        traceback.print_exc()
-        return jsonify({'success': False, 'error': str(e)}), 500
+    res_start = ai_service.run_text_generation([{'role': 'system', 'content': sys + " (首帧)"}, {'role': 'user', 'content': user_prompt}], config)
+    res_end = ai_service.run_text_generation([{'role': 'system', 'content': sys + " (尾帧)"}, {'role': 'user', 'content': user_prompt}], config)
     
+    if res_start.get('success'):
+        return jsonify({'success': True, 'prompt': res_start['content'], 'end_frame_prompt': res_end.get('content', '')})
+    return jsonify({'success': False}), 500
+
+@app.route('/api/generate/fusion_video', methods=['POST'])
+def generate_fusion_video():
+    data = request.json
+    fusion_id = data.get('fusion_id')
+    project_id = data.get('project_id')
+    
+    current_fusion = db.get_fusion(project_id, fusion_id)
+    if not current_fusion: return jsonify({'success': False, 'error': 'Not found'}), 404
+    
+    s_url = current_fusion.get('result_image')
+    e_url = current_fusion.get('end_frame_image')
+    if not s_url: return jsonify({'success': False, 'error': 'No start image'}), 400
+    
+    s_path = os.path.abspath(os.path.join(STATIC_FOLDER, s_url.lstrip('/')))
+    e_path = os.path.abspath(os.path.join(STATIC_FOLDER, e_url.lstrip('/'))) if e_url else None
+    
+    config = db.get_provider_config(data.get('provider_id'))
+    if data.get('model_name'): config['model_name'] = data.get('model_name')
+    
+    result = ai_service.run_video_generation(
+        current_fusion.get('fusion_prompt') or "high quality video",
+        s_path, e_path, config, 
+        os.path.join(STATIC_FOLDER, VIDEO_SAVE_DIR), 
+        f"/{VIDEO_SAVE_DIR}"
+    )
+    
+    if result.get('success'):
+        db.update_fusion(project_id, fusion_id, {'video_url': result['url']})
+        return jsonify({'success': True, 'url': result['url']})
+    return jsonify({'success': False}), 500
+
 if __name__ == '__main__':
-    ensure_dirs()
+    ensure_static_dirs()
     print(f"Server started on http://127.0.0.1:5000")
     app.run(debug=True, port=5000)
