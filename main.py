@@ -1,5 +1,6 @@
 import os
 import time
+import json
 import re
 import uuid
 from typing import List, Optional, Dict, Any
@@ -386,7 +387,7 @@ def generate_character_list():
     if data.get('model_name'): config['model_name'] = data.get('model_name')
 
     visual_prompt = data.get('visual_consistency_prompt', '')
-    sys = "你是一个专业的电影角色设计师。请根据提供的视觉统一设定，生成3-5个主要角色列表，每个角色包含名称和详细描述。"
+    sys = "你是一个专业的电影角色设计师。请根据提供的视觉统一设定，生成主要角色列表，每个角色包含名称和详细描述。"
     msgs = [{'role': 'system', 'content': sys}, 
             {'role': 'user', 'content': f"视觉统一设定：{visual_prompt}\n\n请生成JSON格式的角色列表: {{ \"characters\": [ {{\"name\": \"...\", \"description\": \"...\"}} ] }}"}]
 
