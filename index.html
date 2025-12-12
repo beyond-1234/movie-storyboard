@@ -413,7 +413,8 @@
                                         <el-tooltip content="生成提示词" placement="top"><el-button size="mini" type="success" icon="el-icon-magic-stick" circle plain @click="generateScenePrompt(scope.row)"></el-button></el-tooltip>
                                         <el-tooltip content="生成图片" placement="top"><el-button size="mini" type="primary" icon="el-icon-picture" circle plain @click="generateSceneImage(scope.row)"></el-button></el-tooltip>
                                         <el-tooltip content="替换图片" placement="top"><el-button size="mini" type="info" icon="el-icon-upload2" circle plain @click="uploadSceneImage(scope.row)"></el-button></el-tooltip>
-                                        <el-tooltip content="向下插入一行" placement="top"><el-button size="mini" type="primary" icon="el-icon-plus" circle plain @click="insertScene(scope.$index)"></el-button></el-tooltip> <el-tooltip content="生成提示词" placement="top"><el-button size="mini" type="success" icon="el-icon-magic-stick" circle plain @click="generateScenePrompt(scope.row)"></el-button></el-tooltip>
+                                        <el-tooltip content="删除" placement="top"><el-button size="mini" type="danger" icon="el-icon-delete" circle plain @click="deleteShot(scope.row)"></el-button></el-tooltip>
+                                        <el-tooltip content="向下插入一行" placement="top"><el-button size="mini" type="primary" icon="el-icon-plus" circle plain @click="insertScene(scope.$index)"></el-button></el-tooltip> 
                                     </template>
                                 </el-table-column>
                             </el-table>
@@ -554,7 +555,7 @@
                                         <el-tooltip content="生成融合图" placement="top"><el-button size="mini" type="success" icon="el-icon-picture" circle plain @click="generateFusionImage(scope.row)"></el-button></el-tooltip>
                                         <el-tooltip content="生成视频" placement="top"><el-button size="mini" type="primary" icon="el-icon-video-camera" circle plain @click="generateFusionVideo(scope.row)" :disabled="!scope.row.result_image"></el-button></el-tooltip>
                                         <el-tooltip content="删除" placement="top"><el-button size="mini" type="danger" icon="el-icon-delete" circle plain @click="deleteFusion(scope.row)"></el-button></el-tooltip>
-                                        <el-tooltip content="向下插入一行" placement="top"><el-button size="mini" type="primary" icon="el-icon-plus" circle plain @click="insertFusion(scope.$index)"></el-button></el-tooltip> <el-tooltip content="生成提示词" placement="top"><el-button size="mini" type="warning" icon="el-icon-magic-stick" circle plain @click="generateFusionPrompt(scope.row)"></el-button></el-tooltip>
+                                        <el-tooltip content="向下插入一行" placement="top"><el-button size="mini" type="primary" icon="el-icon-plus" circle plain @click="insertFusion(scope.$index)"></el-button></el-tooltip> 
                                     </template>
                                 </el-table-column>
                             </el-table>
@@ -1223,7 +1224,7 @@
                 },
                 editShot(row) { this.shotForm = JSON.parse(JSON.stringify(row)); this.videoUrl=row.video_url||''; this.shotDialogVisible = true; },
                 async submitShot() { if(!this.shotForm.shot_number) return; if(this.videoUrl) this.shotForm.video_url = this.videoUrl; const method = this.shotForm.id ? 'PUT' : 'POST'; const url = this.shotForm.id ? `/api/projects/${this.currentProjectId}/shots/${this.shotForm.id}` : `/api/projects/${this.currentProjectId}/shots`; await this.request(method, url, this.shotForm); this.fetchShots(this.currentProjectId); this.shotDialogVisible = false; },
-                async deleteShot(row) { await this.request('DELETE', `/api/projects/${this.currentProjectId}/shots/${row.id}`); this.fetchShots(this.currentProjectId); },
+                async deleteShot(row) { await this.$confirm('确定删除该场景？此操作不可恢复。', '提示', { type: 'warning' }); await this.request('DELETE', `/api/projects/${this.currentProjectId}/shots/${row.id}`); this.fetchShots(this.currentProjectId); },
                 removeImage() {}, previewImage(url) { this.previewUrl = url; this.previewVisible = true; },
                 async fetchCharacters() {
                     if (!this.currentProjectId) return;
