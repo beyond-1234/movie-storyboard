@@ -896,7 +896,26 @@
                     </el-col>
                     <el-col :span="8">
                         <el-form-item label="关联分镜 ID" :title="fusionForm.shot_id || '无'">
-                            <el-tag size="mini">{{ fusionForm.shot_id ? fusionForm.shot_id.slice(0, 8) + '...' : '未关联' }}</el-tag>
+                            <el-select 
+                                v-model="fusionForm.shot_id" 
+                                placeholder="选择关联分镜" 
+                                filterable 
+                                clearable 
+                                style="width: 100%"
+                                @change="handleFusionShotChange"
+                            >
+                                <el-option
+                                    v-for="shot in shotList"
+                                    :key="shot.id"
+                                    :label="`场${shot.scene}-镜${shot.shot_number}`"
+                                    :value="shot.id">
+                                    <span style="float: left; font-weight: bold;">{{ shot.scene }}-{{ shot.shot_number }}</span>
+                                    <span style="float: right; color: #8492a6; font-size: 12px; margin-left: 10px; max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+                                        {{ shot.visual_description || '无画面描述' }}
+                                    </span>
+                                </el-option>
+                            </el-select>
+                            <!-- <el-tag size="mini">{{ fusionForm.shot_id ? fusionForm.shot_id.slice(0, 8) + '...' : '未关联' }}</el-tag> -->
                         </el-form-item>
                     </el-col>
                 </el-row>
@@ -2504,7 +2523,88 @@
                             throw e;
                         }
                 },
-                
+                // 处理融图任务中分镜选择的变化
+                handleFusionShotChange(shotId) {
+                    // 1. 如果用户点击了清除按钮（shotId 为空），则清空相关字段
+                        if (!shotId) {
+                            this.fusionForm.scene = '';
+                            this.fusionForm.shot_number = '';
+                            this.fusionForm.scene_description = '';
+                            this.fusionForm.visual_description = '';
+                            this.fusionForm.dialogue = '';
+                            this.fusionForm.audio_description = '';
+                            return;
+                        }
+
+                        // 2. 在 shotList 中查找对应的分镜对象
+                        const targetShot = this.shotList.find(s => s.id === shotId);
+
+                        if (targetShot) {
+                            // === 第一步：无论如何，先更新文本元数据 ===
+                            this.fusionForm.scene = targetShot.scene;
+                            this.fusionForm.shot_number = targetShot.shot_number;
+                            
+                            // 自动回填描述信息（配合 saveFusionData 的不落地显示逻辑）
+                            this.fusionForm.scene_description = targetShot.scene_description || '';
+                            this.fusionForm.visual_description = targetShot.visual_description || '';
+                            this.fusionForm.dialogue = targetShot.dialogue || '';
+                            this.fusionForm.audio_description = targetShot.audio_description || '';
+
+                            // === 第二步：检查是否有资源可更新 ===
+                            const hasSceneImage = !!targetShot.scene_image;
+                            const hasCharacters = targetShot.characters && targetShot.characters.length > 0;
+
+                            // 如果分镜既没有场景图也没有角色，就不用弹窗问了
+                            if (!hasSceneImage && !hasCharacters) {
+                                return;
+                            }
+
+                            // === 第三步：弹窗询问用户 ===
+                            let confirmText = '检测到该分镜包含';
+                            if (hasSceneImage) confirmText += '【场景图片】';
+                            if (hasSceneImage && hasCharacters) confirmText += '和';
+                            if (hasCharacters) confirmText += '【关联角色】';
+                            confirmText += '。\n\n是否直接将其覆盖到当前任务的“底图”和“元素”中？';
+
+                            this.$confirm(confirmText, '同步资源确认', {
+                                confirmButtonText: '覆盖更新',
+                                cancelButtonText: '仅关联数据',
+                                type: 'warning',
+                                distinguishCancelAndClose: true // 区分点击取消按钮和点击关闭X
+                            }).then(() => {
+                                // === 用户选择“覆盖更新” ===
+                                
+                                // 1. 更新底图
+                                if (hasSceneImage) {
+                                    this.fusionForm.base_image = targetShot.scene_image;
+                                }
+
+                                // 2. 更新元素（深拷贝防止引用问题）
+                                if (hasCharacters) {
+                                    // 将角色转换为元素格式
+                                    // 注意：原 shot.characters 可能包含 id, name, description, image_url
+                                    // 融图元素通常需要 image_url 和 name
+                                    const newElements = targetShot.characters.map(char => ({
+                                        id: `element_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`, // 生成新ID
+                                        name: char.name,
+                                        image_url: char.image_url,
+                                        type: 'character',
+                                        character_id: char.id // 关联原始角色ID
+                                    }));
+                                    
+                                    this.$set(this.fusionForm, 'elements', newElements);
+                                }
+
+                                this.$message.success('已同步分镜的图片和角色数据');
+
+                            }).catch((action) => {
+                                // === 用户选择“仅关联数据”或关闭弹窗 ===
+                                if (action === 'cancel') {
+                                    this.$message.info('已保留当前任务原有的底图和元素');
+                                }
+                            });
+                        }
+                },
                 // 处理元素图片上传
                 async handleElementUpload(e) {
                     const file = e.target.files[0];
