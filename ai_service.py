@@ -16,7 +16,10 @@ from typing import Dict, Any, Optional, List
 from zai import ZhipuAiClient
 
 # 配置日志
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logging.basicConfig(
+    level=logging.INFO, 
+    format='%(asctime)s - %(name)s - %(levelname)s - [%(filename)s:%(lineno)d] - %(message)s'
+)
 logger = logging.getLogger("AIService")
 
 # 尝试导入 dashscope (仅用于阿里云)
@@ -31,29 +34,73 @@ except ImportError:
 
 # --- 通用工具 ---
 
+def _safe_log_payload(payload: Dict) -> str:
+    """
+    辅助函数：安全地记录 Payload，将过长的 Base64 字符串截断，防止日志爆炸。
+    """
+    if not payload:
+        return "{}"
+    try:
+        # 浅拷贝以免修改原数据
+        log_data = payload.copy()
+        # 需要截断的字段名列表
+        keys_to_truncate = ['images', 'image', 'image_url', 'binary_data_base64', 'first_frame_image', 'last_frame_image', 'image_file', 'first_frame_url', 'last_frame_url']
+        
+        for key in keys_to_truncate:
+            if key in log_data:
+                val = log_data[key]
+                if isinstance(val, list):
+                    # 列表中的 Base64 字符串
+                    log_data[key] = [f"<Base64 Data (len={len(v)})>" if isinstance(v, str) and len(v) > 200 else v for v in val]
+                elif isinstance(val, str) and len(val) > 200:
+                    # 单个 Base64 字符串
+                    log_data[key] = f"<Base64 Data (len={len(val)})>"
+        
+        # 针对 MiniMax subject_reference 特殊结构的递归处理
+        if 'subject_reference' in log_data and isinstance(log_data['subject_reference'], list):
+            new_refs = []
+            for ref in log_data['subject_reference']:
+                if isinstance(ref, dict):
+                    new_ref = ref.copy()
+                    if 'image_file' in new_ref and len(str(new_ref['image_file'])) > 200:
+                        new_ref['image_file'] = f"<Base64 Data (len={len(str(new_ref['image_file']))})>"
+                    new_refs.append(new_ref)
+                else:
+                    new_refs.append(ref)
+            log_data['subject_reference'] = new_refs
+
+        return json.dumps(log_data, ensure_ascii=False)
+    except Exception as e:
+        return f"<Error parsing payload for logging: {str(e)}>"
+
 def file_to_base64(file_path: str) -> Optional[str]:
-    if not file_path or not os.path.exists(file_path): return None
+    if not file_path or not os.path.exists(file_path): 
+        logger.warning(f"[Base64] File not found: {file_path}")
+        return None
     mime_type, _ = mimetypes.guess_type(file_path)
     if not mime_type: mime_type = 'image/png'
     try:
         with open(file_path, "rb") as f:
             base64_data = base64.b64encode(f.read()).decode('utf-8')
+        logger.debug(f"[Base64] Converted {file_path} to base64 (len={len(base64_data)})")
         return f"data:{mime_type};base64,{base64_data}"
     except Exception as e:
-        logger.error(f"[Base64] Error: {e}")
+        logger.error(f"[Base64] Error converting {file_path}: {e}")
         return None
 
 def download_file(url: str, save_path: str):
+    logger.info(f"[Download] Starting download: {url} -> {save_path}")
     try:
         resp = requests.get(url, stream=True, timeout=120)
         if resp.status_code == 200:
             with open(save_path, 'wb') as f:
                 for chunk in resp.iter_content(1024): f.write(chunk)
+            logger.info(f"[Download] Success: {save_path} ({os.path.getsize(save_path)} bytes)")
             return True
         else:
-            logger.error(f"Download returned status {resp.status_code}")
+            logger.error(f"[Download] Failed status code: {resp.status_code} for {url}")
     except Exception as e:
-        logger.error(f"Download failed: {e}")
+        logger.error(f"[Download] Exception: {e}")
     return False
 
 # ============================================================
@@ -67,12 +114,18 @@ class AliyunHandler:
         api_key = config.get('api_key') or os.getenv("DASHSCOPE_API_KEY")
         model = config.get('model_name') or 'qwen-plus'
         
+        logger.info(f"[Aliyun] Text Gen Request. Model: {model}, Msg Count: {len(messages)}")
         try:
             rsp = Generation.call(api_key=api_key, model=model, messages=messages, result_format='message')
             if rsp.status_code == HTTPStatus.OK:
-                return {'success': True, 'content': rsp.output.choices[0].message.content}
+                content = rsp.output.choices[0].message.content
+                logger.info(f"[Aliyun] Text Gen Success. Length: {len(content)}")
+                return {'success': True, 'content': content}
+            
+            logger.error(f"[Aliyun] Text Gen Failed. Code: {rsp.code}, Msg: {rsp.message}")
             return {'success': False, 'error_msg': rsp.message}
         except Exception as e:
+            logger.exception(f"[Aliyun] Text Gen Exception")
             return {'success': False, 'error_msg': str(e)}
 
     @staticmethod
@@ -81,6 +134,7 @@ class AliyunHandler:
         api_key = config.get('api_key')
         model = config.get('model_name') or 'qwen-image-plus'
         
+        logger.info(f"[Aliyun] Image Gen Request. Model: {model}, Prompt: {prompt[:50]}...")
         try:
             rsp = MultiModalConversation.call(
                 api_key=api_key, model=model, messages=[{"role": "user", "content": [{"text": prompt}]}],
@@ -96,9 +150,13 @@ class AliyunHandler:
                         if download_file(img_url, save_path):
                             return {'success': True, 'url': f"{url_prefix.rstrip('/')}/{fname}"}
                 except Exception as e:
+                    logger.error(f"[Aliyun] Image Parse Error: {e}")
                     return {'success': False, 'error_msg': f"Parse failed: {e}"}
+            
+            logger.error(f"[Aliyun] Image Gen API Fail: {getattr(rsp, 'message', 'Unknown')}")
             return {'success': False, 'error_msg': getattr(rsp, 'message', 'Unknown Error')}
         except Exception as e:
+            logger.exception("[Aliyun] Image Gen Exception")
             return {'success': False, 'error_msg': str(e)}
 
     @staticmethod
@@ -106,6 +164,8 @@ class AliyunHandler:
         if not DASHSCOPE_AVAILABLE: return {'success': False, 'error_msg': "DashScope SDK not installed"}
         api_key = config.get('api_key')
         model = config.get('model_name') or 'wanx2.1-kf2v-plus'
+        
+        logger.info(f"[Aliyun] Video Gen Request. Model: {model}, Prompt: {prompt[:30]}...")
         
         params = {'model': model, 'prompt': prompt, 'prompt_extend': True, 'watermark': False}
         if start_img: 
@@ -116,15 +176,22 @@ class AliyunHandler:
             if b64: params['last_frame_url'] = b64
         
         try:
+            # 记录脱敏后的参数以供调试
+            logger.info(f"[Aliyun] Video Params: {_safe_log_payload(params)}")
+            
             rsp = VideoSynthesis.call(api_key=api_key, **params)
             if rsp.status_code == HTTPStatus.OK:
                 video_url = rsp.output.video_url
+                logger.info(f"[Aliyun] Video Gen Success. TaskID: {rsp.output.task_id}, URL: {video_url}")
                 fname = f"{rsp.output.task_id}.mp4"
                 save_path = os.path.join(save_dir, fname)
                 if download_file(video_url, save_path):
                     return {'success': True, 'url': f"{url_prefix.rstrip('/')}/{fname}"}
+            
+            logger.error(f"[Aliyun] Video Gen API Fail: {getattr(rsp, 'message', 'Unknown')}")
             return {'success': False, 'error_msg': getattr(rsp, 'message', 'Unknown Error')}
         except Exception as e:
+            logger.exception("[Aliyun] Video Gen Exception")
             return {'success': False, 'error_msg': str(e)}
 
     @staticmethod
@@ -133,6 +200,7 @@ class AliyunHandler:
         api_key = config.get('api_key')
         model = config.get('model_name') or 'qwen3-tts-flash'
         
+        logger.info(f"[Aliyun] Voice Gen Request. Model: {model}, Text Len: {len(text)}")
         base_url = config.get('base_url', '')
         if base_url:
             dashscope.base_http_api_url = base_url
@@ -146,10 +214,15 @@ class AliyunHandler:
                         fname = f"{uuid.uuid4()}.mp3"
                         save_path = os.path.join(save_dir, fname)
                         with open(save_path, 'wb') as f: f.write(audio_data)
+                        logger.info(f"[Aliyun] Voice Gen Success. Saved to {save_path}")
                         return {'success': True, 'url': f"{url_prefix.rstrip('/')}/{fname}"}
+                logger.error("[Aliyun] No audio data in response")
                 return {'success': False, 'error_msg': "No audio data in response"}
+            
+            logger.error(f"[Aliyun] Voice Gen API Fail: {getattr(rsp, 'message', 'Unknown')}")
             return {'success': False, 'error_msg': getattr(rsp, 'message', 'Unknown Error')}
         except Exception as e:
+            logger.exception("[Aliyun] Voice Gen Exception")
             return {'success': False, 'error_msg': str(e)}
 
     @staticmethod
@@ -166,6 +239,8 @@ class AliyunHandler:
         # 默认使用 wan2.5-i2i-preview 模型，如果配置中未指定
         model = config.get('model_name') or 'wan2.5-i2i-preview'
         
+        logger.info(f"[Aliyun] Fusion Request. Model: {model}, BaseImg: {base_image_path}, RefCount: {len(ref_image_path_list)}")
+
         if len(ref_image_path_list) + 1 > 3:
             return {'success': False, 'error_msg': "阿里云图生图模型最多支持3张参考图片"}
         
@@ -231,10 +306,11 @@ class AliyunHandler:
                             logger.warning(f"[Aliyun] Download failed, returning remote URL")
                             return {'success': True, 'url': img_url}
                 
+                logger.error("[Aliyun] No image URL in fusion response")
                 return {'success': False, 'error_msg': "No image URL in response"}
             
             else:
-                logger.error(f"[Aliyun] API Error: code={rsp.code}, message={rsp.message}")
+                logger.error(f"[Aliyun] Fusion API Error: code={rsp.code}, message={rsp.message}")
                 return {'success': False, 'error_msg': f"Aliyun Error ({rsp.code}): {rsp.message}"}
 
         except Exception as e:
@@ -258,13 +334,20 @@ class OpenAICompatibleHandler:
             "messages": messages,
             "stream": False
         }
+        
+        logger.info(f"[OpenAI-Compat] Text Req: URL={url}, Model={payload['model']}")
         try:
             resp = requests.post(url, json=payload, headers=OpenAICompatibleHandler._get_headers(config), timeout=60)
             if resp.status_code == 200:
                 data = resp.json()
-                return {'success': True, 'content': data['choices'][0]['message']['content']}
+                content = data['choices'][0]['message']['content']
+                logger.info(f"[OpenAI-Compat] Text Success. Length: {len(content)}")
+                return {'success': True, 'content': content}
+            
+            logger.error(f"[OpenAI-Compat] Text Fail: {resp.status_code} - {resp.text[:200]}")
             return {'success': False, 'error_msg': resp.text}
         except Exception as e:
+            logger.exception("[OpenAI-Compat] Text Exception")
             return {'success': False, 'error_msg': str(e)}
 
     @staticmethod
@@ -277,6 +360,8 @@ class OpenAICompatibleHandler:
             "image_size": "1024x1024",
             "batch_size": 1
         }
+        logger.info(f"[OpenAI-Compat] Image Req: URL={url}, Model={payload['model']}")
+        
         try:
             resp = requests.post(url, json=payload, headers=OpenAICompatibleHandler._get_headers(config), timeout=120)
             if resp.status_code == 200:
@@ -287,8 +372,11 @@ class OpenAICompatibleHandler:
                     save_path = os.path.join(save_dir, fname)
                     if download_file(img_url, save_path):
                         return {'success': True, 'url': f"{url_prefix.rstrip('/')}/{fname}"}
+            
+            logger.error(f"[OpenAI-Compat] Image Fail: {resp.status_code} - {resp.text[:200]}")
             return {'success': False, 'error_msg': resp.text}
         except Exception as e:
+            logger.exception("[OpenAI-Compat] Image Exception")
             return {'success': False, 'error_msg': str(e)}
 
     @staticmethod
@@ -366,6 +454,7 @@ class ViduHandler:
         url = f"{base_url.rstrip('/')}/ent/v2/tasks/{task_id}/creations" 
         headers = ViduHandler._get_headers(config)
         
+        logger.info(f"[VIDU] Waiting for task {task_id}...")
         start_time = time.time()
         while time.time() - start_time < max_wait:
             try:
@@ -375,9 +464,8 @@ class ViduHandler:
                     state = data.get('state')
                     err_code = data.get('err_code')
                     
-                    logger.info(f"[VIDU] Task {task_id} state: {state}")
-                    
                     if state == 'success':
+                        logger.info(f"[VIDU] Task {task_id} Success.")
                         creations = data.get('creations', [])
                         if creations and len(creations) > 0:
                             # 获取结果 URL
@@ -408,10 +496,13 @@ class ViduHandler:
                             return {'success': False, 'error_msg': 'Task succeeded but creation list is empty'}
                     
                     elif state == 'failed':
+                        logger.error(f"[VIDU] Task {task_id} Failed. ErrCode: {err_code}")
                         # 优先显示 err_code
                         return {'success': False, 'error_msg': f"Generation failed code: {err_code}"}
                     
                     elif state in ['created', 'queueing', 'processing']:
+                        if int(time.time()) % 5 == 0: # 减少日志频率
+                            logger.info(f"[VIDU] Task {task_id} state: {state}")
                         time.sleep(5)
                     
                     else:
@@ -473,7 +564,7 @@ class ViduHandler:
         
         try:
             headers = ViduHandler._get_headers(config)
-            logger.info(f"[VIDU] Creating video task with model: {model}")
+            logger.info(f"[VIDU] Creating video task with model: {model}, URL: {url}")
             
             resp = requests.post(url, json=payload, headers=headers, timeout=60)
             
@@ -884,6 +975,7 @@ class JimengHandler:
         }
         req_body_str = json.dumps(req_payload)
         
+        logger.info(f"[Jimeng] Waiting T2I Task {task_id}")
         start_time = time.time()
         while time.time() - start_time < max_wait:
             try:
@@ -904,6 +996,7 @@ class JimengHandler:
                         logger.info(f"[Jimeng] T2I task {task_id} status: {status}")
                         
                         if status == 'done':
+                            logger.info(f"[Jimeng] Task {task_id} Done")
                             image_urls = task_data.get('image_urls', [])
                             binary_data = task_data.get('binary_data_base64', [])
                             
@@ -929,10 +1022,12 @@ class JimengHandler:
                         elif status in ['in_queue', 'generating']:
                             time.sleep(2)
                         elif status in ['not_found', 'expired']:
+                             logger.warning(f"[Jimeng] Task {task_id} status: {status}")
                              return {'success': False, 'error_msg': f"Task status: {status}"}
                         else:
                              time.sleep(2)
                     else:
+                        logger.error(f"[Jimeng] Query Error: {data.get('message')}")
                         return {'success': False, 'error_msg': f"Query failed (code={code}): {data.get('message')}"}
                 else:
                     logger.warning(f"[Jimeng] Query HTTP Error: {resp.status_code}")
@@ -1042,6 +1137,7 @@ class JimengHandler:
         }
         req_body_str = json.dumps(body_params)
         
+        logger.info(f"[Jimeng] Waiting Video Task {task_id}")
         start_time = time.time()
         while time.time() - start_time < max_wait:
             try:
@@ -1085,6 +1181,7 @@ class JimengHandler:
                              time.sleep(5)
                     else:
                         # 业务错误 (如审核不通过)
+                        logger.error(f"[Jimeng] Query Fail: {data.get('message')}")
                         return {'success': False, 'error_msg': f"Query failed (code={code}): {data.get('message')}"}
                 else:
                     logger.warning(f"[Jimeng] Query HTTP Error: {resp.status_code}")
@@ -1128,11 +1225,11 @@ class JimengHandler:
         if ref_image_path_list:
             for ref_path in ref_image_path_list:
                 ref_b64 = file_to_base64(ref_path)
-                if img_b64 and ',' in img_b64:
-                    img_b64 = img_b64.split(',', 1)[1]
+                if ref_b64 and ',' in ref_b64:
+                    ref_b64 = ref_b64.split(',', 1)[1]
                     images_payload.append(ref_b64)
                 else:
-                    logger.warning(f"[VIDU] Failed to encode ref image: {ref_path}")
+                    logger.warning(f"[Jimeng] Failed to encode ref image: {ref_path}")
                     
         # 准备图片 Base64
         # 注意: 接口需要纯 base64 字符串，不包含 "data:image/png;base64," 前缀
@@ -1191,9 +1288,7 @@ class JimengHandler:
     @staticmethod
     def _wait_for_i2i_result(task_id, access_key, secret_key, save_dir, url_prefix, max_wait=600):
         """
-        即梦图生图 3.0 (Jimeng Image-to-Image V3.0)
-        官方接口: https://visual.volcengineapi.com
-        Action: CVSync2AsyncSubmitTask (提交) / CVSync2AsyncGetResult (查询)
+        轮询图生图结果
         """
         import time
         start_time = time.time()
@@ -1203,6 +1298,8 @@ class JimengHandler:
             "task_id": task_id
         }
         req_body_str = json.dumps(req_payload)
+
+        logger.info(f"[Jimeng] Waiting i2i Task {task_id}")
 
         while time.time() - start_time < max_wait:
             try:
@@ -1225,6 +1322,7 @@ class JimengHandler:
                         logger.info(f"[Jimeng] i2i task {task_id} status: {status}")
 
                         if status == 'done':
+                            logger.info(f"[Jimeng] i2i Task {task_id} Done")
                             # 任务完成 (成功或失败需进一步判断)
                             # 如果成功, binary_data_base64 或 image_urls 会有数据
                             image_urls = task_data.get('image_urls', [])
@@ -1249,7 +1347,6 @@ class JimengHandler:
                                      return {'success': True, 'url': url}
                             
                             # done 但无数据，可能是业务逻辑失败(尽管外层code=10000)
-                            # 这种情况极为罕见，通常外层code会变
                             return {'success': False, 'error_msg': "Task done but no image data returned"}
 
                         elif status in ['in_queue', 'generating']:
@@ -1500,6 +1597,8 @@ class MiniMaxHandler:
         headers = MiniMaxHandler._get_headers(config)
         
         start_time = time.time()
+        logger.info(f"[MiniMax] Waiting Video Task {task_id}")
+
         while time.time() - start_time < max_wait:
             try:
                 resp = requests.get(url, headers=headers, timeout=30)
@@ -1524,6 +1623,7 @@ class MiniMaxHandler:
                         
                         elif status == 'Failed':
                             error_msg = data.get('error_message', 'Generation failed')
+                            logger.error(f"[MiniMax] Task Failed: {error_msg}")
                             return {'success': False, 'error_msg': error_msg}
                         
                         elif status in ['Processing', 'Queueing']:
@@ -1662,12 +1762,14 @@ class ZhipuHandler:
             model = config.get('model_name') or 'glm-4.6'
             client = ZhipuAiClient(api_key=api_key)
             
+            logger.info(f"[Zhipu] Text Req: {model}")
             response = client.chat.completions.create(
                 model=model,
                 messages=messages
             )
             
             if response.choices:
+                logger.info("[Zhipu] Text Success")
                 return {'success': True, 'content': response.choices[0].message.content}
             return {'success': False, 'error_msg': "No response from Zhipu API"}
             
@@ -1685,6 +1787,7 @@ class ZhipuHandler:
             model = config.get('model_name') or 'cogview-3'
             client = ZhipuAiClient(api_key=api_key)
             
+            logger.info(f"[Zhipu] Image Req: {model}, Prompt: {prompt[:30]}")
             response = client.images.generations(
                 model=model,
                 prompt=prompt,
@@ -1726,6 +1829,8 @@ class ZhipuHandler:
             model = config.get('model_name') or 'cogvideox-2'
             client = ZhipuAiClient(api_key=api_key)
             
+            logger.info(f"[Zhipu] Video Submit: {model}")
+            
             # 提交视频生成任务
             response = client.videos.generations(
                 model=model,
@@ -1739,6 +1844,8 @@ class ZhipuHandler:
             
             if not response.id:
                 return {'success': False, 'error_msg': "No task ID returned from API"}
+            
+            logger.info(f"[Zhipu] Video Task ID: {response.id}")
             
             # 轮询等待结果
             max_wait = config.get('max_wait', 600)
@@ -1797,6 +1904,7 @@ def get_handler(provider_type):
 # ============================================================
 
 def run_text_generation(messages, config):
+    logger.info(f"[Main] Run Text Gen. Provider: {config.get('type')}")
     handler = get_handler(config.get('type'))
     return handler.generate_text(messages, config)
 
@@ -1832,6 +1940,8 @@ def run_image_generation(visual_desc, style_desc, consistency_text, frame_type, 
             - Dict[str, Any]: 图像生成 API 的结果字典（'success', 'url', 'error_msg'）。
             - str: 最终用于图像生成器（如 Midjourney、Stable Diffusion）的**优化后的**完整 Prompt 文本。
     """
+    logger.info(f"[Main] Run Image Gen. Provider: {config.get('type')}, FrameType: {frame_type}")
+
     # 1. 准备 Prompt Engineering 的输入
     consistency_instruction = f"**GLOBAL VISUAL RULES**: {consistency_text}. Maintain consistent characters and environment.\n" if consistency_text else ""
     context_instruction = f"\n**PREVIOUS SHOT CONTEXT**: \"{prev_shot_context}\". Ensure narrative continuity." if prev_shot_context else ""
@@ -1882,7 +1992,7 @@ def run_image_generation(visual_desc, style_desc, consistency_text, frame_type, 
                 text_config['model_name'] = 'glm-4.6'
             
             # 执行 Prompt 优化
-            logger.info("start prompt eng")
+            logger.info("[Prompt Eng] Starting optimization...")
             res = handler.generate_text([{'role': 'system', 'content': sys_prompt + " 使用中文回答"}, {'role': 'user', 'content': user_prompt}], text_config)
             
             if res['success']:
@@ -1896,7 +2006,8 @@ def run_image_generation(visual_desc, style_desc, consistency_text, frame_type, 
 
     # 3. 调用生图 API
     # 这里使用原始配置（包含生图模型名称）
-    result = handler.generate_image(optimized_prompt, save_dir, url_prefix, config)
+    img_handler = get_handler(config.get('type'))
+    result = img_handler.generate_image(optimized_prompt, save_dir, url_prefix, config)
     
     return result, optimized_prompt
 
@@ -1931,6 +2042,7 @@ def run_video_generation(prompt, start_img_path, end_img_path, config, save_dir,
             - 'url' (str, optional): 生成视频文件的公开访问 URL。
             - 'error_msg' (str, optional): 错误信息（如果 'success' 为 False）。
     """
+    logger.info(f"[Main] Run Video Gen. Provider: {config.get('type')}, StartImg: {start_img_path}, EndImg: {end_img_path}")
     handler = get_handler(config.get('type'))
     return handler.generate_video(prompt, save_dir, url_prefix, config, start_img=start_img_path, end_img=end_img_path)
 
@@ -1939,7 +2051,7 @@ def run_simple_image_generation(prompt, config, save_dir, url_prefix):
     不带提示词工程的简单图片生成方法
     直接使用用户提供的prompt，不进行任何优化
     """
-    logger.info(f"[Simple Image Gen] Starting generation with prompt: {prompt[:50]}...")
+    logger.info(f"[Main] Run Simple Image Gen. Provider: {config.get('type')}, Prompt: {prompt[:30]}...")
     
     handler = get_handler(config.get('type', 'mock'))
     result = handler.generate_image(prompt, save_dir, url_prefix, config)
@@ -1952,6 +2064,7 @@ def run_simple_image_generation(prompt, config, save_dir, url_prefix):
     return result
 
 def run_voice_generation(text, config, save_dir, url_prefix):
+    logger.info(f"[Main] Run Voice Gen. Provider: {config.get('type')}, TextLen: {len(text)}")
     handler = get_handler(config.get('type'))
     return handler.generate_voice(text, save_dir, url_prefix, config)
 
@@ -1989,7 +2102,7 @@ def run_fusion_generation(base_image_path, fusion_prompt, config, save_dir, url_
             - 'url' (str, optional): 生成图片的公开访问 URL。
             - 'error_msg' (str, optional): 错误信息（如果 'success' 为 False）。
     """
-    logger.info(f"[Fusion Gen] Starting fusion. Base: {base_image_path}, Prompt: {fusion_prompt[:30]}...")
+    logger.info(f"[Main] Run Fusion Gen. Provider: {config.get('type')}, Base: {base_image_path}, Elements: {len(element_image_paths)}")
     handler = get_handler(config.get('type', 'mock'))
     
     # 传入 ref_image_path 参数，Handler 内部会判断是否调用图生图接口
