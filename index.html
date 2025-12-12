@@ -2460,33 +2460,49 @@
                 // 保存融图功能的场景融图数据 (通用保存函数)
                 async saveFusionData(fusion) {
                     try {
-                        const method = fusion.id ? 'PUT' : 'POST';
-                        const url = fusion.id 
-                            ? `/api/projects/${this.currentProjectId}/fusions/${fusion.id}`
-                            : `/api/projects/${this.currentProjectId}/fusions`;
+                            // 1. 先把当前前端对象里那些“只读/展示用”的字段备份下来
+                            // 这些字段不在数据库里，但我们希望在界面上保留显示
+                            const transientFields = {
+                                scene_description: fusion.scene_description || '',
+                                visual_description: fusion.visual_description || '',
+                                dialogue: fusion.dialogue || '',
+                                audio_description: fusion.audio_description || ''
+                            };
 
-                        const res = await this.request(method, url, fusion);
-                        
-                        // 如果是新创建的任务 (POST)
-                        if (method === 'POST') {
-                            fusion.id = res.id;
-                            this.fusionList.push(res);
-                        } else {
-                             // 更新列表中的数据 (PUT)
-                             const idx = this.fusionList.findIndex(f => f.id === fusion.id);
-                             if (idx !== -1) {
-                                 this.$set(this.fusionList, idx, res);
-                             }
+                            const method = fusion.id ? 'PUT' : 'POST';
+                            const url = fusion.id 
+                                ? `/api/projects/${this.currentProjectId}/fusions/${fusion.id}`
+                                : `/api/projects/${this.currentProjectId}/fusions`;
+
+                            // 发送请求（后端只会保存实体字段，忽略上面的 transientFields）
+                            const res = await this.request(method, url, fusion);
+                            
+                            // 2. 【关键一步】将后端返回的“干净结果”与我们备份的“展示字段”合并
+                            // 这样 res 就重新拥有了 scene_description 等数据
+                            const mergedResult = { ...res, ...transientFields };
+
+                            // 如果是新创建的任务 (POST)
+                            if (method === 'POST') {
+                                fusion.id = res.id; // 更新ID
+                                // 将合并后的对象推入列表
+                                this.fusionList.push(mergedResult);
+                            } else {
+                                // 更新列表中的数据 (PUT)
+                                const idx = this.fusionList.findIndex(f => f.id === fusion.id);
+                                if (idx !== -1) {
+                                    // 使用合并后的对象更新视图，防止文字消失
+                                    this.$set(this.fusionList, idx, mergedResult);
+                                }
+                            }
+                            
+                            // 返回合并后的对象，保证调用链下游拿到的是完整数据
+                            return mergedResult;
+
+                        } catch (e) {
+                            console.error(e);
+                            this.$message.error('保存失败');
+                            throw e;
                         }
-                        
-                        // 返回最新的任务对象
-                        return res;
-
-                    } catch (e) {
-                        console.error(e);
-                        this.$message.error('保存失败');
-                        throw e;
-                    }
                 },
                 
                 // 处理元素图片上传
