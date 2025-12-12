@@ -511,10 +511,11 @@ class JimengHandler:
         return request_parameters_init[:-1]
     
     @staticmethod
-    def _sign_request(access_key, secret_key, req_body):
+    def _sign_request(access_key, secret_key, req_body, action='CVProcess'):
         """
         火山引擎 V4 签名
         返回 (headers, request_url)
+        Updated: 支持自定义 Action 参数 (Action 默认为 CVProcess 以兼容旧接口)
         """
         from datetime import datetime
         
@@ -528,7 +529,7 @@ class JimengHandler:
         
         # 查询参数
         query_params = {
-            'Action': 'CVProcess',
+            'Action': action,
             'Version': '2022-08-31',
         }
         canonical_querystring = JimengHandler._format_query(query_params)
@@ -603,315 +604,294 @@ class JimengHandler:
     @staticmethod
     def generate_image(prompt, save_dir, url_prefix, config):
         """
-        即梦文生图 API
+        即梦文生图 V3.1 API
+        Action: CVSync2AsyncSubmitTask
         """
         api_key_combined = config.get('api_key')
-        model = config.get('model_name', 'high_aes')
+        # 默认模型 V3.1
+        model = config.get('model_name', 'jimeng_t2i_v31')
         
         try:
-            # 解析凭证
             access_key, secret_key = JimengHandler._parse_credentials(api_key_combined)
         except ValueError as e:
             return {'success': False, 'error_msg': str(e)}
         
-        # 构建请求体
+        # 构建请求参数
         body_params = {
             "req_key": model,
             "prompt": prompt,
-            "width": 1024,
-            "height": 1024,
-            "seed": -1,
+            "seed": int(config.get('seed', -1)),
+            "use_pre_llm": config.get('use_pre_llm', True)
         }
+        
+        # 处理宽高
+        if config.get('width') and config.get('height'):
+            body_params['width'] = int(config.get('width'))
+            body_params['height'] = int(config.get('height'))
+        else:
+            # 默认值，虽然API有默认，但显式传递是个好习惯，或者留空让API决定
+            # 文档说默认 1328*1328
+            pass
+
         req_body = json.dumps(body_params)
         
         try:
-            # 签名请求
-            headers, request_url = JimengHandler._sign_request(access_key, secret_key, req_body)
+            # 1. 提交任务 (Action=CVSync2AsyncSubmitTask)
+            headers, request_url = JimengHandler._sign_request(
+                access_key, secret_key, req_body, action='CVSync2AsyncSubmitTask'
+            )
             
-            logger.info(f"[Jimeng] Generating image with model: {model}, prompt: {prompt[:50]}...")
+            logger.info(f"[Jimeng] Submitting T2I task. Model: {model}, Prompt: {prompt[:30]}...")
             
-            # 发送请求
-            resp = requests.post(request_url, headers=headers, data=req_body, timeout=120)
+            resp = requests.post(request_url, headers=headers, data=req_body, timeout=60)
             
-            if resp.status_code == 200:
-                data = resp.json()
-                
-                # 检查返回状态
-                code = data.get('code')
-                if code == 10000:  # 火山引擎成功状态码
-                    # 获取图片数据
-                    resp_data = data.get('data', {})
-                    
-                    # 可能返回 binary_data_base64 数组
-                    binary_data_list = resp_data.get('binary_data_base64', [])
-                    
-                    if binary_data_list:
-                        # 解析 base64 图片
-                        img_base64 = binary_data_list[0]
-                        
-                        # 如果包含 data:image 前缀
-                        if ',' in img_base64:
-                            img_base64 = img_base64.split(',', 1)[1]
-                        
-                        img_bytes = base64.b64decode(img_base64)
-                        
-                        fname = f"{uuid.uuid4()}.png"
-                        save_path = os.path.join(save_dir, fname)
-                        
-                        with open(save_path, 'wb') as f:
-                            f.write(img_bytes)
-                        
-                        logger.info(f"[Jimeng] Image saved to: {save_path}")
-                        return {'success': True, 'url': f"{url_prefix.rstrip('/')}/{fname}"}
-                    
-                    # 也可能直接返回 image_url
-                    img_url = resp_data.get('image_url')
-                    if img_url:
-                        fname = f"{uuid.uuid4()}.png"
-                        save_path = os.path.join(save_dir, fname)
-                        
-                        if download_file(img_url, save_path):
-                            return {'success': True, 'url': f"{url_prefix.rstrip('/')}/{fname}"}
-                
-                error_msg = data.get('message', 'Unknown error')
-                logger.error(f"[Jimeng] API Error code={code}: {error_msg}")
-                return {'success': False, 'error_msg': f"API Error (code={code}): {error_msg}"}
+            if resp.status_code != 200:
+                return {'success': False, 'error_msg': f"Submit failed: {resp.text}"}
             
-            else:
-                error_msg = resp.text
-                logger.error(f"[Jimeng] HTTP Error {resp.status_code}: {error_msg}")
-                return {'success': False, 'error_msg': f"HTTP Error ({resp.status_code}): {error_msg}"}
-                
-        except ValueError as e:
-            return {'success': False, 'error_msg': str(e)}
-        except requests.exceptions.Timeout:
-            return {'success': False, 'error_msg': 'Request timeout'}
+            data = resp.json()
+            if data.get('code') != 10000:
+                 return {'success': False, 'error_msg': f"API Error: {data.get('message')}"}
+                 
+            task_id = data.get('data', {}).get('task_id')
+            if not task_id:
+                return {'success': False, 'error_msg': "No task_id returned"}
+            
+            logger.info(f"[Jimeng] T2I task submitted: {task_id}")
+            
+            # 2. 轮询结果
+            return JimengHandler._wait_for_t2i_result(
+                task_id, model, access_key, secret_key, save_dir, url_prefix
+            )
+            
         except Exception as e:
             logger.exception("[Jimeng] Image generation failed")
             return {'success': False, 'error_msg': str(e)}
-    
+
     @staticmethod
-    def generate_video(prompt, save_dir, url_prefix, config, start_img=None, end_img=None):
+    def _wait_for_t2i_result(task_id, req_key, access_key, secret_key, save_dir, url_prefix, max_wait=600):
         """
-        即梦首尾帧生视频 API
-        需要提供首帧,尾帧可选
-        """
-        api_key_combined = config.get('api_key')
-        model = config.get('model_name', 'i2v_high_aes')
-        
-        try:
-            # 解析凭证
-            access_key, secret_key = JimengHandler._parse_credentials(api_key_combined)
-        except ValueError as e:
-            return {'success': False, 'error_msg': str(e)}
-        
-        if not start_img:
-            return {'success': False, 'error_msg': "Jimeng video generation requires start frame"}
-        
-        # 转换图片为 base64 (只要 base64 部分,不要 data:image 前缀)
-        start_img_b64 = file_to_base64(start_img)
-        if start_img_b64 and ',' in start_img_b64:
-            start_img_b64 = start_img_b64.split(',', 1)[1]
-        
-        end_img_b64 = None
-        if end_img:
-            end_img_b64 = file_to_base64(end_img)
-            if end_img_b64 and ',' in end_img_b64:
-                end_img_b64 = end_img_b64.split(',', 1)[1]
-        
-        if not start_img_b64:
-            return {'success': False, 'error_msg': "Failed to encode start image to base64"}
-        
-        # 构建请求体
-        body_params = {
-            "req_key": model,
-            "binary_data_base64": [start_img_b64],
-            "prompt": prompt,
-            "frames": 121
-        }
-        
-        # 如果有尾帧,添加到数组
-        if end_img_b64:
-            body_params["binary_data_base64"].append(end_img_b64)
-        
-        req_body = json.dumps(body_params)
-        
-        try:
-            # 签名请求
-            headers, request_url = JimengHandler._sign_request(access_key, secret_key, req_body)
-            
-            logger.info(f"[Jimeng] Creating video task with model: {model}")
-            
-            # 1. 创建任务
-            resp = requests.post(request_url, headers=headers, data=req_body, timeout=60)
-            
-            if resp.status_code == 200:
-                data = resp.json()
-                code = data.get('code')
-                
-                if code == 10000:  # 成功创建任务
-                    resp_data = data.get('data', {})
-                    
-                    # 检查是否是异步任务
-                    if 'task_id' in resp_data:
-                        task_id = resp_data['task_id']
-                        logger.info(f"[Jimeng] Async task created: {task_id}")
-                        
-                        # 轮询等待视频生成完成
-                        result = JimengHandler._wait_for_video(task_id, access_key, secret_key, max_wait=600)
-                        
-                        if result['success']:
-                            # 处理 base64 视频
-                            if result.get('base64'):
-                                video_bytes = base64.b64decode(result['base64'])
-                                
-                                fname = f"{task_id}.mp4"
-                                save_path = os.path.join(save_dir, fname)
-                                
-                                with open(save_path, 'wb') as f:
-                                    f.write(video_bytes)
-                                
-                                logger.info(f"[Jimeng] Video saved to: {save_path}")
-                                return {'success': True, 'url': f"{url_prefix.rstrip('/')}/{fname}"}
-                            
-                            # 处理 URL 视频
-                            elif result.get('url'):
-                                video_url = result['url']
-                                fname = f"{task_id}.mp4"
-                                save_path = os.path.join(save_dir, fname)
-                                
-                                logger.info(f"[Jimeng] Downloading video from: {video_url}")
-                                
-                                if download_file(video_url, save_path):
-                                    logger.info(f"[Jimeng] Video saved to: {save_path}")
-                                    return {'success': True, 'url': f"{url_prefix.rstrip('/')}/{fname}"}
-                                else:
-                                    logger.warning(f"[Jimeng] Download failed, returning remote URL")
-                                    return {'success': True, 'url': video_url}
-                        
-                        return result
-                    
-                    # 同步返回视频数据
-                    elif 'binary_data_base64' in resp_data:
-                        video_base64_list = resp_data.get('binary_data_base64', [])
-                        if video_base64_list:
-                            video_base64 = video_base64_list[0]
-                            if ',' in video_base64:
-                                video_base64 = video_base64.split(',', 1)[1]
-                            
-                            video_bytes = base64.b64decode(video_base64)
-                            
-                            fname = f"{uuid.uuid4()}.mp4"
-                            save_path = os.path.join(save_dir, fname)
-                            
-                            with open(save_path, 'wb') as f:
-                                f.write(video_bytes)
-                            
-                            logger.info(f"[Jimeng] Video saved to: {save_path}")
-                            return {'success': True, 'url': f"{url_prefix.rstrip('/')}/{fname}"}
-                
-                error_msg = data.get('message', 'Unknown error')
-                logger.error(f"[Jimeng] API Error code={code}: {error_msg}")
-                return {'success': False, 'error_msg': f"API Error (code={code}): {error_msg}"}
-            
-            else:
-                error_msg = resp.text
-                logger.error(f"[Jimeng] HTTP Error {resp.status_code}: {error_msg}")
-                return {'success': False, 'error_msg': f"HTTP Error ({resp.status_code}): {error_msg}"}
-                
-        except ValueError as e:
-            return {'success': False, 'error_msg': str(e)}
-        except requests.exceptions.Timeout:
-            return {'success': False, 'error_msg': 'Request timeout'}
-        except Exception as e:
-            logger.exception("[Jimeng] Video generation failed")
-            return {'success': False, 'error_msg': str(e)}
-    
-    @staticmethod
-    def _wait_for_video(task_id, access_key, secret_key, max_wait=600):
-        """
-        轮询等待视频生成完成
-        使用火山引擎查询接口
+        轮询文生图结果
+        Action: CVSync2AsyncGetResult
         """
         import time
-        from datetime import datetime
         
-        # 查询请求体
-        body_params = {
-            "req_key": "query_async",
+        req_payload = {
+            "req_key": req_key,
             "task_id": task_id
         }
+        req_body_str = json.dumps(req_payload)
         
         start_time = time.time()
         while time.time() - start_time < max_wait:
             try:
-                req_body = json.dumps(body_params)
+                headers, request_url = JimengHandler._sign_request(
+                    access_key, secret_key, req_body_str, action='CVSync2AsyncGetResult'
+                )
                 
-                # 签名请求
-                headers, request_url = JimengHandler._sign_request(access_key, secret_key, req_body)
-                
-                resp = requests.post(request_url, headers=headers, data=req_body, timeout=30)
+                resp = requests.post(request_url, headers=headers, data=req_body_str, timeout=30)
                 
                 if resp.status_code == 200:
                     data = resp.json()
                     code = data.get('code')
                     
-                    logger.info(f"[Jimeng] Task {task_id} status code: {code}")
-                    
                     if code == 10000:
-                        # 任务完成
-                        resp_data = data.get('data', {})
-                        status = resp_data.get('status')
+                        task_data = data.get('data', {})
+                        status = task_data.get('status')
+                        
+                        logger.info(f"[Jimeng] T2I task {task_id} status: {status}")
                         
                         if status == 'done':
-                            # 获取视频数据
-                            binary_data_list = resp_data.get('binary_data_base64', [])
-                            if binary_data_list:
-                                # 视频以 base64 返回
-                                video_base64 = binary_data_list[0]
-                                if ',' in video_base64:
-                                    video_base64 = video_base64.split(',', 1)[1]
-                                
-                                return {'success': True, 'base64': video_base64}
+                            image_urls = task_data.get('image_urls', [])
+                            binary_data = task_data.get('binary_data_base64', [])
                             
-                            # 或者返回 URL
-                            video_url = resp_data.get('video_url')
-                            if video_url:
-                                return {'success': True, 'url': video_url}
+                            if binary_data:
+                                b64 = binary_data[0]
+                                fname = f"{task_id}.png"
+                                save_path = os.path.join(save_dir, fname)
+                                with open(save_path, 'wb') as f:
+                                    f.write(base64.b64decode(b64))
+                                return {'success': True, 'url': f"{url_prefix.rstrip('/')}/{fname}"}
                             
-                            return {'success': False, 'error_msg': 'No video data in response'}
-                        
-                        elif status == 'failed':
-                            error_msg = resp_data.get('message', 'Generation failed')
-                            return {'success': False, 'error_msg': error_msg}
-                        
-                        elif status in ['processing', 'pending']:
-                            # 继续等待
-                            logger.info(f"[Jimeng] Task {task_id} still processing...")
-                            time.sleep(10)
-                        
+                            elif image_urls:
+                                url = image_urls[0]
+                                fname = f"{task_id}.png"
+                                save_path = os.path.join(save_dir, fname)
+                                if download_file(url, save_path):
+                                     return {'success': True, 'url': f"{url_prefix.rstrip('/')}/{fname}"}
+                                else:
+                                     return {'success': True, 'url': url}
+                            
+                            return {'success': False, 'error_msg': "Task done but no image data returned"}
+                            
+                        elif status in ['in_queue', 'generating']:
+                            time.sleep(2)
+                        elif status in ['not_found', 'expired']:
+                             return {'success': False, 'error_msg': f"Task status: {status}"}
                         else:
-                            logger.warning(f"[Jimeng] Unknown status: {status}")
-                            time.sleep(10)
-                    
-                    elif code == 10001:
-                        # 任务处理中
-                        time.sleep(10)
-                    
+                             time.sleep(2)
                     else:
-                        error_msg = data.get('message', 'Query failed')
-                        logger.error(f"[Jimeng] Query error code={code}: {error_msg}")
-                        time.sleep(10)
-                
+                        return {'success': False, 'error_msg': f"Query failed (code={code}): {data.get('message')}"}
                 else:
-                    logger.error(f"[Jimeng] Query HTTP error: {resp.status_code}")
-                    time.sleep(10)
+                    logger.warning(f"[Jimeng] Query HTTP Error: {resp.status_code}")
+                    time.sleep(2)
                     
             except Exception as e:
-                logger.error(f"[Jimeng] Query exception: {e}")
-                time.sleep(10)
+                logger.error(f"[Jimeng] Polling error: {e}")
+                time.sleep(2)
+                
+        return {'success': False, 'error_msg': "Timeout waiting for T2I result"}
+    
+    @staticmethod
+    def generate_video(prompt, save_dir, url_prefix, config, start_img=None, end_img=None):
+        """
+        即梦首尾帧生视频 API (Jimeng Video 3.0)
+        Action: CVSync2AsyncSubmitTask
+        支持 Start-End 模式 (需2张图)
+        """
+        api_key_combined = config.get('api_key')
+        # 默认模型 (V3.0 1080P Start-End)
+        model = config.get('model_name', 'jimeng_i2v_first_tail_v30_1080')
         
-        return {'success': False, 'error_msg': f'Timeout after {max_wait}s waiting for video generation'}
+        try:
+            access_key, secret_key = JimengHandler._parse_credentials(api_key_combined)
+        except ValueError as e:
+            return {'success': False, 'error_msg': str(e)}
+        
+        # 校验输入
+        if not start_img:
+            return {'success': False, 'error_msg': "Jimeng video generation requires start frame"}
+            
+        # 针对 Start-End 模型，强制检查 end_img
+        if 'first_tail' in model and not end_img:
+             return {'success': False, 'error_msg': "Jimeng Start-End video generation requires both start and end frames"}
+
+        # 准备图片列表 (纯 Base64，无前缀)
+        img_paths = [start_img]
+        if end_img:
+            img_paths.append(end_img)
+            
+        images_b64 = []
+        for p in img_paths:
+            b64 = file_to_base64(p)
+            if b64 and ',' in b64:
+                b64 = b64.split(',', 1)[1]
+            if not b64:
+                 return {'success': False, 'error_msg': f"Failed to encode image: {p}"}
+            images_b64.append(b64)
+            
+        # 参数构建
+        # frames: 5s=121, 10s=241. 默认121
+        frames = int(config.get('frames', 121))
+        
+        body_params = {
+            "req_key": model,
+            "binary_data_base64": images_b64,
+            "prompt": prompt,
+            "seed": int(config.get('seed', -1)),
+            "frames": frames
+        }
+        
+        req_body = json.dumps(body_params)
+        
+        try:
+            # 提交任务 (Action=CVSync2AsyncSubmitTask)
+            headers, request_url = JimengHandler._sign_request(
+                access_key, secret_key, req_body, action='CVSync2AsyncSubmitTask'
+            )
+            
+            logger.info(f"[Jimeng] Creating video task with model: {model}")
+            resp = requests.post(request_url, headers=headers, data=req_body, timeout=60)
+            
+            if resp.status_code != 200:
+                 return {'success': False, 'error_msg': f"Submit failed: {resp.text}"}
+            
+            data = resp.json()
+            if data.get('code') != 10000:
+                 return {'success': False, 'error_msg': f"API Error: {data.get('message')}"}
+                 
+            task_id = data.get('data', {}).get('task_id')
+            if not task_id:
+                return {'success': False, 'error_msg': "No task_id returned"}
+            
+            logger.info(f"[Jimeng] Video task submitted: {task_id}")
+            
+            # 轮询等待结果
+            return JimengHandler._wait_for_video_result(
+                task_id, model, access_key, secret_key, save_dir, url_prefix
+            )
+            
+        except Exception as e:
+            logger.exception("[Jimeng] Video generation failed")
+            return {'success': False, 'error_msg': str(e)}
+
+    @staticmethod
+    def _wait_for_video_result(task_id, req_key, access_key, secret_key, save_dir, url_prefix, max_wait=600):
+        """
+        轮询视频结果 (Jimeng Video 3.0)
+        Action: CVSync2AsyncGetResult
+        """
+        import time
+        
+        # 查询请求体
+        body_params = {
+            "req_key": req_key,
+            "task_id": task_id
+        }
+        req_body_str = json.dumps(body_params)
+        
+        start_time = time.time()
+        while time.time() - start_time < max_wait:
+            try:
+                # 签名请求 (Action=CVSync2AsyncGetResult)
+                headers, request_url = JimengHandler._sign_request(
+                    access_key, secret_key, req_body_str, action='CVSync2AsyncGetResult'
+                )
+                
+                resp = requests.post(request_url, headers=headers, data=req_body_str, timeout=30)
+                
+                if resp.status_code == 200:
+                    data = resp.json()
+                    code = data.get('code')
+                    
+                    if code == 10000:
+                        task_data = data.get('data', {})
+                        status = task_data.get('status')
+                        
+                        logger.info(f"[Jimeng] Video task {task_id} status: {status}")
+                        
+                        if status == 'done':
+                            video_url = task_data.get('video_url')
+                            if video_url:
+                                fname = f"{task_id}.mp4"
+                                save_path = os.path.join(save_dir, fname)
+                                
+                                logger.info(f"[Jimeng] Downloading video from: {video_url}")
+                                if download_file(video_url, save_path):
+                                    return {'success': True, 'url': f"{url_prefix.rstrip('/')}/{fname}"}
+                                else:
+                                    # 下载失败返回原链接
+                                    return {'success': True, 'url': video_url}
+                            
+                            return {'success': False, 'error_msg': "Task done but no video_url found"}
+                            
+                        elif status in ['in_queue', 'generating']:
+                            time.sleep(5) # Wait
+                        elif status in ['not_found', 'expired']:
+                             return {'success': False, 'error_msg': f"Task status: {status}"}
+                        else:
+                             time.sleep(5)
+                    else:
+                        # 业务错误 (如审核不通过)
+                        return {'success': False, 'error_msg': f"Query failed (code={code}): {data.get('message')}"}
+                else:
+                    logger.warning(f"[Jimeng] Query HTTP Error: {resp.status_code}")
+                    time.sleep(5)
+                    
+            except Exception as e:
+                logger.error(f"[Jimeng] Polling error: {e}")
+                time.sleep(5)
+                
+        return {'success': False, 'error_msg': "Timeout waiting for video result"} 
     
     @staticmethod
     def generate_text(messages, config):
@@ -923,11 +903,160 @@ class JimengHandler:
     @staticmethod
     def fuse_image(prompt, save_dir, url_prefix, config, base_image_path, ref_image_path_list):
         """
-        JimengHandler: 图生图/融合图方法
-        即梦平台提供了针对图生图的 req_key，但需要单独实现其 API 逻辑。
-        当前实现为占位符。
+        即梦图生图 3.0 (Jimeng Image-to-Image V3.0)
+        官方接口: https://visual.volcengineapi.com
+        Action: CVSync2AsyncSubmitTask (提交) / CVSync2AsyncGetResult (查询)
         """
-        return {'success': False, 'error_msg': "Jimeng i2i/fusion generation is not implemented yet."}
+        api_key_combined = config.get('api_key')
+        
+        try:
+            access_key, secret_key = JimengHandler._parse_credentials(api_key_combined)
+        except ValueError as e:
+            return {'success': False, 'error_msg': str(e)}
+
+        if not base_image_path or not os.path.exists(base_image_path):
+             return {'success': False, 'error_msg': "Base image path is required for fusion"}
+
+        # 准备图片 Base64
+        # 注意: 接口需要纯 base64 字符串，不包含 "data:image/png;base64," 前缀
+        img_b64 = file_to_base64(base_image_path)
+        if img_b64 and ',' in img_b64:
+            img_b64 = img_b64.split(',', 1)[1]
+            
+        if not img_b64:
+             return {'success': False, 'error_msg': "Failed to process base image"}
+
+        # 构建请求参数
+        req_payload = {
+            "req_key": "jimeng_i2i_v30",
+            "binary_data_base64": [img_b64],
+            "prompt": prompt,
+            "seed": int(config.get('seed', -1)),
+            "scale": float(config.get('scale', 0.5)),
+        }
+        
+        # 可选参数: width, height
+        if config.get('width') and config.get('height'):
+            req_payload['width'] = int(config.get('width'))
+            req_payload['height'] = int(config.get('height'))
+
+        req_body_str = json.dumps(req_payload)
+
+        try:
+            # 1. 提交任务 (Action=CVSync2AsyncSubmitTask)
+            headers, request_url = JimengHandler._sign_request(
+                access_key, secret_key, req_body_str, action='CVSync2AsyncSubmitTask'
+            )
+            
+            logger.info(f"[Jimeng] Submitting i2i task. Prompt: {prompt[:30]}...")
+            resp = requests.post(request_url, headers=headers, data=req_body_str, timeout=60)
+            
+            if resp.status_code != 200:
+                 return {'success': False, 'error_msg': f"Submit failed: {resp.text}"}
+            
+            resp_json = resp.json()
+            if resp_json.get('code') != 10000:
+                return {'success': False, 'error_msg': f"API Error: {resp_json.get('message')}"}
+
+            task_id = resp_json.get('data', {}).get('task_id')
+            if not task_id:
+                return {'success': False, 'error_msg': "No task_id returned"}
+
+            logger.info(f"[Jimeng] i2i task submitted. Task ID: {task_id}")
+
+            # 2. 轮询结果
+            return JimengHandler._wait_for_i2i_result(task_id, access_key, secret_key, save_dir, url_prefix)
+
+        except Exception as e:
+            logger.exception("[Jimeng] Fusion failed")
+            return {'success': False, 'error_msg': str(e)}
+
+    @staticmethod
+    def _wait_for_i2i_result(task_id, access_key, secret_key, save_dir, url_prefix, max_wait=600):
+        """
+        即梦图生图 3.0 (Jimeng Image-to-Image V3.0)
+        官方接口: https://visual.volcengineapi.com
+        Action: CVSync2AsyncSubmitTask (提交) / CVSync2AsyncGetResult (查询)
+        """
+        import time
+        start_time = time.time()
+        
+        req_payload = {
+            "req_key": "jimeng_i2i_v30",
+            "task_id": task_id
+        }
+        req_body_str = json.dumps(req_payload)
+
+        while time.time() - start_time < max_wait:
+            try:
+                # 签名查询请求 (Action=CVSync2AsyncGetResult)
+                headers, request_url = JimengHandler._sign_request(
+                    access_key, secret_key, req_body_str, action='CVSync2AsyncGetResult'
+                )
+                
+                resp = requests.post(request_url, headers=headers, data=req_body_str, timeout=30)
+                
+                if resp.status_code == 200:
+                    data = resp.json()
+                    code = data.get('code')
+                    
+                    # 外层 Code 检查
+                    if code == 10000:
+                        task_data = data.get('data', {})
+                        status = task_data.get('status')
+                        
+                        logger.info(f"[Jimeng] i2i task {task_id} status: {status}")
+
+                        if status == 'done':
+                            # 任务完成 (成功或失败需进一步判断)
+                            # 如果成功, binary_data_base64 或 image_urls 会有数据
+                            image_urls = task_data.get('image_urls', [])
+                            binary_data = task_data.get('binary_data_base64', [])
+                            
+                            if binary_data:
+                                b64 = binary_data[0]
+                                fname = f"{task_id}.png"
+                                save_path = os.path.join(save_dir, fname)
+                                with open(save_path, 'wb') as f:
+                                    f.write(base64.b64decode(b64))
+                                return {'success': True, 'url': f"{url_prefix.rstrip('/')}/{fname}"}
+                            
+                            elif image_urls:
+                                url = image_urls[0]
+                                fname = f"{task_id}.png"
+                                save_path = os.path.join(save_dir, fname)
+                                if download_file(url, save_path):
+                                     return {'success': True, 'url': f"{url_prefix.rstrip('/')}/{fname}"}
+                                else:
+                                     # 下载失败则返回原始链接
+                                     return {'success': True, 'url': url}
+                            
+                            # done 但无数据，可能是业务逻辑失败(尽管外层code=10000)
+                            # 这种情况极为罕见，通常外层code会变
+                            return {'success': False, 'error_msg': "Task done but no image data returned"}
+
+                        elif status in ['in_queue', 'generating']:
+                            # 继续等待
+                            time.sleep(2)
+                            continue
+                        elif status in ['not_found', 'expired']:
+                             return {'success': False, 'error_msg': f"Task status: {status}"}
+                        else:
+                             # 其他未知状态
+                             time.sleep(2)
+                    else:
+                        # 外层 Code != 10000，表示明确失败 (如敏感词拦截 code=50413)
+                        return {'success': False, 'error_msg': f"Task failed with code {code}: {data.get('message')}"}
+                else:
+                    logger.warning(f"[Jimeng] Query HTTP Error: {resp.status_code}")
+                    time.sleep(2)
+
+            except Exception as e:
+                logger.error(f"[Jimeng] Polling error: {e}")
+                time.sleep(2)
+        
+        return {'success': False, 'error_msg': "Timeout waiting for i2i result"}
+
 
 class MiniMaxHandler:
     @staticmethod
