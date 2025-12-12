@@ -1430,7 +1430,7 @@ class ZhipuHandler:
         通用 i2i 或融合图功能可能需要专门的接口或通过多模态 chat 接口实现。
         当前实现为占位符。
         """
-        return {'success': False, 'error_msg': "Zhipu AI generic image fusion/i2i generation is not implemented yet."}
+        return {'success': False, 'error_msg': "智谱目前无提供融合图模型"}
     
 # ============================================================
 #  Dispatcher
