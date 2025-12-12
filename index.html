@@ -191,7 +191,11 @@
         <!-- Main Layout -->
         <el-container>
             <el-header>
-                <div class="app-title"><i class="el-icon-film"></i> 电影分镜管理系统</div>
+                <div class="app-title">
+                    <a href="/series.html" style="color: #fff; text-decoration: none; font-size: 14px; margin-right: 15px; border: 1px solid #fff; padding: 5px 10px; border-radius: 4px;">
+                        <i class="el-icon-back"></i> 返回剧集列表
+                    </a>
+                    <i class="el-icon-film"></i> 电影分镜管理系统</div>
                 <div style="display: flex; gap: 15px; align-items: center;">
                     <el-select v-model="currentProjectId" placeholder="选择项目" @change="handleProjectChange" size="small" style="width: 200px;">
                         <el-option v-for="item in projectList" :key="item.id" :label="item.film_name" :value="item.id"></el-option>
@@ -1011,7 +1015,26 @@
                 currentProviderVideoModels() { return this.availableVideoModels; },
                 currentProviderAudioModels() { return this.availableVoiceModels; }
             },
-            mounted() { this.fetchProjects(); this.fetchSettings(); },
+            mounted() { 
+                this.fetchSettings(); 
+                this.fetchProjects().then(() => {
+                    // [新增] 检查 URL 参数
+                    const urlParams = new URLSearchParams(window.location.search);
+                    const pid = urlParams.get('project_id');
+                    if (pid) {
+                        // 检查项目是否存在于列表中 (可选，因为列表可能只返回了所有项目)
+                        const exists = this.projectList.find(p => p.id === pid);
+                        if (exists) {
+                            this.currentProjectId = pid;
+                            this.handleProjectChange(pid);
+                        } else {
+                            // 如果项目列表只返回了部分项目，或者逻辑需要，可以单独获取项目详情
+                            // 这里假设 list 返回了所有项目。如果没找到，可能是被删了或者权限问题
+                            this.$message.warning('未找到指定的项目，加载默认项目');
+                        }
+                    }
+                });
+            },
             methods: {
                 async request(method, url, data = null, config = {}) {
                     try { const res = await axios({ method, url, data, ...config }); return res.data; } 

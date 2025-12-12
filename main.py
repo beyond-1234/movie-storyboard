@@ -21,6 +21,7 @@ VIDEO_SAVE_DIR = "static/videos"
 AUDIO_SAVE_DIR = "static/audio"
 SETTINGS_FILE = "settings.json"
 EXPORT_DIR = "exports"
+SERIES_FILE = "series.json"
 
 app = Flask(__name__, static_url_path='', static_folder=STATIC_FOLDER)
 
@@ -55,11 +56,30 @@ def get_provider_config(provider_id):
         if p.get('id') == provider_id: return p
     return {'type': 'mock'} 
 
+@dataclass
+class Series:
+    id: str
+    name: str
+    description: str = ""
+    cover_image: str = ""
+    script_core_conflict: str = ""
+    script_emotional_keywords: str = ""
+    basic_info: str = "" 
+    visual_color_system: str = ""
+    visual_consistency_prompt: str = ""
+    created_time: str = field(default_factory=lambda: datetime.now().isoformat())
+    updated_time: str = field(default_factory=lambda: datetime.now().isoformat())
+    @classmethod
+    def from_dict(cls, data):
+        return cls(**{k: v for k, v in data.items() if k in cls.__dataclass_fields__})
+    def to_dict(self): return asdict(self)
+    
 # --- 数据模型 ---
 @dataclass
 class MovieProject:
     film_name: str
     script_core_conflict: str = ""
+    series_id: str = ""  # [新增] 关联的剧集ID
     script_emotional_keywords: str = ""
     # 合并世界观设定的三个字段为一个基础信息字段
     basic_info: str = ""  # 包含时代背景、空间特质、人物小传
@@ -127,7 +147,75 @@ class FusionTask:
     
 # --- 路由 ---
 @app.route('/')
-def index(): return send_file('index.html')
+def index(): return send_file('series.html')
+
+@app.route('/series')
+def index_series(): return send_file('series.html')
+
+@app.route('/project')
+def series_page():
+    return send_file('index.html')
+
+@app.route('/api/series', methods=['GET'])
+def get_all_series():
+    series_list = read_json(SERIES_FILE, default=[])
+    # 按更新时间倒序
+    series_list.sort(key=lambda x: x.get('updated_time', ''), reverse=True)
+    return jsonify(series_list)
+
+@app.route('/api/series', methods=['POST'])
+def create_series():
+    data = request.json
+    if not data.get('name'): return jsonify({"error": "剧集名称必填"}), 400
+    
+    series_list = read_json(SERIES_FILE, default=[])
+    
+    # 使用 from_dict 自动映射所有字段 (包括新增加的5个字段)
+    # 确保传入 id
+    data['id'] = str(uuid.uuid4())
+    new_series = Series.from_dict(data)
+    
+    series_list.insert(0, new_series.to_dict())
+    write_json(SERIES_FILE, series_list)
+    return jsonify(new_series.to_dict()), 201
+
+@app.route('/api/series/<series_id>', methods=['PUT'])
+def update_series(series_id):
+    data = request.json
+    series_list = read_json(SERIES_FILE, default=[])
+    for i, s in enumerate(series_list):
+        if s['id'] == series_id:
+            merged = {**s, **data, 'updated_time': datetime.now().isoformat()}
+            series_list[i] = merged
+            write_json(SERIES_FILE, series_list)
+            return jsonify(merged)
+    return jsonify({"error": "Not found"}), 404
+
+@app.route('/api/series/<series_id>', methods=['DELETE'])
+def delete_series(series_id):
+    series_list = read_json(SERIES_FILE, default=[])
+    new_list = [s for s in series_list if s['id'] != series_id]
+    write_json(SERIES_FILE, new_list)
+    # 注意：这里逻辑上可能需要级联删除该剧集下的所有 Projects，暂且保留项目但解除关联
+    return jsonify({"success": True})
+
+@app.route('/api/series/<series_id>/episodes', methods=['GET'])
+def get_series_episodes(series_id):
+    """获取指定剧集下的所有分集（Projects）"""
+    ensure_dirs()
+    episodes = []
+    if os.path.exists(DATA_DIR):
+        for pid in os.listdir(DATA_DIR):
+            info_path = os.path.join(DATA_DIR, pid, 'info.json')
+            if os.path.exists(info_path):
+                proj = read_json(info_path)
+                # 筛选属于该剧集的项目，或者为了兼容旧数据，如果 series_id 为空且请求的是 'uncategorized' 也可处理
+                if proj.get('series_id') == series_id:
+                    episodes.append(proj)
+    
+    # 按集数名称排序，或者按创建时间
+    episodes.sort(key=lambda x: x.get('film_name', '')) 
+    return jsonify(episodes)
 
 @app.route('/api/settings', methods=['GET'])
 def get_settings():
@@ -189,6 +277,26 @@ def get_projects():
 def create_project():
     data = request.json
     if not data.get('film_name'): return jsonify({"error": "项目名称必填"}), 400
+    
+    # [新增] 如果关联了 series_id，尝试继承数据
+    series_id = data.get('series_id')
+    if series_id:
+        series_list = read_json(SERIES_FILE, default=[])
+        series = next((s for s in series_list if s['id'] == series_id), None)
+        if series:
+            # 字段列表
+            inherit_fields = [
+                'script_core_conflict', 
+                'script_emotional_keywords', 
+                'basic_info', 
+                'visual_color_system', 
+                'visual_consistency_prompt'
+            ]
+            for field in inherit_fields:
+                # 逻辑：如果前端没传该字段(或为空)，且剧集里有该字段，则继承
+                if not data.get(field) and series.get(field):
+                    data[field] = series.get(field)
+
     project = MovieProject.from_dict(data)
     write_json(os.path.join(get_project_path(project.id), 'info.json'), project.to_dict())
     write_json(os.path.join(get_project_path(project.id), 'shot.json'), [])

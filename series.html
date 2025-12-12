@@ -1,0 +1,311 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>剧集管理中心 - 电影分镜系统</title>
+    <link rel="stylesheet" href="https://unpkg.com/element-ui/lib/theme-chalk/index.css">
+    <style>
+        body { margin: 0; background-color: #f0f2f5; font-family: "Helvetica Neue", Helvetica, "PingFang SC", "Microsoft YaHei", Arial, sans-serif; }
+        .series-container { display: flex; height: 100vh; }
+        
+        /* 左侧侧边栏 */
+        .sidebar { width: 300px; background: #fff; border-right: 1px solid #e6e6e6; display: flex; flex-direction: column; }
+        .sidebar-header { padding: 20px; border-bottom: 1px solid #eee; display: flex; justify-content: space-between; align-items: center; }
+        .sidebar-title { font-size: 18px; font-weight: bold; color: #303133; }
+        .series-list { flex: 1; overflow-y: auto; padding: 10px; }
+        .series-item { padding: 15px; border-radius: 6px; cursor: pointer; margin-bottom: 10px; transition: all 0.3s; border: 1px solid transparent; }
+        .series-item:hover { background-color: #f5f7fa; }
+        .series-item.active { background-color: #e6f7ff; border-color: #1890ff; }
+        .series-name { font-weight: bold; font-size: 16px; margin-bottom: 5px; }
+        .series-desc { font-size: 12px; color: #909399; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
+        
+        /* 右侧主内容 */
+        .main-content { flex: 1; padding: 30px; overflow-y: auto; display: flex; flex-direction: column; }
+        .content-header { margin-bottom: 30px; display: flex; justify-content: space-between; align-items: center; }
+        .empty-state { text-align: center; color: #909399; margin-top: 100px; }
+        
+        /* 集数卡片网格 */
+        .episodes-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 20px; }
+        .episode-card { background: #fff; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 12px 0 rgba(0,0,0,0.05); transition: transform 0.3s; position: relative; border: 1px solid #ebeef5; }
+        .episode-card:hover { transform: translateY(-5px); box-shadow: 0 5px 15px rgba(0,0,0,0.1); }
+        .episode-header { padding: 15px 20px; border-bottom: 1px solid #f5f5f5; font-weight: bold; font-size: 16px; display: flex; justify-content: space-between; align-items: center; }
+        .episode-body { padding: 20px; font-size: 13px; color: #666; height: 100px; overflow: hidden; }
+        .episode-footer { padding: 10px 20px; background: #f9f9f9; display: flex; justify-content: flex-end; gap: 10px; }
+        
+        .action-btn { opacity: 0; transition: opacity 0.3s; }
+        .series-item:hover .action-btn { opacity: 1; }
+        
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-thumb { background: #ccc; border-radius: 3px; }
+    </style>
+</head>
+<body>
+    <div id="app">
+        <div class="series-container">
+            <div class="sidebar">
+                <div class="sidebar-header">
+                    <span class="sidebar-title">我的剧集</span>
+                    <el-button type="primary" size="small" icon="el-icon-plus" circle @click="openCreateSeries"></el-button>
+                </div>
+                <div class="series-list" v-loading="loadingSeries">
+                    <div v-for="item in seriesList" :key="item.id" 
+                         class="series-item" :class="{active: currentSeries && currentSeries.id === item.id}"
+                         @click="selectSeries(item)">
+                        <div style="display: flex; justify-content: space-between; align-items: start;">
+                            <div class="series-name">{{ item.name }}</div>
+                            <div class="action-btn">
+                                <el-button type="text" size="mini" icon="el-icon-edit" @click.stop="editSeries(item)"></el-button>
+                                <el-button type="text" size="mini" icon="el-icon-delete" style="color:#F56C6C" @click.stop="deleteSeries(item)"></el-button>
+                            </div>
+                        </div>
+                        <div class="series-desc">{{ item.description || '暂无简介' }}</div>
+                        <div style="margin-top: 5px; font-size: 12px; color: #ccc;">
+                            更新于: {{ formatDate(item.updated_time) }}
+                        </div>
+                    </div>
+                    <div v-if="seriesList.length === 0" style="text-align: center; padding: 20px; color: #999;">
+                        暂无剧集，请先创建
+                    </div>
+                </div>
+            </div>
+
+            <div class="main-content" v-loading="loadingEpisodes">
+                <template v-if="currentSeries">
+                    <div class="content-header">
+                        <div>
+                            <h2 style="margin: 0; font-size: 24px;">{{ currentSeries.name }}</h2>
+                            <p style="margin: 5px 0 0; color: #666;">{{ currentSeries.description }}</p>
+                        </div>
+                        <div>
+                            <el-button type="primary" icon="el-icon-plus" @click="openCreateEpisode">新建分集</el-button>
+                        </div>
+                    </div>
+
+                    <div class="episodes-grid">
+                        <div v-for="ep in episodesList" :key="ep.id" class="episode-card">
+                            <div class="episode-header">
+                                <span>{{ ep.film_name }}</span>
+                                <el-tag size="mini" type="info">分集</el-tag>
+                            </div>
+                            <div class="episode-body">
+                                <div><i class="el-icon-info"></i> {{ ep.basic_info ? ep.basic_info.slice(0, 50) + '...' : '暂无基础信息' }}</div>
+                                <div style="margin-top: 10px;"><i class="el-icon-price-tag"></i> {{ ep.script_core_conflict || '无核心冲突' }}</div>
+                            </div>
+                            <div class="episode-footer">
+                                <el-button type="primary" size="small" plain icon="el-icon-edit-outline" @click="enterStudio(ep)">进入创作</el-button>
+                                <el-button type="danger" size="small" icon="el-icon-delete" plain circle @click="deleteEpisode(ep)"></el-button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div v-if="episodesList.length === 0" class="empty-state">
+                        <i class="el-icon-film" style="font-size: 48px; margin-bottom: 20px;"></i>
+                        <div>该剧集下暂无分集，点击右上角新建</div>
+                    </div>
+                </template>
+                <template v-else>
+                    <div class="empty-state">
+                        <i class="el-icon-back" style="font-size: 48px; margin-bottom: 20px;"></i>
+                        <div>请在左侧选择一个剧集</div>
+                    </div>
+                </template>
+            </div>
+        </div>
+
+        <el-dialog :title="seriesForm.id ? '编辑剧集' : '新建剧集'" :visible.sync="seriesDialogVisible" width="80%">
+            <el-form :model="seriesForm" label-width="100px">
+                <el-form-item label="剧集名称" required>
+                    <el-input v-model="seriesForm.name" placeholder="例如：黑神话：悟空"></el-input>
+                </el-form-item>
+                <el-form-item label="简介">
+                    <el-input type="textarea" v-model="seriesForm.description" rows="2" placeholder="剧集大纲..."></el-input>
+                </el-form-item>
+                
+                <el-divider content-position="left">公共设定 (所有分集默认继承)</el-divider>
+                
+                <el-form-item label="核心冲突">
+                    <el-input v-model="seriesForm.script_core_conflict" placeholder="全剧的核心冲突"></el-input>
+                </el-form-item>
+                <el-form-item label="情感关键词">
+                    <el-input v-model="seriesForm.script_emotional_keywords" placeholder="例如：史诗、悲壮、复仇"></el-input>
+                </el-form-item>
+                <el-form-item label="基础信息">
+                    <el-input type="textarea" v-model="seriesForm.basic_info" rows="3" placeholder="世界观、时代背景、通用人物小传等"></el-input>
+                </el-form-item>
+                <el-form-item label="色彩体系">
+                    <el-input v-model="seriesForm.visual_color_system" placeholder="例如：黑金冷色调"></el-input>
+                </el-form-item>
+                <el-form-item label="视觉设定">
+                    <el-input type="textarea" v-model="seriesForm.visual_consistency_prompt" rows="8" placeholder="固定角色的视觉描述 Prompt..."></el-input>
+                </el-form-item>
+            </el-form>
+            <span slot="footer">
+                <el-button @click="seriesDialogVisible = false">取消</el-button>
+                <el-button type="primary" @click="submitSeries">确定</el-button>
+            </span>
+        </el-dialog>
+
+        <el-dialog title="新建分集" :visible.sync="episodeDialogVisible" width="80%">
+            <el-form :model="episodeForm" label-width="100px">
+                <el-form-item label="分集名称" required>
+                    <el-input v-model="episodeForm.film_name" placeholder="例如：第一集：缘起"></el-input>
+                </el-form-item>
+                
+                <el-divider content-position="left">本集设定 (默认已复制剧集设定)</el-divider>
+
+                <el-form-item label="核心冲突">
+                    <el-input type="textarea" v-model="episodeForm.script_core_conflict" rows="2"></el-input>
+                </el-form-item>
+                <el-form-item label="情感关键词">
+                    <el-input v-model="episodeForm.script_emotional_keywords"></el-input>
+                </el-form-item>
+                <el-form-item label="基础信息">
+                    <el-input type="textarea" v-model="episodeForm.basic_info" rows="3"></el-input>
+                </el-form-item>
+                
+                <el-form-item label="色彩体系">
+                    <el-input v-model="episodeForm.visual_color_system"></el-input>
+                </el-form-item>
+                <el-form-item label="视觉设定">
+                    <el-input type="textarea" v-model="episodeForm.visual_consistency_prompt" rows="8"></el-input>
+                </el-form-item>
+            </el-form>
+            <span slot="footer">
+                <el-button @click="episodeDialogVisible = false">取消</el-button>
+                <el-button type="primary" @click="submitEpisode">创建并进入</el-button>
+            </span>
+        </el-dialog>
+    </div>
+
+    <script src="https://unpkg.com/vue@2.6.14/dist/vue.min.js"></script>
+    <script src="https://unpkg.com/element-ui/lib/index.js"></script>
+    <script src="https://unpkg.com/axios/dist/axios.min.js"></script>
+    <script>
+        new Vue({
+            el: '#app',
+            data: {
+                loadingSeries: false,
+                loadingEpisodes: false,
+                seriesList: [],
+                currentSeries: null,
+                episodesList: [],
+                
+                seriesDialogVisible: false,
+                seriesForm: { name: '', description: '' },
+                
+                episodeDialogVisible: false,
+                episodeForm: { film_name: '', script_core_conflict: '', basic_info: '' }
+            },
+            mounted() {
+                this.fetchSeries();
+            },
+            methods: {
+                async request(method, url, data) {
+                    try {
+                        const res = await axios({ method, url, data });
+                        return res.data;
+                    } catch (err) {
+                        this.$message.error(err.response?.data?.error || '请求失败');
+                        throw err;
+                    }
+                },
+                formatDate(str) {
+                    if(!str) return '';
+                    return new Date(str).toLocaleDateString();
+                },
+                
+                // Series Methods
+                async fetchSeries() {
+                    this.loadingSeries = true;
+                    try {
+                        this.seriesList = await this.request('GET', '/api/series');
+                        if (this.seriesList.length > 0 && !this.currentSeries) {
+                            this.selectSeries(this.seriesList[0]);
+                        }
+                    } finally { this.loadingSeries = false; }
+                },
+                async selectSeries(item) {
+                    this.currentSeries = item;
+                    this.fetchEpisodes(item.id);
+                },
+                openCreateSeries() {
+                    this.seriesForm = { 
+                        name: '', description: '',
+                        script_core_conflict: '', script_emotional_keywords: '',
+                        basic_info: '', visual_color_system: '', visual_consistency_prompt: ''
+                    };
+                    this.seriesDialogVisible = true;
+                },
+                editSeries(item) {
+                    this.seriesForm = JSON.parse(JSON.stringify(item));
+                    this.seriesDialogVisible = true;
+                },
+                async submitSeries() {
+                    if (!this.seriesForm.name) return this.$message.warning('名称必填');
+                    const method = this.seriesForm.id ? 'PUT' : 'POST';
+                    const url = this.seriesForm.id ? `/api/series/${this.seriesForm.id}` : '/api/series';
+                    
+                    await this.request(method, url, this.seriesForm);
+                    this.seriesDialogVisible = false;
+                    this.fetchSeries(); // Refresh
+                },
+                async deleteSeries(item) {
+                    await this.$confirm(`确定删除剧集 "${item.name}" 吗?`, '警告', { type: 'warning' });
+                    await this.request('DELETE', `/api/series/${item.id}`);
+                    if (this.currentSeries && this.currentSeries.id === item.id) {
+                        this.currentSeries = null;
+                        this.episodesList = [];
+                    }
+                    this.fetchSeries();
+                },
+
+                // Episode Methods
+                async fetchEpisodes(seriesId) {
+                    this.loadingEpisodes = true;
+                    try {
+                        this.episodesList = await this.request('GET', `/api/series/${seriesId}/episodes`);
+                    } finally { this.loadingEpisodes = false; }
+                },
+                openCreateEpisode() {
+                    if (!this.currentSeries) return;
+                    
+                    this.episodeForm = { 
+                        film_name: '', 
+                        // 复制 Series 的字段作为默认值
+                        script_core_conflict: this.currentSeries.script_core_conflict || '', 
+                        script_emotional_keywords: this.currentSeries.script_emotional_keywords || '',
+                        basic_info: this.currentSeries.basic_info || '',
+                        visual_color_system: this.currentSeries.visual_color_system || '',
+                        visual_consistency_prompt: this.currentSeries.visual_consistency_prompt || ''
+                    };
+                    this.episodeDialogVisible = true;
+                },
+                async submitEpisode() {
+                    if (!this.episodeForm.film_name) return this.$message.warning('名称必填');
+                    
+                    const payload = {
+                        ...this.episodeForm,
+                        series_id: this.currentSeries.id, // 关键：关联到当前剧集
+                        // 可选：将剧集的视觉设定同步给分集
+                    };
+                    
+                    const res = await this.request('POST', '/api/projects', payload);
+                    this.episodeDialogVisible = false;
+                    // 直接跳转
+                    this.enterStudio(res);
+                },
+                async deleteEpisode(ep) {
+                    await this.$confirm(`确定删除分集 "${ep.film_name}" 吗?`, '警告', { type: 'warning' });
+                    await this.request('DELETE', `/api/projects/${ep.id}`);
+                    this.fetchEpisodes(this.currentSeries.id);
+                },
+                enterStudio(ep) {
+                    // 跳转到 index.html 并带上 project_id 参数
+                    window.location.href = `/project?project_id=${ep.id}`;
+                }
+            }
+        });
+    </script>
+</body>
+</html>
