@@ -457,11 +457,14 @@
 
                             <!-- 工具栏 -->
                             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
-                                <div><span style="margin-right: 20px;">共 {{ fusionList.length }} 个融图任务</span>
+                                <div>
+                                    <span style="margin-right: 20px;">共 {{ fusionList.length }} 个融图任务</span>
                                     <el-button type="danger" size="small" icon="el-icon-delete" plain :disabled="multipleFusionSelection.length === 0" @click="deleteSelectedFusions">批量删除</el-button>
                                     <el-button type="success" size="small" icon="el-icon-copy-document" @click="copyFromScenes">从场景列表复制数据</el-button>
-                                    <el-button type="warning" size="small" icon="el-icon-magic-stick" @click="batchGenerateFusionPrompts">批量生成提示词</el-button>
-                                    <el-button type="success" size="small" icon="el-icon-picture" :disabled="multipleFusionSelection.length === 0" @click="batchGenerateFusionImages">批量生成融合图</el-button>
+                                    
+                                    <el-button type="warning" size="small" icon="el-icon-magic-stick" @click="openFusionBatchDialog('prompt')">批量生成提示词</el-button>
+                                    
+                                    <el-button type="success" size="small" icon="el-icon-picture" @click="openFusionBatchDialog('image')">批量生成融合图</el-button>
                                 </div>
                                 <div>
                                     <el-button type="primary" size="small" icon="el-icon-plus" @click="openCreateFusion">添加融图任务</el-button>
@@ -1043,6 +1046,35 @@
                 <el-button type="primary" @click="submitElement">确 定</el-button>
             </div>
         </el-dialog>
+
+        <el-dialog title="融图批量生成设置" :visible.sync="fusionBatchDialogVisible" width="400px">
+            <el-form label-position="top">
+                <el-form-item label="生成类型">
+                    <el-tag v-if="fusionBatchConfig.target === 'prompt'" type="warning">融图提示词 (Fusion Prompt)</el-tag>
+                    <el-tag v-if="fusionBatchConfig.target === 'image'" type="success">融合图片 (Fusion Image)</el-tag>
+                </el-form-item>
+
+                <el-form-item label="选择生成范围">
+                    <el-radio-group v-model="fusionBatchConfig.scope" style="display: flex; flex-direction: column; gap: 10px;">
+                        <el-radio label="all">全部 {{ fusionList.length }} 个任务</el-radio>
+                        
+                        <el-radio label="selected" :disabled="multipleFusionSelection.length === 0">
+                            已选中的 {{ multipleFusionSelection.length }} 个任务 
+                            <span v-if="multipleFusionSelection.length===0" style="color:#999;font-size:12px">(请先在列表中勾选)</span>
+                        </el-radio>
+                        
+                        <el-radio label="missing">
+                            仅针对未生成的 {{ getFusionMissingCount(fusionBatchConfig.target) }} 个任务 
+                            <span style="color:#999;font-size:12px">(跳过已存在的)</span>
+                        </el-radio>
+                    </el-radio-group>
+                </el-form-item>
+            </el-form>
+            <div slot="footer">
+                <el-button icon="el-icon-close" @click="fusionBatchDialogVisible = false">取 消</el-button>
+                <el-button type="primary" icon="el-icon-video-play" @click="startFusionBatchGeneration">开始生成</el-button>
+            </div>
+        </el-dialog>
     </div>
 
     <script src="https://unpkg.com/vue@2.6.14/dist/vue.min.js"></script>
@@ -1116,6 +1148,9 @@
                 },
                 currentFusion: null, // 当前正在编辑元素的融图任务对象
                 generatingElement: false,
+                // 融图批量弹框状态
+                fusionBatchDialogVisible: false,
+                fusionBatchConfig: { target: '', scope: 'all' },
             },
             computed: {
                 getModelsByProviderId() {
@@ -2755,19 +2790,12 @@
                         this.stopGlobalLoading();
                     }
                 },
-                async batchGenerateFusionPrompts() {
-                    if (this.multipleFusionSelection.length === 0) {
-                        this.$message.warning('请先在列表中勾选要生成提示词的任务');
-                        return;
-                    }
+                async batchGenerateFusionPrompts(tasks) {
                     
                     if (!this.genOptions.textProviderId || !this.genOptions.textModelName) {
                         this.$message.warning('请先在顶部选择文本生成模型');
                         return;
                     }
-                    
-                    // 筛选出已选中且缺少提示词的任务
-                    const tasks = this.multipleFusionSelection.filter(f => !f.fusion_prompt || f.fusion_prompt.trim() === '');
                     
                     if (tasks.length === 0) {
                         this.$message.info('选中的任务都已有提示词，无需生成');
@@ -2871,71 +2899,58 @@
                     });
                 },
                 // 批量生成融合图
-                async batchGenerateFusionImages() {
-                    if (!this.multipleFusionSelection || this.multipleFusionSelection.length === 0) {
-                        this.$message.warning('请先选择要生成融合图的融图任务');
-                        return;
-                    }
+                async batchGenerateFusionImages(tasks) {
                     
                     // 检查是否有未生成提示词的任务
-                    const tasksWithoutPrompt = this.multipleFusionSelection.filter(f => !f.fusion_prompt || f.fusion_prompt.trim() === '');
+                    const tasksWithoutPrompt = tasks.filter(f => !f.fusion_prompt || f.fusion_prompt.trim() === '');
                     if (tasksWithoutPrompt.length > 0) {
                         this.$message.warning(`以下任务尚未生成提示词，请先生成提示词：${tasksWithoutPrompt.map(f => f.shot_number || '未知').join(', ')}`);
                         return;
                     }
-                    
-                    this.$confirm(`确定要为选中的 ${this.multipleFusionSelection.length} 个任务生成融合图吗？`, '确认操作', {
-                        confirmButtonText: '确定',
-                        cancelButtonText: '取消',
-                        type: 'warning'
-                    }).then(async () => {
-                        this.startGlobalLoading('正在批量生成融合图...', `已完成 ${this.multipleFusionSelection.filter(f => f.result_image).length}/${this.multipleFusionSelection.length}`);
-                        
+
+                    this.startGlobalLoading('正在批量生成融合图...', `共 ${tasks.length}  个任务，请勿关闭页面`);
+
+                    const total = tasks.length;
+                    let successCount = 0;
+                    let failCount = 0;
+
+                    // 遍历选中的任务，逐个生成融合图
+                    for (let i = 0; i < total; i++) {
+                        const fusion = tasks[i];
+                        this.loadingTitle = `正在处理第 ${i + 1}/${total} 个融合图...`;
+
                         try {
-                            let successCount = 0;
-                            let failCount = 0;
-                            
-                            // 遍历选中的任务，逐个生成融合图
-                            for (const fusion of this.multipleFusionSelection) {
-                                try {
-                                    // 调用融合图生成API
-                                    const res = await this.request('POST', '/api/generate/fusion_image', {
-                                        fusion_id: fusion.id,
-                                        project_id: this.currentProjectId,
-                                        fusion_prompt: fusion.fusion_prompt,
-                                        provider_id: this.genOptions.fusionProviderId,
-                                        model_name: this.genOptions.fusionModelName
-                                    });
-                                    
-                                    if (res.success) {
-                                        fusion.result_image = res.url;
-                                        
-                                        // 保存更新
-                                        await this.request('PUT', `/api/projects/${this.currentProjectId}/fusions/${fusion.id}`, { result_image: res.url });
-                                        
-                                        successCount++;
-                                    } else {
-                                        failCount++;
-                                        console.error(`生成失败: ${fusion.shot_number}`, res.error);
-                                    }
-                                } catch (e) {
-                                    failCount++;
-                                    console.error(`生成出错: ${fusion.shot_number}`, e);
-                                }
-                                
-                                // 更新进度
-                                this.$message(`已完成 ${successCount + failCount}/${this.multipleFusionSelection.length}`);
+                            if (this.currentAbortController.signal.aborted) break;
+                            // 调用融合图生成API
+                            const res = await this.request('POST', '/api/generate/fusion_image', {
+                                fusion_id: fusion.id,
+                                project_id: this.currentProjectId,
+                                fusion_prompt: fusion.fusion_prompt,
+                                provider_id: this.genOptions.fusionProviderId,
+                                model_name: this.genOptions.fusionModelName
+                            });
+
+                            if (res.success) {
+                                fusion.result_image = res.url;
+
+                                // 保存更新
+                                await this.request('PUT', `/api/projects/${this.currentProjectId}/fusions/${fusion.id}`, { result_image: res.url });
+
+                                successCount++;
+                            }  else {
+                                throw new Error(res.error || '生成失败');
                             }
-                            
-                            this.$message.success(`批量生成完成！成功: ${successCount}, 失败: ${failCount}`);
+
                         } catch (e) {
                             console.error('批量生成融合图失败:', e);
-                            this.$message.error('批量生成失败');
-                        } finally {
-                            this.stopGlobalLoading();
+                            failCount++;
                         }
-                    }).catch(() => {
-                        // 用户取消操作
+                    }
+
+                    this.stopGlobalLoading();
+                    this.$message({ 
+                        type: failCount === 0 ? 'success' : 'warning', 
+                        message: `批量任务完成！成功: ${successCount}, 失败: ${failCount}` 
                     });
                 },
 
@@ -2984,8 +2999,79 @@
 
                     this.elementDialogVisible = false;
                     this.$message.success('元素添加成功');
-                }
+                },
+                // 1. 打开融图批量弹框
+                openFusionBatchDialog(target) {
+                    this.fusionBatchConfig = {
+                        target: target, // 'prompt' 或 'image'
+                        scope: 'all'    // 默认选全部
+                    };
+                    this.fusionBatchDialogVisible = true;
+                },
 
+                // 2. 获取缺失数量辅助函数（用于UI显示）
+                getFusionMissingCount(target) {
+                    if (!this.fusionList) return 0;
+                    if (target === 'prompt') {
+                        // 统计没有提示词的任务
+                        return this.fusionList.filter(f => !f.fusion_prompt || !f.fusion_prompt.trim()).length;
+                    } else if (target === 'image') {
+                        // 统计没有结果图的任务
+                        return this.fusionList.filter(f => !f.result_image).length;
+                    }
+                    return 0;
+                },
+
+                // 3. 开始执行融图批量生成
+                async startFusionBatchGeneration() {
+                    // 关闭弹框
+                    this.fusionBatchDialogVisible = false;
+                    
+                    const { target, scope } = this.fusionBatchConfig;
+                    
+                    // 检查模型选择
+                    if (target === 'prompt') {
+                        if (!this.genOptions.textProviderId || !this.genOptions.textModelName) {
+                            return this.$message.warning('请先在顶部选择文本生成模型');
+                        }
+                    } else if (target === 'image') {
+                        if (!this.genOptions.fusionProviderId || !this.genOptions.fusionModelName) {
+                            return this.$message.warning('请先在顶部选择图生图模型');
+                        }
+                    }
+
+                    // --- 确定任务范围 ---
+                    let tasks = [];
+                    if (scope === 'all') {
+                        tasks = [...this.fusionList];
+                    } else if (scope === 'selected') {
+                        tasks = [...this.multipleFusionSelection];
+                    } else if (scope === 'missing') {
+                        if (target === 'prompt') {
+                            tasks = this.fusionList.filter(f => !f.fusion_prompt || !f.fusion_prompt.trim());
+                        } else {
+                            tasks = this.fusionList.filter(f => !f.result_image);
+                        }
+                    }
+
+                    if (tasks.length === 0) {
+                        this.$message.info("没有符合条件及范围的任务需要生成");
+                        return;
+                    }
+
+                    // --- 开始批量处理 ---
+                    const total = tasks.length;
+                    let successCount = 0;
+                    let failCount = 0;
+                    const actionName = target === 'prompt' ? '提示词' : '融合图';
+
+                    if (target === 'prompt') {
+                        this.batchGenerateFusionPrompts(tasks);
+                    } else if (target === 'image') {
+                        this.batchGenerateFusionImages(tasks);
+                    }
+
+                }
             }
         });
                 </script>
