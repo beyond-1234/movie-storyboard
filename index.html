@@ -422,6 +422,16 @@
                             <!-- 融图生成配置 -->
                             <div style="margin-bottom: 15px; background: #f5f7fa; padding: 10px; border-radius: 4px;">
                                 <div style="display:flex; align-items:center; gap: 15px;">
+                                    <span style="font-size:13px; color:#606266; font-weight:bold;">文本生成模型:</span>
+                                    <el-select v-model="genOptions.textProviderId" size="mini" placeholder="供应商" style="width: 120px;" @change="updateTextModelDefault">
+                                        <el-option v-for="p in providers" :key="p.id" :label="p.name" :value="p.id"></el-option>
+                                    </el-select>
+                                    <el-select v-model="genOptions.textModelName" size="mini" placeholder="模型" style="width: 150px;">
+                                        <el-option v-for="m in availableTextModels" :key="m.name" :label="m.name" :value="m.name"></el-option>
+                                    </el-select>
+                                </div>
+
+                                <div style="display:flex; align-items:center; gap: 15px; margin-top: 10px;">
                                     <span style="font-size:13px; color:#606266; font-weight:bold;">元素图片生成模型:</span>
                                     <el-select v-model="genOptions.imageProviderId" size="mini" placeholder="供应商" style="width: 120px;" @change="updateImageModelDefault">
                                         <el-option v-for="p in providers" :key="p.id" :label="p.name" :value="p.id"></el-option>
@@ -517,7 +527,7 @@
                                 <el-table-column label="操作" fixed="right">
                                     <template slot-scope="scope">
                                         <el-tooltip content="编辑任务" placement="top"><el-button size="mini" icon="el-icon-edit" circle @click="editFusion(scope.row)"></el-button></el-tooltip>
-                                        <el-tooltip content="生成提示词" placement="top"><el-button size="mini" type="warning" icon="el-icon-magic-stick" circle plain @click="generatePrompt(scope.row)"></el-button></el-tooltip>
+                                        <el-tooltip content="生成提示词" placement="top"><el-button size="mini" type="warning" icon="el-icon-magic-stick" circle plain @click="generateFusionPrompt(scope.row)"></el-button></el-tooltip>
                                         <el-tooltip content="生成融合图" placement="top"><el-button size="mini" type="success" icon="el-icon-picture" circle plain @click="generateFusionImage(scope.row)"></el-button></el-tooltip>
                                         <el-tooltip content="删除" placement="top"><el-button size="mini" type="danger" icon="el-icon-delete" circle plain @click="deleteFusion(scope.row)"></el-button></el-tooltip>
                                     </template>
