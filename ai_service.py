@@ -155,10 +155,88 @@ class AliyunHandler:
     @staticmethod
     def fuse_image(prompt, save_dir, url_prefix, config, base_image_path, ref_image_path_list):
         """
-        AliyunHandler: 图生图/融合图方法 (目前未实现或DashScope不支持通用 i2i API)
-        目前 DashScope 的文生图 API (MultiModalConversation) 不支持 i2i 或角色融合。
+        AliyunHandler: 图生图/融合图方法
+        使用 ImageSynthesis.call 和 wan2.5-i2i-preview 模型
+        支持 Base64 编码的图片输入
         """
-        return {'success': False, 'error_msg': "Aliyun (DashScope) does not currently support generic image-to-image or character fusion API through this interface."}
+        if not DASHSCOPE_AVAILABLE: 
+            return {'success': False, 'error_msg': "DashScope SDK not installed"}
+        
+        api_key = config.get('api_key')
+        # 默认使用 wan2.5-i2i-preview 模型，如果配置中未指定
+        model = config.get('model_name') or 'wan2.5-i2i-preview'
+        
+        # 准备图片列表 (Base64编码)
+        images_input = []
+        
+        # 处理参考图片列表
+        if ref_image_path_list:
+            for ref_path in ref_image_path_list:
+                ref_b64 = file_to_base64(ref_path)
+                if ref_b64:
+                    images_input.append(ref_b64)
+                else:
+                    logger.warning(f"[Aliyun] Failed to encode reference image: {ref_path}")
+                    
+        # 处理基础图片
+        if base_image_path:
+            base_b64 = file_to_base64(base_image_path)
+            if base_b64:
+                images_input.append(base_b64)
+            else:
+                return {'success': False, 'error_msg': f"Failed to encode base image: {base_image_path}"}
+        
+        if not images_input:
+            return {'success': False, 'error_msg': "No input images provided for fusion"}
+
+        # 如果有自定义 Base URL (例如新加坡节点)
+        base_url = config.get('base_url')
+        if base_url:
+            dashscope.base_http_api_url = base_url
+
+        try:
+            logger.info(f"[Aliyun] Calling ImageSynthesis.call with model={model}, images_count={len(images_input)}")
+            
+            # 调用 DashScope 图像合成接口
+            rsp = ImageSynthesis.call(
+                api_key=api_key,
+                model=model,
+                prompt=prompt,
+                images=images_input, # 支持 Base64 列表
+                n=1,
+                prompt_extend=config.get('prompt_extend', True),
+                watermark=config.get('watermark', False),
+                seed=int(config.get('seed', 12345))
+            )
+            
+            if rsp.status_code == HTTPStatus.OK:
+                # 获取结果
+                if hasattr(rsp, 'output') and hasattr(rsp.output, 'results') and len(rsp.output.results) > 0:
+                    result = rsp.output.results[0]
+                    img_url = result.url
+                    
+                    if img_url:
+                        # 下载保存图片
+                        fname = f"{uuid.uuid4()}.png"
+                        save_path = os.path.join(save_dir, fname)
+                        
+                        if download_file(img_url, save_path):
+                            logger.info(f"[Aliyun] Fusion image saved to: {save_path}")
+                            return {'success': True, 'url': f"{url_prefix.rstrip('/')}/{fname}"}
+                        else:
+                            # 下载失败返回远程 URL
+                            logger.warning(f"[Aliyun] Download failed, returning remote URL")
+                            return {'success': True, 'url': img_url}
+                
+                return {'success': False, 'error_msg': "No image URL in response"}
+            
+            else:
+                logger.error(f"[Aliyun] API Error: code={rsp.code}, message={rsp.message}")
+                return {'success': False, 'error_msg': f"Aliyun Error ({rsp.code}): {rsp.message}"}
+
+        except Exception as e:
+            logger.exception("[Aliyun] Fusion generation failed")
+            return {'success': False, 'error_msg': str(e)}
     
 class OpenAICompatibleHandler:
     @staticmethod
@@ -260,9 +338,11 @@ class MockHandler:
 
 class ViduHandler:
     """
-    VIDU API Handler - Start-End to Video
-    官方文档: https://api.vidu.com/ent/v2/start-end2video
-    支持首尾帧生成视频
+    VIDU API Handler
+    支持：
+    1. 首尾帧生成视频 (Start-End to Video)
+    2. 文生图 / 图生图 (Reference to Image)
+    官方文档: https://api.vidu.com/ent/v2/
     """
     
     @staticmethod
@@ -273,10 +353,10 @@ class ViduHandler:
         }
     
     @staticmethod
-    def _wait_for_video(task_id, config, max_wait=600):
+    def _wait_for_task(task_id, config, save_dir, url_prefix, max_wait=600):
         """
-        轮询等待视频生成完成
-        max_wait: 最大等待时间(秒)，默认10分钟（off_peak模式可能需要48小时）
+        轮询等待任务完成 (Video or Image)
+        max_wait: 最大等待时间(秒)，默认10分钟
         """
         import time
         base_url = config.get('base_url', 'https://api.vidu.com')
@@ -292,38 +372,60 @@ class ViduHandler:
                     state = data.get('state')
                     err_code = data.get('err_code')
                     
-                    logger.info(f"[VIDU] Task {task_id} state: {state} err_code: {err_code}")
+                    logger.info(f"[VIDU] Task {task_id} state: {state}")
                     
                     if state == 'success':
-                        # 成功，获取视频URL
-                        video_url = data.get('video_url') or data.get('video')
-                        if video_url:
-                            return {'success': True, 'url': video_url, 'data': data}
+                        creations = data.get('creations', [])
+                        if creations and len(creations) > 0:
+                            # 获取结果 URL
+                            creation = creations[0]
+                            result_url = creation.get('url')
+                            
+                            if not result_url:
+                                return {'success': False, 'error_msg': 'No URL in creation result'}
+                            
+                            # 尝试推断文件扩展名
+                            path = urlparse(result_url).path
+                            ext = os.path.splitext(path)[1].lower()
+                            if not ext:
+                                # 默认根据任务类型推断可能不准确，暂定 .mp4，如果是图片任务通常 URL 会有后缀
+                                ext = '.mp4' 
+                            
+                            fname = f"{task_id}{ext}"
+                            save_path = os.path.join(save_dir, fname)
+                            
+                            logger.info(f"[VIDU] Downloading result from: {result_url}")
+                            
+                            if download_file(result_url, save_path):
+                                return {'success': True, 'url': f"{url_prefix.rstrip('/')}/{fname}"}
+                            else:
+                                return {'success': True, 'url': result_url}
+                        
                         else:
-                            return {'success': False, 'error_msg': 'No video URL in response'}
+                            return {'success': False, 'error_msg': 'Task succeeded but creation list is empty'}
                     
                     elif state == 'failed':
-                        error_msg = data.get('error', 'Generation failed')
-                        return {'success': False, 'error_msg': error_msg}
+                        # 优先显示 err_code
+                        return {'success': False, 'error_msg': f"Generation failed code: {err_code}"}
                     
                     elif state in ['created', 'queueing', 'processing']:
-                        # 继续等待
-                        time.sleep(10)  # 每10秒查询一次
+                        time.sleep(5)
                     
                     else:
                         logger.warning(f"[VIDU] Unknown state: {state}")
-                        time.sleep(10)
+                        time.sleep(5)
                 else:
                     logger.error(f"[VIDU] Query failed: {resp.status_code} - {resp.text}")
                     if resp.status_code == 404:
                         return {'success': False, 'error_msg': 'Task not found'}
-                    time.sleep(10)
+                    time.sleep(5)
                     
             except Exception as e:
                 logger.error(f"[VIDU] Query error: {e}")
-                time.sleep(10)
+                time.sleep(5)
         
-        return {'success': False, 'error_msg': f'Timeout after {max_wait}s waiting for video generation'}
+        return {'success': False, 'error_msg': f'Timeout after {max_wait}s waiting for result'}
+
     
     @staticmethod
     def generate_video(prompt, save_dir, url_prefix, config, start_img=None, end_img=None):
@@ -368,7 +470,7 @@ class ViduHandler:
         
         try:
             headers = ViduHandler._get_headers(config)
-            logger.info(f"[VIDU] Creating task with model: {model}")
+            logger.info(f"[VIDU] Creating video task with model: {model}")
             
             resp = requests.post(url, json=payload, headers=headers, timeout=60)
             
@@ -376,34 +478,14 @@ class ViduHandler:
                 data = resp.json()
                 task_id = data.get('task_id')
                 state = data.get('state')
-                credits = data.get('credits', 0)
                 
-                logger.info(f"[VIDU] Task created: {task_id}, state: {state}, credits: {credits}")
+                logger.info(f"[VIDU] Video Task created: {task_id}, state: {state}")
                 
                 if not task_id:
                     return {'success': False, 'error_msg': 'No task_id returned from API'}
                 
                 # 等待视频生成完成
-                result = ViduHandler._wait_for_video(task_id, config, max_wait=600)
-                
-                if result['success'] and result.get('url'):
-                    video_url = result['url']
-                    
-                    # 下载视频到本地
-                    fname = f"{task_id}.mp4"
-                    save_path = os.path.join(save_dir, fname)
-                    
-                    logger.info(f"[VIDU] Downloading video from: {video_url}")
-                    
-                    if download_file(video_url, save_path):
-                        logger.info(f"[VIDU] Video saved to: {save_path}")
-                        return {'success': True, 'url': f"{url_prefix.rstrip('/')}/{fname}"}
-                    else:
-                        # 下载失败，返回远程URL
-                        logger.warning(f"[VIDU] Download failed, returning remote URL")
-                        return {'success': True, 'url': video_url}
-                
-                return result
+                return ViduHandler._wait_for_task(task_id, config, save_dir, url_prefix)
             
             else:
                 # API调用失败
@@ -426,9 +508,56 @@ class ViduHandler:
     @staticmethod
     def generate_image(prompt, save_dir, url_prefix, config):
         """
-        VIDU 不支持图片生成，返回错误
+        VIDU 文生图 API
+        Endpoint: /ent/v2/reference2image
+        Model: viduq2 (支持 Text to Image)
         """
-        return {'success': False, 'error_msg': "VIDU only supports video generation (start-end to video)"}
+        api_key = config.get('api_key')
+        base_url = config.get('base_url', 'https://api.vidu.com')
+        model = config.get('model_name', 'viduq2') # 默认使用viduq2以支持更好的效果
+        
+        if not api_key:
+            return {'success': False, 'error_msg': "Missing VIDU API key"}
+            
+        url = f"{base_url.rstrip('/')}/ent/v2/reference2image"
+        
+        # 文生图时 images 为空
+        payload = {
+            "model": model,
+            "images": [],
+            "prompt": prompt,
+            "aspect_ratio": config.get('aspect_ratio', '16:9'),
+            "resolution": config.get('resolution', '1080p'),
+        }
+        
+        if config.get('seed') is not None:
+            payload['seed'] = int(config.get('seed'))
+
+        try:
+            headers = ViduHandler._get_headers(config)
+            logger.info(f"[VIDU] Creating T2I task. Model: {model}, Prompt: {prompt[:30]}")
+            
+            resp = requests.post(url, json=payload, headers=headers, timeout=60)
+            
+            if resp.status_code in [200, 201]:
+                data = resp.json()
+                task_id = data.get('task_id')
+                state = data.get('state')
+                
+                logger.info(f"[VIDU] Image Task created: {task_id}, state: {state}")
+                
+                if not task_id:
+                    return {'success': False, 'error_msg': 'No task_id returned from API'}
+                
+                # 轮询结果
+                return ViduHandler._wait_for_task(task_id, config, save_dir, url_prefix)
+            else:
+                logger.error(f"[VIDU] API Error {resp.status_code}: {resp.text}")
+                return {'success': False, 'error_msg': f"API Error ({resp.status_code}): {resp.text}"}
+                
+        except Exception as e:
+            logger.exception("[VIDU] Image generation failed")
+            return {'success': False, 'error_msg': str(e)}
     
     @staticmethod
     def generate_text(messages, config):
@@ -440,10 +569,81 @@ class ViduHandler:
     @staticmethod
     def fuse_image(prompt, save_dir, url_prefix, config, base_image_path, ref_image_path_list):
         """
-        ViduHandler: 图生图/融合图方法
-        Vidu 主要专注于视频生成，不支持图片生成和融合。
+        VIDU 图生图 / Reference to Image
+        Endpoint: /ent/v2/reference2image
+        Model: viduq2
         """
-        return {'success': False, 'error_msg': "VIDU is a video generation service and does not support image fusion/i2i."}
+        api_key = config.get('api_key')
+        base_url = config.get('base_url', 'https://api.vidu.com')
+        model = config.get('model_name', 'viduq2')
+        
+        if not api_key:
+            return {'success': False, 'error_msg': "Missing VIDU API key"}
+            
+        # 准备图片列表
+        images_payload = []
+        
+        # 处理 Reference Images
+        if ref_image_path_list:
+            for ref_path in ref_image_path_list:
+                ref_b64 = file_to_base64(ref_path)
+                if ref_b64:
+                    images_payload.append(ref_b64)
+                else:
+                    logger.warning(f"[VIDU] Failed to encode ref image: {ref_path}")
+                    
+        # 处理 Base Image
+        if base_image_path:
+            base_b64 = file_to_base64(base_image_path)
+            if base_b64:
+                images_payload.append(base_b64)
+            else:
+                return {'success': False, 'error_msg': f"Failed to encode base image: {base_image_path}"}
+        
+
+        # 检查图片数量限制 (viduq2 supports 0-7)
+        if len(images_payload) > 7:
+            logger.warning("[VIDU] Too many reference images, truncating to 7")
+            images_payload = images_payload[:7]
+
+        url = f"{base_url.rstrip('/')}/ent/v2/reference2image"
+        
+        payload = {
+            "model": model,
+            "images": images_payload,
+            "prompt": prompt,
+            "aspect_ratio": config.get('aspect_ratio', '16:9'), # viduq2 supports auto
+            "resolution": config.get('resolution', '1080p'),
+        }
+        
+        if config.get('seed') is not None:
+            payload['seed'] = int(config.get('seed'))
+
+        try:
+            headers = ViduHandler._get_headers(config)
+            logger.info(f"[VIDU] Creating Fusion task. Model: {model}, Images: {len(images_payload)}")
+            
+            resp = requests.post(url, json=payload, headers=headers, timeout=60)
+            
+            if resp.status_code in [200, 201]:
+                data = resp.json()
+                task_id = data.get('task_id')
+                state = data.get('state')
+                
+                logger.info(f"[VIDU] Fusion Task created: {task_id}, state: {state}")
+                
+                if not task_id:
+                    return {'success': False, 'error_msg': 'No task_id returned from API'}
+                
+                # 轮询结果
+                return ViduHandler._wait_for_task(task_id, config, save_dir, url_prefix)
+            else:
+                logger.error(f"[VIDU] API Error {resp.status_code}: {resp.text}")
+                return {'success': False, 'error_msg': f"API Error ({resp.status_code}): {resp.text}"}
+                
+        except Exception as e:
+            logger.exception("[VIDU] Fusion generation failed")
+            return {'success': False, 'error_msg': str(e)}
 
 class JimengHandler:
     """
@@ -917,19 +1117,33 @@ class JimengHandler:
         if not base_image_path or not os.path.exists(base_image_path):
              return {'success': False, 'error_msg': "Base image path is required for fusion"}
 
+         
+        # 准备图片列表
+        images_payload = []
+        
+        # 处理 Reference Images
+        if ref_image_path_list:
+            for ref_path in ref_image_path_list:
+                ref_b64 = file_to_base64(ref_path)
+                if img_b64 and ',' in img_b64:
+                    img_b64 = img_b64.split(',', 1)[1]
+                    images_payload.append(ref_b64)
+                else:
+                    logger.warning(f"[VIDU] Failed to encode ref image: {ref_path}")
+                    
         # 准备图片 Base64
         # 注意: 接口需要纯 base64 字符串，不包含 "data:image/png;base64," 前缀
         img_b64 = file_to_base64(base_image_path)
         if img_b64 and ',' in img_b64:
             img_b64 = img_b64.split(',', 1)[1]
-            
-        if not img_b64:
-             return {'success': False, 'error_msg': "Failed to process base image"}
+            images_payload.append(img_b64)
+        else:
+            return {'success': False, 'error_msg': f"Failed to encode base image: {base_image_path}"}
 
         # 构建请求参数
         req_payload = {
             "req_key": "jimeng_i2i_v30",
-            "binary_data_base64": [img_b64],
+            "binary_data_base64": images_payload,
             "prompt": prompt,
             "seed": int(config.get('seed', -1)),
             "scale": float(config.get('scale', 0.5)),
