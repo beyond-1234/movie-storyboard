@@ -116,6 +116,7 @@ class FusionTask:
     end_frame_image: str = "" # 尾帧结果图
     end_frame_prompt: str = "" # 尾帧提示词
     shot_id: str = ""        # 关联分镜 ID
+    video_url: str = ""     # 融合视频 URL
     created_time: str = field(default_factory=lambda: datetime.now().isoformat())
     # 增加 updated_time 字段，便于追踪更新
     updated_time: str = field(default_factory=lambda: datetime.now().isoformat()) 
@@ -1090,6 +1091,84 @@ def generate_fusion_prompt():
     else:
         return jsonify({'success': False, 'error': result.get('error', '生成失败')}), 500
     
+# --- 融图功能：生成视频 (新增) ---
+@app.route('/api/generate/fusion_video', methods=['POST'])
+def generate_fusion_video():
+    """
+    融图视频生成接口
+    使用 result_image 作为首帧，end_frame_image 作为尾帧 (如果存在)
+    """
+    data = request.json
+    fusion_id = data.get('fusion_id')
+    project_id = data.get('project_id')
+    provider_id = data.get('provider_id')
+    model_name = data.get('model_name')
+    
+    # 1. 获取任务数据
+    fusions_path = os.path.join(get_project_path(project_id), 'fusions.json')
+    fusions = read_json(fusions_path, default=[])
+    current_fusion = next((f for f in fusions if f['id'] == fusion_id), None)
+    
+    if not current_fusion:
+        return jsonify({'success': False, 'error': '融图任务不存在'}), 404
+        
+    # 2. 准备首尾帧路径
+    start_url = current_fusion.get('result_image')
+    end_url = current_fusion.get('end_frame_image') # 目前可能为空，但逻辑预留
+    
+    if not start_url:
+        return jsonify({'success': False, 'error': '缺少首帧图片 (Result Image)'}), 400
+        
+    # 将 URL 转换为本地绝对路径供 AI Service 读取
+    start_path = os.path.abspath(os.path.join(STATIC_FOLDER, start_url.lstrip('/')))
+    end_path = os.path.abspath(os.path.join(STATIC_FOLDER, end_url.lstrip('/'))) if end_url else None
+    
+    # 3. 准备 Prompt (使用融图提示词或分镜描述)
+    prompt = current_fusion.get('fusion_prompt') or current_fusion.get('visual_description') or "High quality video"
+    
+    # 4. 获取配置
+    config = get_provider_config(provider_id)
+    if model_name: config['model_name'] = model_name
+    
+    save_dir = os.path.join(STATIC_FOLDER, VIDEO_SAVE_DIR)
+    web_prefix = f"/{VIDEO_SAVE_DIR}"
+    
+    # 5. 调用 AI Service
+    try:
+        result = ai_service.run_video_generation(
+            prompt, 
+            start_path, 
+            end_path, 
+            config, 
+            save_dir, 
+            web_prefix
+        )
+        
+        if result.get('success'):
+            video_url = result['url']
+            
+            # 更新数据
+            current_fusion['video_url'] = video_url
+            current_fusion['updated_time'] = datetime.now().isoformat()
+            
+            # 保存回文件
+            # 注意：我们需要更新 fusions 列表中的这个对象，上面的 current_fusion 是引用，直接修改即可
+            # 但为了安全起见，重新找索引赋值
+            for i, f in enumerate(fusions):
+                if f['id'] == fusion_id:
+                    fusions[i] = current_fusion
+                    break
+            
+            write_json(fusions_path, fusions)
+            
+            return jsonify({'success': True, 'url': video_url})
+        else:
+            return jsonify({'success': False, 'error': result.get('error_msg', '生成失败')}), 500
+            
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({'success': False, 'error': str(e)}), 500
     
 if __name__ == '__main__':
     ensure_dirs()

@@ -453,6 +453,15 @@
                                     <div style="font-size: 12px; color: #E6A23C; margin-left: 10px;"><i class="el-icon-info"></i> 提示：推荐使用支持图生图的模型 (如 Wanx)</div>
                                     <div style="font-size: 12px; color: #E6A23C; margin-left: 10px;"><i class="el-icon-info"></i> 提示：融图发给AI的顺序为先是元素图片，最后是场景底图，在提示词描述时请注意顺序</div>
                                 </div>
+                                <div style="display:flex; align-items:center; gap: 15px; margin-top: 10px;">
+                                    <span style="font-size:13px; color:#606266; font-weight:bold;">视频生成模型:</span>
+                                    <el-select v-model="genOptions.videoProviderId" size="mini" placeholder="供应商" style="width: 120px;" @change="updateVideoModelDefault">
+                                        <el-option v-for="p in providers" :key="p.id" :label="p.name" :value="p.id"></el-option>
+                                    </el-select>
+                                    <el-select v-model="genOptions.videoModelName" size="mini" placeholder="模型" style="width: 150px;">
+                                        <el-option v-for="m in availableVideoModels" :key="m.name" :label="m.name" :value="m.name"></el-option>
+                                    </el-select>
+                                </div>
                             </div>
 
                             <!-- 工具栏 -->
@@ -465,6 +474,7 @@
                                     <el-button type="warning" size="small" icon="el-icon-magic-stick" @click="openFusionBatchDialog('prompt')">批量生成提示词</el-button>
                                     
                                     <el-button type="success" size="small" icon="el-icon-picture" @click="openFusionBatchDialog('image')">批量生成融合图</el-button>
+                                    <el-button type="danger" size="small" icon="el-icon-video-camera" @click="openFusionBatchDialog('video')">批量生成视频</el-button>
                                 </div>
                                 <div>
                                     <el-button type="primary" size="small" icon="el-icon-plus" @click="openCreateFusion">添加融图任务</el-button>
@@ -527,11 +537,21 @@
                                         <div v-else style="color: #ccc; font-size: 12px;">未生成</div>
                                     </template>
                                 </el-table-column>
+                                <el-table-column label="结果视频" width="160" align="center">
+                                    <template slot-scope="scope">
+                                        <div v-if="scope.row.video_url" style="width: 140px; height: 80px; background: #000; display: flex; justify-content: center; align-items: center; border-radius: 4px; overflow: hidden; position: relative; cursor: pointer;" @click="playVideo(scope.row)">
+                                            <video :src="scope.row.video_url" style="width: 100%; height: 100%; object-fit: cover;"></video>
+                                            <div class="video-play-overlay"><i class="el-icon-caret-right"></i></div>
+                                        </div>
+                                        <div v-else style="color: #ccc; font-size: 12px;">未生成</div>
+                                    </template>
+                                </el-table-column>
                                 <el-table-column label="操作" fixed="right">
                                     <template slot-scope="scope">
-                                        <el-tooltip content="编辑任务" placement="top"><el-button size="mini" icon="el-icon-edit" circle @click="editFusion(scope.row)"></el-button></el-tooltip>
+                                        <el-tooltip content="编辑任务" placement="top"><el-button size="mini" icon="el-icon-edit" circle plain @click="editFusion(scope.row)"></el-button></el-tooltip>
                                         <el-tooltip content="生成提示词" placement="top"><el-button size="mini" type="warning" icon="el-icon-magic-stick" circle plain @click="generateFusionPrompt(scope.row)"></el-button></el-tooltip>
                                         <el-tooltip content="生成融合图" placement="top"><el-button size="mini" type="success" icon="el-icon-picture" circle plain @click="generateFusionImage(scope.row)"></el-button></el-tooltip>
+                                        <el-tooltip content="生成视频" placement="top"><el-button size="mini" type="primary" icon="el-icon-video-camera" circle plain @click="generateFusionVideo(scope.row)" :disabled="!scope.row.result_image"></el-button></el-tooltip>
                                         <el-tooltip content="删除" placement="top"><el-button size="mini" type="danger" icon="el-icon-delete" circle plain @click="deleteFusion(scope.row)"></el-button></el-tooltip>
                                     </template>
                                 </el-table-column>
@@ -976,6 +996,11 @@
                     </div>
                     <div v-else style="color: #ccc; font-size: 14px; height: 150px; display: flex; align-items: center;">未生成</div>
                 </el-form-item>
+
+                <el-form-item label="融合视频">
+                    <div v-if="fusionForm.video_url" class="media-generated-box"><video :src="fusionForm.video_url" controls class="video-preview"></video><div style="margin-top: 5px;"><a :href="fusionForm.video_url" target="_blank" download style="font-size: 12px;">下载视频</a></div></div>
+                    <div v-else style="color: #ccc; font-size: 14px; height: 150px; display: flex; align-items: center;">未生成</div>
+                </el-form-item>
             </el-form>
             <div slot="footer" class="dialog-footer">
                 <el-button @click="fusionDialogVisible = false">取 消</el-button>
@@ -983,6 +1008,7 @@
                     生成提示词
                 </el-button>
                 <el-button type="warning" icon="el-icon-picture" :disabled="!fusionForm.base_image || !fusionForm.fusion_prompt" @click="generateFusionImage(fusionForm)">生成融合图</el-button>
+                <el-button type="warning" icon="el-icon-video-camera" :disabled="!fusionForm.result_image" @click="generateFusionVideo(fusionForm)">生成视频</el-button>
                 <el-button type="primary" @click="saveFusion">保 存</el-button>
             </div>
         </el-dialog>
@@ -1052,6 +1078,7 @@
                 <el-form-item label="生成类型">
                     <el-tag v-if="fusionBatchConfig.target === 'prompt'" type="warning">融图提示词 (Fusion Prompt)</el-tag>
                     <el-tag v-if="fusionBatchConfig.target === 'image'" type="success">融合图片 (Fusion Image)</el-tag>
+                    <el-tag v-if="fusionBatchConfig.target === 'video'" type="danger">融图视频 (Fusion Video)</el-tag>
                 </el-form-item>
 
                 <el-form-item label="选择生成范围">
@@ -1135,7 +1162,8 @@
                     base_image: '', // 基础图片
                     elements: [], // 融合元素列表
                     result_image: '', // 结果图片
-                    fusion_prompt: '' // 融合提示词
+                    fusion_prompt: '', // 融合提示词
+                    video_url: '' // 融合视频
                 },
                 elementDialogVisible: false,
                 elementForm: {
@@ -2290,7 +2318,8 @@
                         scene_description: '',
                         visual_description: '',
                         dialogue: '',
-                        audio_description: ''
+                        audio_description: '',
+                        video_url: ''
                     };
                     this.fusionDialogTitle = '新建融图任务';
                     this.fusionDialogVisible = true;
@@ -3038,6 +3067,11 @@
                         if (!this.genOptions.fusionProviderId || !this.genOptions.fusionModelName) {
                             return this.$message.warning('请先在顶部选择图生图模型');
                         }
+                    } else if (target === 'video') {
+                        // [新增] 检查视频模型
+                        if (!this.genOptions.videoProviderId || !this.genOptions.videoModelName) {
+                            return this.$message.warning('请先在顶部选择视频生成模型');
+                        }
                     }
 
                     // --- 确定任务范围 ---
@@ -3049,8 +3083,11 @@
                     } else if (scope === 'missing') {
                         if (target === 'prompt') {
                             tasks = this.fusionList.filter(f => !f.fusion_prompt || !f.fusion_prompt.trim());
-                        } else {
+                        } else if (target === 'image') {
                             tasks = this.fusionList.filter(f => !f.result_image);
+                        } else if (target === 'video') {
+                            // [新增] 筛选缺失视频的任务
+                            tasks = this.fusionList.filter(f => !f.video_url);
                         }
                     }
 
@@ -3063,14 +3100,122 @@
                     const total = tasks.length;
                     let successCount = 0;
                     let failCount = 0;
-                    const actionName = target === 'prompt' ? '提示词' : '融合图';
+                    //const actionName = target === 'prompt' ? '提示词' : '融合图';
 
                     if (target === 'prompt') {
                         this.batchGenerateFusionPrompts(tasks);
                     } else if (target === 'image') {
                         this.batchGenerateFusionImages(tasks);
+                    } else if (target === 'video') {
+                        // [新增] 调用批量视频生成
+                        this.batchGenerateFusionVideos(tasks);
                     }
 
+                },
+                async generateFusionVideo(row) {
+                    if (!row.result_image) {
+                        return this.$message.warning('请先生成融合图作为首帧');
+                    }
+                    
+                    if (!this.genOptions.videoProviderId || !this.genOptions.videoModelName) {
+                        return this.$message.warning('请先选择视频生成模型');
+                    }
+
+                    this.startGlobalLoading('正在生成融图视频...', 'AI 正在基于融合图生成动态视频...');
+                    
+                    try {
+                        // 确保任务有ID
+                        if (!row.id) {
+                            const saved = await this.saveFusionData(row);
+                            Object.assign(row, saved);
+                        }
+
+                        const res = await this.request('POST', '/api/generate/fusion_video', {
+                            fusion_id: row.id,
+                            project_id: this.currentProjectId,
+                            provider_id: this.genOptions.videoProviderId,
+                            model_name: this.genOptions.videoModelName
+                        });
+
+                        if (res.success) {
+                            // 更新前端数据
+                            this.$set(row, 'video_url', res.url);
+                            this.$message.success('视频生成成功！');
+                        } else {
+                            this.$message.error(res.error || '生成失败');
+                        }
+                    } catch (e) {
+                        console.error(e);
+                        this.$message.error('生成视频请求失败');
+                    } finally {
+                        this.stopGlobalLoading();
+                    }
+                },
+                async batchGenerateFusionVideos(tasks) {
+                    // 1. 预检查：所有任务必须已有 Result Image (作为首帧)
+                    const readyTasks = tasks.filter(f => f.result_image);
+                    const skippedCount = tasks.length - readyTasks.length;
+                    
+                    if (readyTasks.length === 0) {
+                        this.$message.warning(`所选任务均未生成融合图(首帧)，无法生成视频。请先生成融合图。`);
+                        return;
+                    }
+                    
+                    if (skippedCount > 0) {
+                        this.$message.info(`已跳过 ${skippedCount} 个未生成融合图的任务`);
+                    }
+
+                    const total = readyTasks.length;
+                    let successCount = 0;
+                    let failCount = 0;
+
+                    this.startGlobalLoading(`批量生成融图视频... (0/${total})`, `共 ${total} 个任务，视频生成较慢，请勿关闭页面`);
+
+                    for (let i = 0; i < total; i++) {
+                        const row = readyTasks[i];
+                        this.loadingTitle = `正在处理第 ${i + 1}/${total} 个视频...`;
+
+                        try {
+                            if (this.currentAbortController.signal.aborted) break;
+
+                            // 确保任务有ID
+                            if (!row.id) {
+                                const saved = await this.saveFusionData(row);
+                                Object.assign(row, saved);
+                            }
+
+                            // 调用单个生成接口
+                            const res = await this.request('POST', '/api/generate/fusion_video', {
+                                fusion_id: row.id,
+                                project_id: this.currentProjectId,
+                                provider_id: this.genOptions.videoProviderId,
+                                model_name: this.genOptions.videoModelName
+                            });
+
+                            if (res.success) {
+                                this.$set(row, 'video_url', res.url);
+                                successCount++;
+                            } else {
+                                console.error(`视频生成失败 ID ${row.id}:`, res.error);
+                                failCount++;
+                            }
+
+                            // 短暂延迟避免限流
+                            if (i < total - 1) {
+                                await new Promise(resolve => setTimeout(resolve, 1000));
+                            }
+
+                        } catch (e) {
+                            console.error(`批量视频异常 ID ${row.id}:`, e);
+                            failCount++;
+                        }
+                    }
+
+                    this.stopGlobalLoading();
+                    this.$message({ 
+                        type: failCount === 0 ? 'success' : 'warning', 
+                        message: `批量视频完成！成功: ${successCount}, 失败: ${failCount}` 
+                    });
                 }
             }
         });

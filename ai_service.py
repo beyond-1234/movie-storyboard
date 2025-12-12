@@ -107,7 +107,7 @@ class AliyunHandler:
         api_key = config.get('api_key')
         model = config.get('model_name') or 'wanx2.1-kf2v-plus'
         
-        params = {'model': model, 'prompt': prompt, 'prompt_extend': True}
+        params = {'model': model, 'prompt': prompt, 'prompt_extend': True, 'watermark': False}
         if start_img: 
             b64 = file_to_base64(start_img)
             if b64: params['first_frame_url'] = b64
