@@ -166,6 +166,9 @@ class AliyunHandler:
         # 默认使用 wan2.5-i2i-preview 模型，如果配置中未指定
         model = config.get('model_name') or 'wan2.5-i2i-preview'
         
+        if len(ref_image_path_list) + 1 > 3:
+            return {'success': False, 'error_msg': "阿里云图生图模型最多支持3张参考图片"}
+        
         # 准备图片列表 (Base64编码)
         images_input = []
         
@@ -1990,5 +1993,5 @@ def run_fusion_generation(base_image_path, fusion_prompt, config, save_dir, url_
     handler = get_handler(config.get('type', 'mock'))
     
     # 传入 ref_image_path 参数，Handler 内部会判断是否调用图生图接口
-    result = handler.fuse_image(fusion_prompt, save_dir, url_prefix, config, base_image_path, element_image_paths=element_image_paths)
+    result = handler.fuse_image(fusion_prompt, save_dir, url_prefix, config, base_image_path, ref_image_path_list=element_image_paths)
     return result
