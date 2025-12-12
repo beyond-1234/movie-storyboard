@@ -413,6 +413,7 @@
                                         <el-tooltip content="生成提示词" placement="top"><el-button size="mini" type="success" icon="el-icon-magic-stick" circle plain @click="generateScenePrompt(scope.row)"></el-button></el-tooltip>
                                         <el-tooltip content="生成图片" placement="top"><el-button size="mini" type="primary" icon="el-icon-picture" circle plain @click="generateSceneImage(scope.row)"></el-button></el-tooltip>
                                         <el-tooltip content="替换图片" placement="top"><el-button size="mini" type="info" icon="el-icon-upload2" circle plain @click="uploadSceneImage(scope.row)"></el-button></el-tooltip>
+                                        <el-tooltip content="向下插入一行" placement="top"><el-button size="mini" type="primary" icon="el-icon-plus" circle plain @click="insertScene(scope.$index)"></el-button></el-tooltip> <el-tooltip content="生成提示词" placement="top"><el-button size="mini" type="success" icon="el-icon-magic-stick" circle plain @click="generateScenePrompt(scope.row)"></el-button></el-tooltip>
                                     </template>
                                 </el-table-column>
                             </el-table>
@@ -553,6 +554,7 @@
                                         <el-tooltip content="生成融合图" placement="top"><el-button size="mini" type="success" icon="el-icon-picture" circle plain @click="generateFusionImage(scope.row)"></el-button></el-tooltip>
                                         <el-tooltip content="生成视频" placement="top"><el-button size="mini" type="primary" icon="el-icon-video-camera" circle plain @click="generateFusionVideo(scope.row)" :disabled="!scope.row.result_image"></el-button></el-tooltip>
                                         <el-tooltip content="删除" placement="top"><el-button size="mini" type="danger" icon="el-icon-delete" circle plain @click="deleteFusion(scope.row)"></el-button></el-tooltip>
+                                        <el-tooltip content="向下插入一行" placement="top"><el-button size="mini" type="primary" icon="el-icon-plus" circle plain @click="insertFusion(scope.$index)"></el-button></el-tooltip> <el-tooltip content="生成提示词" placement="top"><el-button size="mini" type="warning" icon="el-icon-magic-stick" circle plain @click="generateFusionPrompt(scope.row)"></el-button></el-tooltip>
                                     </template>
                                 </el-table-column>
                             </el-table>
@@ -1435,6 +1437,7 @@
                 
                 // 场景相关方法（操作分镜数据）
                 openCreateScene() {
+                    this.currentInsertIndex = -1; // 重置插入位置
                     this.sceneForm = {
                         scene: '',
                         shot_number: '',
@@ -1450,6 +1453,12 @@
                     this.sceneForm = JSON.parse(JSON.stringify(shot));
                     this.sceneDialogTitle = '编辑场景';
                     this.sceneDialogVisible = true;
+                },
+                // 新增 insertScene 方法
+                insertScene(index) {
+                    this.openCreateScene();
+                    this.currentInsertIndex = index + 1; // 记录要在哪一行之后插入
+                    this.sceneDialogTitle = '插入新场景';
                 },
                 async submitScene() {
                     if(!this.sceneForm.scene || !this.sceneForm.shot_number) {
@@ -1467,10 +1476,16 @@
                         const newShot = {
                             movie_id: this.currentProjectId,
                             ...this.sceneForm,
-                            visual_description: ''
+                            visual_description: '',
+                            insert_index: this.currentInsertIndex > -1 ? this.currentInsertIndex : undefined // 传递插入位置
                         };
                         const res = await this.request('POST', `/api/projects/${this.currentProjectId}/shots`, newShot);
-                        this.shotList.push(res);
+                        
+                        if (this.currentInsertIndex > -1) {
+                            this.shotList.splice(this.currentInsertIndex, 0, res); // 前端也同步插入
+                        } else {
+                            this.shotList.push(res);
+                        }
                     }
                     this.sceneDialogVisible = false;
                 },
@@ -1870,6 +1885,7 @@
                 },
                 
                 openCreateFusion() {
+                    this.currentInsertIndex = -1; // 重置
                     this.fusionForm = { 
                         id: '', 
                         scene: '', 
@@ -1887,7 +1903,12 @@
                     this.fusionDialogTitle = '新建融图任务';
                     this.fusionDialogVisible = true;
                 },
-                
+                // 新增 insertFusion 方法
+                insertFusion(index) {
+                    this.openCreateFusion();
+                    this.currentInsertIndex = index + 1;
+                    this.fusionDialogTitle = '插入融图任务';
+                },
                 editFusion(row) {
                     const formData = JSON.parse(JSON.stringify(row));
                     if (!formData.scene_description && formData.shot_id) {
@@ -2106,49 +2127,51 @@
                 // 保存融图功能的场景融图数据 (通用保存函数)
                 async saveFusionData(fusion) {
                     try {
-                            // 1. 先把当前前端对象里那些“只读/展示用”的字段备份下来
-                            // 这些字段不在数据库里，但我们希望在界面上保留显示
-                            const transientFields = {
-                                scene_description: fusion.scene_description || '',
-                                visual_description: fusion.visual_description || '',
-                                dialogue: fusion.dialogue || '',
-                                audio_description: fusion.audio_description || ''
-                            };
+                        // 备份瞬态字段
+                        const transientFields = {
+                            scene_description: fusion.scene_description || '',
+                            visual_description: fusion.visual_description || '',
+                            dialogue: fusion.dialogue || '',
+                            audio_description: fusion.audio_description || ''
+                        };
 
-                            const method = fusion.id ? 'PUT' : 'POST';
-                            const url = fusion.id 
-                                ? `/api/projects/${this.currentProjectId}/fusions/${fusion.id}`
-                                : `/api/projects/${this.currentProjectId}/fusions`;
+                        const method = fusion.id ? 'PUT' : 'POST';
+                        const url = fusion.id 
+                            ? `/api/projects/${this.currentProjectId}/fusions/${fusion.id}`
+                            : `/api/projects/${this.currentProjectId}/fusions`;
 
-                            // 发送请求（后端只会保存实体字段，忽略上面的 transientFields）
-                            const res = await this.request(method, url, fusion);
-                            
-                            // 2. 【关键一步】将后端返回的“干净结果”与我们备份的“展示字段”合并
-                            // 这样 res 就重新拥有了 scene_description 等数据
-                            const mergedResult = { ...res, ...transientFields };
-
-                            // 如果是新创建的任务 (POST)
-                            if (method === 'POST') {
-                                fusion.id = res.id; // 更新ID
-                                // 将合并后的对象推入列表
-                                this.fusionList.push(mergedResult);
-                            } else {
-                                // 更新列表中的数据 (PUT)
-                                const idx = this.fusionList.findIndex(f => f.id === fusion.id);
-                                if (idx !== -1) {
-                                    // 使用合并后的对象更新视图，防止文字消失
-                                    this.$set(this.fusionList, idx, mergedResult);
-                                }
-                            }
-                            
-                            // 返回合并后的对象，保证调用链下游拿到的是完整数据
-                            return mergedResult;
-
-                        } catch (e) {
-                            console.error(e);
-                            this.$message.error('保存失败');
-                            throw e;
+                        // 如果是新建且有插入位置，添加到 payload
+                        if (!fusion.id && this.currentInsertIndex > -1) {
+                            fusion.insert_index = this.currentInsertIndex;
                         }
+
+                        const res = await this.request(method, url, fusion);
+                        
+                        // 合并结果
+                        const mergedResult = { ...res, ...transientFields };
+
+                        if (method === 'POST') {
+                            fusion.id = res.id;
+                            if (this.currentInsertIndex > -1) {
+                                this.fusionList.splice(this.currentInsertIndex, 0, mergedResult); // 前端插入
+                                this.currentInsertIndex = -1; // 重置
+                            } else {
+                                this.fusionList.push(mergedResult);
+                            }
+                        } else {
+                            const idx = this.fusionList.findIndex(f => f.id === fusion.id);
+                            if (idx !== -1) {
+                                this.$set(this.fusionList, idx, mergedResult);
+                            }
+                        }
+                        
+                        return mergedResult;
+
+                    } catch (e) {
+                        console.error(e);
+                        this.$message.error('保存失败');
+                        throw e;
+                    }
                 },
                 // 处理融图任务中分镜选择的变化
                 handleFusionShotChange(shotId) {

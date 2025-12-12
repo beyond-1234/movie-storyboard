@@ -233,7 +233,14 @@ def create_shot(project_id):
     data = request.json
     shots = read_json(os.path.join(get_project_path(project_id), 'shot.json'), default=[])
     new_shot = StoryboardShot.from_dict({**data, 'movie_id': project_id})
-    shots.append(new_shot.to_dict())
+    
+    # [新增] 处理插入位置
+    insert_index = data.get('insert_index')
+    if insert_index is not None and isinstance(insert_index, int) and 0 <= insert_index <= len(shots):
+        shots.insert(insert_index, new_shot.to_dict())
+    else:
+        shots.append(new_shot.to_dict())
+        
     write_json(os.path.join(get_project_path(project_id), 'shot.json'), shots)
     return jsonify(new_shot.to_dict()), 201
 
@@ -867,7 +874,14 @@ def create_fusion(project_id):
     data['updated_time'] = datetime.now().isoformat()
     
     new_fusion = FusionTask.from_dict(data) 
-    fusions.append(new_fusion.to_dict())
+    
+    # [新增] 处理插入位置
+    insert_index = data.get('insert_index')
+    if insert_index is not None and isinstance(insert_index, int) and 0 <= insert_index <= len(fusions):
+        fusions.insert(insert_index, new_fusion.to_dict())
+    else:
+        fusions.append(new_fusion.to_dict())
+        
     write_json(path, fusions)
     return jsonify(new_fusion.to_dict()), 201
 
