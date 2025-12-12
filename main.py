@@ -1039,7 +1039,9 @@ def generate_fusion_prompt():
     project_id = data.get('project_id')
     provider_id = data.get('provider_id')
     model_name = data.get('model_name')
-
+    # 接收前端传来的素材映射描述字符串 (例如："图1:男主角, 图2:女主角, 图3:背景底图")
+    element_mapping = data.get('element_mapping', '')
+    
     if not scene_description:
         return jsonify({'success': False, 'error': '场景描述不能为空'}), 400
 
@@ -1057,7 +1059,7 @@ def generate_fusion_prompt():
     sys = "你是一个专业的电影分镜设计师。请根据场景描述生成详细的场景及人物和元素图片融合的提示词，用于AI图片融合"
     
     # 构建用户提示词，包含场景描述和项目信息
-    user_prompt = f"""场景描述：{scene_description} 分镜描述：{shot_description}
+    user_prompt = f"""【输入图片列表 (必须在提示词中引用)】：{element_mapping} 【场景环境】：{scene_description} 【画面/动作描述】：{shot_description}
 
 请生成一个详细的融合图片提示词，必须包含以下元素：人物、场景、人物展位、人物朝向、姿态、景别、视角、构图、时间、氛围、人物表情。
 例如：人物+场景：1个人物:人物/角色在某场景中所处相对位置，做什么，什么表情/情绪，做什么，额外可对场景增加提示词描述改变场景状态，如光线、夜晚。

@@ -2670,8 +2670,9 @@
                     }
                 },
                 async generateFusionPrompt(fusion) {
+                    // 1. 基础校验
                     if (!fusion.scene_description && !fusion.visual_description) {
-                        this.$message.warning('请先从分镜列表复制数据或在编辑任务中手动补充场景和分镜描述');
+                        this.$message.warning('缺少场景或分镜描述，请先关联分镜或手动填写');
                         return;
                     }
                     
@@ -2680,19 +2681,45 @@
                         return;
                     }
 
-                    this.startGlobalLoading('生成融图提示词...', 'AI 正在分析分镜和场景信息');
+                    // 2. [新增核心逻辑] 汇总图1、图2等素材内容
+                    let imgIndex = 1;
+                    let mappingParts = [];
+
+                    // 处理元素 (前景)
+                    if (fusion.elements && fusion.elements.length > 0) {
+                        fusion.elements.forEach(el => {
+                            mappingParts.push(`图${imgIndex} (Image ${imgIndex}): ${el.name} [前景元素]`);
+                            imgIndex++;
+                        });
+                    }
+
+                    // 处理底图 (背景/环境)
+                    if (fusion.base_image) {
+                        // 如果有底图，它通常是最后一张
+                        mappingParts.push(`图${imgIndex} (Image ${imgIndex}): 场景底图/背景 [Background]`);
+                    } else {
+                        // 如果没有底图，给个提示
+                        mappingParts.push(`(未设置底图，请基于纯文本生成背景)`);
+                    }
+
+                    const elementMappingStr = mappingParts.join('\n');
+                    console.log("构建的素材映射:", elementMappingStr); // 调试用
+
+                    // 3. 开始请求
+                    this.startGlobalLoading('生成融图提示词...', '正在根据素材列表编排画面...');
                     try {
-                        // 1. 确保任务有 ID，否则先保存
+                        // 确保任务有 ID
                         if (!fusion.id) {
                             const savedFusion = await this.saveFusionData(fusion);
-                            // 将引用更新为已保存的任务对象
                             Object.assign(fusion, savedFusion);
                         }
 
-                        // 2. 接口请求
+                        // 发送请求，带上 element_mapping
                         const res = await this.request('POST', '/api/generate/fusion_prompt', {
                             scene_description: fusion.scene_description || '',
                             shot_description: fusion.visual_description || '',
+                            // 传递构建好的映射字符串
+                            element_mapping: elementMappingStr,
                             project_id: this.currentProjectId,
                             provider_id: this.genOptions.textProviderId,
                             model_name: this.genOptions.textModelName
@@ -2701,19 +2728,20 @@
                         if (res.success) {
                             const newPrompt = res.prompt;
                             
-                            // 3. 更新后端数据
+                            // 更新后端
                             await this.request('PUT', `/api/projects/${this.currentProjectId}/fusions/${fusion.id}`, {
                                 fusion_prompt: newPrompt
                             });
 
-                            // 4. 更新本地 Vue 数据
+                            // 更新前端
                             fusion.fusion_prompt = newPrompt;
                             const idx = this.fusionList.findIndex(f => f.id === fusion.id);
                             if(idx !== -1) {
+                                // 使用 $set 确保视图更新
                                 this.$set(this.fusionList, idx, { ...this.fusionList[idx], fusion_prompt: newPrompt });
                             }
                             
-                            this.$message.success('融图提示词生成成功');
+                            this.$message.success('已生成包含图片引用的提示词');
                         } else {
                             throw new Error(res.error || '生成失败');
                         }
@@ -2772,10 +2800,36 @@
                                 continue;
                             }
 
+                            // 2. [新增核心逻辑] 汇总图1、图2等素材内容
+                            let imgIndex = 1;
+                            let mappingParts = [];
+
+                            // 处理元素 (前景)
+                            if (fusion.elements && fusion.elements.length > 0) {
+                                fusion.elements.forEach(el => {
+                                    mappingParts.push(`图${imgIndex} (Image ${imgIndex}): ${el.name} [前景元素]`);
+                                    imgIndex++;
+                                });
+                            }
+
+                            // 处理底图 (背景/环境)
+                            if (fusion.base_image) {
+                                // 如果有底图，它通常是最后一张
+                                mappingParts.push(`图${imgIndex} (Image ${imgIndex}): 场景底图/背景 [Background]`);
+                            } else {
+                                // 如果没有底图，给个提示
+                                mappingParts.push(`(未设置底图，请基于纯文本生成背景)`);
+                            }
+
+                            const elementMappingStr = mappingParts.join('\n');
+                            console.log("构建的素材映射:", elementMappingStr); // 调试用
+
                             // 2. 接口请求
                             const res = await this.request('POST', '/api/generate/fusion_prompt', {
                                 scene_description: fusion.scene_description || '',
                                 shot_description: fusion.visual_description || '',
+                                // 传递构建好的映射字符串
+                                element_mapping: elementMappingStr,
                                 project_id: this.currentProjectId,
                                 provider_id: this.genOptions.textProviderId,
                                 model_name: this.genOptions.textModelName
