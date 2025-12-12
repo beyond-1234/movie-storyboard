@@ -111,8 +111,10 @@ class FusionTask:
     shot_number: str
     base_image: str = ""     # 底图 URL
     elements: List[Dict] = field(default_factory=list) # 预留字段
-    result_image: str = ""   # 结果图 URL
-    fusion_prompt: str = ""  # 融合提示词
+    result_image: str = ""   # 首帧结果图 URL
+    fusion_prompt: str = ""  # 首帧融合提示词
+    end_frame_image: str = "" # 尾帧结果图
+    end_frame_prompt: str = "" # 尾帧提示词
     shot_id: str = ""        # 关联分镜 ID
     created_time: str = field(default_factory=lambda: datetime.now().isoformat())
     # 增加 updated_time 字段，便于追踪更新
@@ -1056,7 +1058,7 @@ def generate_fusion_prompt():
         project_info = read_json(os.path.join(get_project_path(project_id), 'info.json'), default={})
 
     # 构建系统提示词
-    sys = "你是一个专业的电影分镜设计师。请根据场景描述生成详细的场景及人物和元素图片融合的提示词，用于AI图片融合"
+    sys = "你是一个专业的电影分镜设计师。请根据场景描述生成详细的场景及人物和元素图片融合的提示词，用于AI图片融合，作为电影分镜的一部分；"
     
     # 构建用户提示词，包含场景描述和项目信息
     user_prompt = f"""【输入图片列表 (必须在提示词中引用)】：{element_mapping} 【场景环境】：{scene_description} 【画面/动作描述】：{shot_description}
@@ -1077,12 +1079,14 @@ def generate_fusion_prompt():
         if color_system:
             user_prompt += f"\n\n色彩体系要求：{color_system}"
 
-    msgs = [{'role': 'system', 'content': sys}, {'role': 'user', 'content': user_prompt}]
+    msgs = [{'role': 'system', 'content': sys + "你要根据场景描述生成第1秒的画面"}, {'role': 'user', 'content': user_prompt}]
 
     result = ai_service.run_text_generation(msgs, config)
+    
+    end_frame_result = ai_service.run_text_generation([{'role': 'system', 'content': sys + "你要根据场景描述生成最后秒的画面"}, {'role': 'user', 'content': user_prompt}], config)
 
     if result.get('success'):
-        return jsonify({'success': True, 'prompt': result['content']})
+        return jsonify({'success': True, 'prompt': result['content'], 'end_frame_prompt': end_frame_result['content']})
     else:
         return jsonify({'success': False, 'error': result.get('error', '生成失败')}), 500
     
