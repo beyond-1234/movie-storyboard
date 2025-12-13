@@ -1,30 +1,23 @@
 import os
 import time
-import json
 import re
 import uuid
+import json
 from typing import List, Optional, Dict, Any
 from flask import Flask, request, jsonify, send_file
-from pathlib import Path
 
 import ai_service 
 from jianying_exporter import export_draft
 from data_manager import DataManager
+from media_manager import MediaManager
 
 # --- 配置 ---
 STATIC_FOLDER = "."
-IMG_SAVE_DIR = "static/imgs"
-VIDEO_SAVE_DIR = "static/videos"
-AUDIO_SAVE_DIR = "static/audio"
-EXPORT_DIR = "exports"
-
 app = Flask(__name__, static_url_path='', static_folder=STATIC_FOLDER)
-db = DataManager() # 初始化数据管理器
 
-# --- 基础工具 ---
-def ensure_static_dirs():
-    for d in [IMG_SAVE_DIR, VIDEO_SAVE_DIR, AUDIO_SAVE_DIR, EXPORT_DIR]:
-        Path(d).mkdir(parents=True, exist_ok=True)
+# 初始化管理器
+db = DataManager() 
+media_mgr = MediaManager(STATIC_FOLDER)
 
 # --- 路由 ---
 @app.route('/')
@@ -278,12 +271,10 @@ def generate_image():
     prev_context = prev_shot['end_frame_prompt'] if prev_shot else ''
     start_prompt_ref = current_shot.get('start_frame_prompt')
     
-    save_dir = os.path.join(STATIC_FOLDER, IMG_SAVE_DIR)
-    web_prefix = f"/{IMG_SAVE_DIR}"
-
+    # 传入 media_mgr 和 shot_id 作为 entity_id 进行版本管理
     result, used_prompt = ai_service.run_image_generation(
         data.get('visual_description'), data.get('style_description'), data.get('consistency_text'),
-        data.get('frame_type'), config, save_dir, web_prefix, start_prompt_ref, prev_context
+        data.get('frame_type'), config, media_mgr, start_prompt_ref, prev_context, entity_id=shot_id
     )
 
     if result.get('success'):
@@ -292,42 +283,13 @@ def generate_image():
         return jsonify(result)
     return jsonify(result), 500
 
-@app.route('/api/generate/video', methods=['POST'])
-def generate_video():
-    data = request.json
-    config = db.get_provider_config(data.get('provider_id'))
-    if data.get('model_name'): config['model_name'] = data.get('model_name')
-    
-    s_url = data.get('start_frame', '')
-    e_url = data.get('end_frame', '')
-    s_path = os.path.abspath(os.path.join(STATIC_FOLDER, s_url.lstrip('/'))) if s_url else None
-    e_path = os.path.abspath(os.path.join(STATIC_FOLDER, e_url.lstrip('/'))) if e_url else None
-    
-    save_dir = os.path.join(STATIC_FOLDER, VIDEO_SAVE_DIR)
-    web_prefix = f"/{VIDEO_SAVE_DIR}"
-
-    result = ai_service.run_video_generation(
-        data.get('visual_description'), s_path, e_path, config, save_dir, web_prefix
-    )
-    return jsonify(result) if result.get('success') else (jsonify(result), 500)
-
-@app.route('/api/generate/voiceover', methods=['POST'])
-def generate_voiceover():
-    data = request.json
-    config = db.get_provider_config(data.get('provider_id'))
-    if data.get('model_name'): config['model_name'] = data.get('model_name')
-    
-    save_dir = os.path.join(STATIC_FOLDER, AUDIO_SAVE_DIR)
-    web_prefix = f"/{AUDIO_SAVE_DIR}"
-    
-    result = ai_service.run_voice_generation(data.get('text'), config, save_dir, web_prefix)
-    return jsonify(result) if result.get('success') else (jsonify(result), 500)
 
 @app.route('/api/projects/<project_id>/export/jianying', methods=['POST'])
 def export_jianying(project_id):
     project_info = db.get_project(project_id)
     shots = db.get_shots(project_id)
-    result = export_draft(project_info, shots, STATIC_FOLDER, EXPORT_DIR)
+    # 导出模块可能还需要适配，暂维持原样，假设导出目录已由 MediaManager 创建
+    result = export_draft(project_info, shots, STATIC_FOLDER, "exports")
     return jsonify(result) if result['success'] else (jsonify(result), 500)
 
 # === Character API ===
@@ -358,8 +320,7 @@ def generate_character_views():
     if data.get('model_name'): config['model_name'] = data.get('model_name')
 
     project_id = data.get('project_id')
-    save_dir = os.path.join(STATIC_FOLDER, IMG_SAVE_DIR)
-    web_prefix = f"/{IMG_SAVE_DIR}"
+    character_id = data.get('character_id') # 获取 ID 用于版本控制
     
     project_info = db.get_project(project_id) if project_id else {}
     
@@ -370,7 +331,7 @@ def generate_character_views():
         project_info.get('basic_info', '')
     )
     
-    result = ai_service.run_simple_image_generation(prompt, config, save_dir, web_prefix)
+    result = ai_service.run_simple_image_generation(prompt, config, media_mgr, entity_id=character_id)
     return jsonify({'success': True, 'url': result['url']}) if result.get('success') else (jsonify({'success': False, 'error': '生成失败'}), 500)
 
 def build_comprehensive_character_prompt(character_desc, color_system, emotional_keywords, basic_info):
@@ -401,25 +362,14 @@ def generate_character_list():
         except: pass
     return jsonify({'success': False, 'error': '无法解析角色列表'}), 500
 
-# --- File Upload Helpers ---
-def allowed_file(filename):
-    return '.' in filename and filename.rsplit('.', 1)[1].lower() in {'png', 'jpg', 'jpeg', 'gif', 'bmp', 'webp'}
-
-def save_uploaded_file(file, prefix_id, sub_dir=IMG_SAVE_DIR):
-    if not file or not allowed_file(file.filename): return None, "Invalid file"
-    ext = os.path.splitext(file.filename)[1].lower() or '.png'
-    filename = f"{prefix_id}_{uuid.uuid4().hex[:8]}{ext}"
-    save_dir = os.path.join(STATIC_FOLDER, sub_dir)
-    os.makedirs(save_dir, exist_ok=True)
-    file_path = os.path.join(save_dir, filename)
-    file.save(file_path)
-    return f"/{sub_dir}/{filename}", None
-
 @app.route('/api/upload/character_image', methods=['POST'])
 def upload_character_image():
     if 'file' not in request.files: return jsonify({'success': False, 'error': 'No file'}), 400
     cid = request.form.get('character_id') or 'char'
-    url, err = save_uploaded_file(request.files['file'], f"character_{cid}")
+    
+    # 使用 MediaManager 上传，并启用版本管理
+    url, err = media_mgr.save_uploaded_file(request.files['file'], media_type='image', entity_id=cid)
+    
     if err: return jsonify({'success': False, 'error': err}), 400
     return jsonify({'success': True, 'url': url})
 
@@ -427,7 +377,10 @@ def upload_character_image():
 def upload_scene_image():
     if 'file' not in request.files: return jsonify({'success': False, 'error': 'No file'}), 400
     sid = request.form.get('scene_id') or 'scene'
-    url, err = save_uploaded_file(request.files['file'], f"scene_{sid}")
+    
+    # 使用 MediaManager 上传
+    url, err = media_mgr.save_uploaded_file(request.files['file'], media_type='image', entity_id=sid)
+    
     if err: return jsonify({'success': False, 'error': err}), 400
     return jsonify({'success': True, 'url': url})
 
@@ -455,8 +408,11 @@ def generate_scene_image():
     config = db.get_provider_config(data.get('provider_id'))
     if data.get('model_name'): config['model_name'] = data.get('model_name')
     
+    # scene_image 可能没有 strict 的 entity_id, 可选
+    scene_id = data.get('scene_id')
+    
     prompt = f"电影场景设计图，{data.get('scene_prompt')}。高分辨率，电影质感。"
-    result = ai_service.run_simple_image_generation(prompt, config, os.path.join(STATIC_FOLDER, IMG_SAVE_DIR), f"/{IMG_SAVE_DIR}")
+    result = ai_service.run_simple_image_generation(prompt, config, media_mgr, entity_id=scene_id)
     
     return jsonify({'success': True, 'url': result['url']}) if result.get('success') else (jsonify({'success': False}), 500)
 
@@ -486,20 +442,29 @@ def generate_element_image():
     config = db.get_provider_config(data.get('provider_id'))
     if data.get('model_name'): config['model_name'] = data.get('model_name')
     
-    result = ai_service.run_simple_image_generation(data.get('prompt'), config, os.path.join(STATIC_FOLDER, IMG_SAVE_DIR), f"/{IMG_SAVE_DIR}")
+    # 元素图，可能有 element_id
+    element_id = data.get('element_id')
+    
+    result = ai_service.run_simple_image_generation(data.get('prompt'), config, media_mgr, entity_id=element_id)
     return jsonify({'success': True, 'url': result['url']}) if result.get('success') else (jsonify({'success': False}), 500)
 
 @app.route('/api/upload/element_image', methods=['POST'])
 def upload_element_image():
     if 'file' not in request.files: return jsonify({'success': False}), 400
-    url, err = save_uploaded_file(request.files['file'], f"fusion_element")
+    
+    eid = request.form.get('element_id')
+    url, err = media_mgr.save_uploaded_file(request.files['file'], media_type='image', entity_id=eid)
+    
     if err: return jsonify({'success': False, 'error': err}), 400
     return jsonify({'success': True, 'url': url})
 
 @app.route('/api/upload/base_image', methods=['POST'])
 def upload_base_image():
     if 'file' not in request.files: return jsonify({'success': False}), 400
-    url, err = save_uploaded_file(request.files['file'], f"fusion_base")
+    
+    fid = request.form.get('fusion_id')
+    url, err = media_mgr.save_uploaded_file(request.files['file'], media_type='image', entity_id=fid)
+    
     if err: return jsonify({'success': False, 'error': err}), 400
     return jsonify({'success': True, 'url': url})
 
@@ -515,11 +480,12 @@ def generate_fusion_image():
     base_image_url = current_fusion.get('base_image')
     if not base_image_url: return jsonify({'success': False, 'error': 'No base image'}), 400
     
-    base_image_path = os.path.join(STATIC_FOLDER, base_image_url.lstrip('/'))
+    base_image_path = media_mgr.get_absolute_path(base_image_url)
     
     element_paths = []
     for el in current_fusion.get('elements', []):
-        if el.get('image_url'): element_paths.append(os.path.join(STATIC_FOLDER, el['image_url'].lstrip('/')))
+        if el.get('image_url'): 
+            element_paths.append(media_mgr.get_absolute_path(el['image_url']))
         
     config = db.get_provider_config(data.get('provider_id'))
     if data.get('model_name'): config['model_name'] = data.get('model_name')
@@ -528,9 +494,9 @@ def generate_fusion_image():
         base_image_path=base_image_path,
         fusion_prompt=data.get('fusion_prompt'),
         config=config,
-        save_dir=os.path.join(STATIC_FOLDER, IMG_SAVE_DIR),
-        url_prefix=f"/{IMG_SAVE_DIR}",
-        element_image_paths=element_paths
+        media_manager=media_mgr,
+        element_image_paths=element_paths,
+        entity_id=fusion_id # 使用 fusion_id 进行版本控制
     )
     
     return jsonify({'success': True, 'url': result['url']}) if result.get('success') else (jsonify({'success': False, 'error': result.get('error_msg')}), 500)
@@ -567,8 +533,8 @@ def generate_fusion_video():
     e_url = current_fusion.get('end_frame_image')
     if not s_url: return jsonify({'success': False, 'error': 'No start image'}), 400
     
-    s_path = os.path.abspath(os.path.join(STATIC_FOLDER, s_url.lstrip('/')))
-    e_path = os.path.abspath(os.path.join(STATIC_FOLDER, e_url.lstrip('/'))) if e_url else None
+    s_path = media_mgr.get_absolute_path(s_url)
+    e_path = media_mgr.get_absolute_path(e_url) if e_url else None
     
     config = db.get_provider_config(data.get('provider_id'))
     if data.get('model_name'): config['model_name'] = data.get('model_name')
@@ -576,8 +542,8 @@ def generate_fusion_video():
     result = ai_service.run_video_generation(
         current_fusion.get('fusion_prompt') or "high quality video",
         s_path, e_path, config, 
-        os.path.join(STATIC_FOLDER, VIDEO_SAVE_DIR), 
-        f"/{VIDEO_SAVE_DIR}"
+        media_mgr,
+        entity_id=fusion_id
     )
     
     if result.get('success'):
@@ -586,6 +552,5 @@ def generate_fusion_video():
     return jsonify({'success': False}), 500
 
 if __name__ == '__main__':
-    ensure_static_dirs()
     print(f"Server started on http://127.0.0.1:5000")
     app.run(debug=True, port=5000)

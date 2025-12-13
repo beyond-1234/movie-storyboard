@@ -6,12 +6,9 @@ import mimetypes
 import logging
 import requests
 import uuid
-import random
 import hmac
 import hashlib
 from http import HTTPStatus
-from urllib.parse import urlparse, unquote
-from pathlib import PurePosixPath, Path
 from typing import Dict, Any, Optional, List
 from zai import ZhipuAiClient
 
@@ -73,36 +70,6 @@ def _safe_log_payload(payload: Dict) -> str:
     except Exception as e:
         return f"<Error parsing payload for logging: {str(e)}>"
 
-def file_to_base64(file_path: str) -> Optional[str]:
-    if not file_path or not os.path.exists(file_path): 
-        logger.warning(f"[Base64] File not found: {file_path}")
-        return None
-    mime_type, _ = mimetypes.guess_type(file_path)
-    if not mime_type: mime_type = 'image/png'
-    try:
-        with open(file_path, "rb") as f:
-            base64_data = base64.b64encode(f.read()).decode('utf-8')
-        logger.debug(f"[Base64] Converted {file_path} to base64 (len={len(base64_data)})")
-        return f"data:{mime_type};base64,{base64_data}"
-    except Exception as e:
-        logger.error(f"[Base64] Error converting {file_path}: {e}")
-        return None
-
-def download_file(url: str, save_path: str):
-    logger.info(f"[Download] Starting download: {url} -> {save_path}")
-    try:
-        resp = requests.get(url, stream=True, timeout=120)
-        if resp.status_code == 200:
-            with open(save_path, 'wb') as f:
-                for chunk in resp.iter_content(1024): f.write(chunk)
-            logger.info(f"[Download] Success: {save_path} ({os.path.getsize(save_path)} bytes)")
-            return True
-        else:
-            logger.error(f"[Download] Failed status code: {resp.status_code} for {url}")
-    except Exception as e:
-        logger.error(f"[Download] Exception: {e}")
-    return False
-
 # ============================================================
 #  Provider Handlers (不同提供商的实现)
 # ============================================================
@@ -129,7 +96,7 @@ class AliyunHandler:
             return {'success': False, 'error_msg': str(e)}
 
     @staticmethod
-    def generate_image(prompt, save_dir, url_prefix, config):
+    def generate_image(prompt, media_manager, config, entity_id=None):
         if not DASHSCOPE_AVAILABLE: return {'success': False, 'error_msg': "DashScope SDK not installed"}
         api_key = config.get('api_key')
         model = config.get('model_name') or 'qwen-image-plus'
@@ -145,10 +112,11 @@ class AliyunHandler:
                     content = rsp.output.choices[0].message.content
                     img_url = next((item['image'] for item in content if 'image' in item), None)
                     if img_url:
-                        fname = f"{uuid.uuid4()}.png"
-                        save_path = os.path.join(save_dir, fname)
-                        if download_file(img_url, save_path):
-                            return {'success': True, 'url': f"{url_prefix.rstrip('/')}/{fname}"}
+                        # 使用 MediaManager 下载，自动处理版本
+                        saved_url = media_manager.download_from_url(img_url, 'image', entity_id)
+                        if saved_url:
+                            return {'success': True, 'url': saved_url}
+                        return {'success': False, 'error_msg': "Download failed"}
                 except Exception as e:
                     logger.error(f"[Aliyun] Image Parse Error: {e}")
                     return {'success': False, 'error_msg': f"Parse failed: {e}"}
@@ -160,7 +128,7 @@ class AliyunHandler:
             return {'success': False, 'error_msg': str(e)}
 
     @staticmethod
-    def generate_video(prompt, save_dir, url_prefix, config, start_img=None, end_img=None):
+    def generate_video(prompt, media_manager, config, start_img=None, end_img=None, entity_id=None):
         if not DASHSCOPE_AVAILABLE: return {'success': False, 'error_msg': "DashScope SDK not installed"}
         api_key = config.get('api_key')
         model = config.get('model_name') or 'wanx2.1-kf2v-plus'
@@ -168,26 +136,26 @@ class AliyunHandler:
         logger.info(f"[Aliyun] Video Gen Request. Model: {model}, Prompt: {prompt[:30]}...")
         
         params = {'model': model, 'prompt': prompt, 'prompt_extend': True, 'watermark': False}
+        
+        # 使用 MediaManager 转换 Base64
         if start_img: 
-            b64 = file_to_base64(start_img)
+            b64 = media_manager.file_to_base64(start_img)
             if b64: params['first_frame_url'] = b64
         if end_img: 
-            b64 = file_to_base64(end_img)
+            b64 = media_manager.file_to_base64(end_img)
             if b64: params['last_frame_url'] = b64
         
         try:
-            # 记录脱敏后的参数以供调试
             logger.info(f"[Aliyun] Video Params: {_safe_log_payload(params)}")
-            
             rsp = VideoSynthesis.call(api_key=api_key, **params)
             if rsp.status_code == HTTPStatus.OK:
                 video_url = rsp.output.video_url
                 logger.info(f"[Aliyun] Video Gen Success. TaskID: {rsp.output.task_id}, URL: {video_url}")
-                fname = f"{rsp.output.task_id}.mp4"
-                save_path = os.path.join(save_dir, fname)
-                if download_file(video_url, save_path):
-                    return {'success': True, 'url': f"{url_prefix.rstrip('/')}/{fname}"}
-            
+                # 使用 MediaManager 下载
+                saved_url = media_manager.download_from_url(video_url, 'video', entity_id)
+                if saved_url:
+                    return {'success': True, 'url': saved_url}
+                return {'success': False, 'error_msg': "Download failed"}
             logger.error(f"[Aliyun] Video Gen API Fail: {getattr(rsp, 'message', 'Unknown')}")
             return {'success': False, 'error_msg': getattr(rsp, 'message', 'Unknown Error')}
         except Exception as e:
@@ -195,7 +163,7 @@ class AliyunHandler:
             return {'success': False, 'error_msg': str(e)}
 
     @staticmethod
-    def generate_voice(text, save_dir, url_prefix, config):
+    def generate_voice(text, media_manager, config, entity_id=None):
         if not DASHSCOPE_AVAILABLE: return {'success': False, 'error_msg': "DashScope SDK not installed"}
         api_key = config.get('api_key')
         model = config.get('model_name') or 'qwen3-tts-flash'
@@ -211,11 +179,9 @@ class AliyunHandler:
                 if hasattr(rsp, 'get_audio_data'):
                     audio_data = rsp.get_audio_data()
                     if audio_data:
-                        fname = f"{uuid.uuid4()}.mp3"
-                        save_path = os.path.join(save_dir, fname)
-                        with open(save_path, 'wb') as f: f.write(audio_data)
-                        logger.info(f"[Aliyun] Voice Gen Success. Saved to {save_path}")
-                        return {'success': True, 'url': f"{url_prefix.rstrip('/')}/{fname}"}
+                        # 使用 MediaManager 保存二进制
+                        saved_url = media_manager.save_binary(audio_data, 'audio', entity_id, '.mp3')
+                        return {'success': True, 'url': saved_url}
                 logger.error("[Aliyun] No audio data in response")
                 return {'success': False, 'error_msg': "No audio data in response"}
             
@@ -226,7 +192,7 @@ class AliyunHandler:
             return {'success': False, 'error_msg': str(e)}
 
     @staticmethod
-    def fuse_image(prompt, save_dir, url_prefix, config, base_image_path, ref_image_path_list):
+    def fuse_image(prompt, media_manager, config, base_image_path, ref_image_path_list, entity_id=None):
         """
         AliyunHandler: 图生图/融合图方法
         使用 ImageSynthesis.call 和 wan2.5-i2i-preview 模型
@@ -250,19 +216,14 @@ class AliyunHandler:
         # 处理参考图片列表
         if ref_image_path_list:
             for ref_path in ref_image_path_list:
-                ref_b64 = file_to_base64(ref_path)
-                if ref_b64:
-                    images_input.append(ref_b64)
-                else:
-                    logger.warning(f"[Aliyun] Failed to encode reference image: {ref_path}")
+                ref_b64 = media_manager.file_to_base64(ref_path)
+                if ref_b64: images_input.append(ref_b64)
                     
         # 处理基础图片
         if base_image_path:
-            base_b64 = file_to_base64(base_image_path)
-            if base_b64:
-                images_input.append(base_b64)
-            else:
-                return {'success': False, 'error_msg': f"Failed to encode base image: {base_image_path}"}
+            base_b64 = media_manager.file_to_base64(base_image_path)
+            if base_b64: images_input.append(base_b64)
+            else: return {'success': False, 'error_msg': f"Failed to encode base image"}
         
         if not images_input:
             return {'success': False, 'error_msg': "No input images provided for fusion"}
@@ -287,36 +248,20 @@ class AliyunHandler:
                 seed=int(config.get('seed', 12345))
             )
             
-            if rsp.status_code == HTTPStatus.OK:
-                # 获取结果
-                if hasattr(rsp, 'output') and hasattr(rsp.output, 'results') and len(rsp.output.results) > 0:
-                    result = rsp.output.results[0]
-                    img_url = result.url
-                    
-                    if img_url:
-                        # 下载保存图片
-                        fname = f"{uuid.uuid4()}.png"
-                        save_path = os.path.join(save_dir, fname)
-                        
-                        if download_file(img_url, save_path):
-                            logger.info(f"[Aliyun] Fusion image saved to: {save_path}")
-                            return {'success': True, 'url': f"{url_prefix.rstrip('/')}/{fname}"}
-                        else:
-                            # 下载失败返回远程 URL
-                            logger.warning(f"[Aliyun] Download failed, returning remote URL")
-                            return {'success': True, 'url': img_url}
-                
-                logger.error("[Aliyun] No image URL in fusion response")
-                return {'success': False, 'error_msg': "No image URL in response"}
-            
-            else:
-                logger.error(f"[Aliyun] Fusion API Error: code={rsp.code}, message={rsp.message}")
-                return {'success': False, 'error_msg': f"Aliyun Error ({rsp.code}): {rsp.message}"}
+            if rsp.status_code == HTTPStatus.OK and hasattr(rsp, 'output') and len(rsp.output.results) > 0:
+                img_url = rsp.output.results[0].url
+                saved_url = media_manager.download_from_url(img_url, 'image', entity_id)
 
+                if saved_url: 
+                    logger.info(f"[Aliyun] Fusion image saved to: {saved_url}")
+                    return {'success': True, 'url': saved_url}
+                return {'success': True, 'url': img_url} # Fallback
+            logger.warning(f"[Aliyun] Download failed, returning remote URL")
+            return {'success': False, 'error_msg': getattr(rsp, 'message', 'Unknown Error')}
         except Exception as e:
             logger.exception("[Aliyun] Fusion generation failed")
             return {'success': False, 'error_msg': str(e)}
-    
+
 class OpenAICompatibleHandler:
     @staticmethod
     def _get_headers(config):
@@ -351,7 +296,7 @@ class OpenAICompatibleHandler:
             return {'success': False, 'error_msg': str(e)}
 
     @staticmethod
-    def generate_image(prompt, save_dir, url_prefix, config):
+    def generate_image(prompt, media_manager, config, entity_id=None):
         base_url = config.get('base_url', 'https://api.siliconflow.cn/v1')
         url = f"{base_url.rstrip('/')}/images/generations"
         payload = {
@@ -368,11 +313,8 @@ class OpenAICompatibleHandler:
                 data = resp.json()
                 if data.get('data'):
                     img_url = data['data'][0]['url']
-                    fname = f"{uuid.uuid4()}.png"
-                    save_path = os.path.join(save_dir, fname)
-                    if download_file(img_url, save_path):
-                        return {'success': True, 'url': f"{url_prefix.rstrip('/')}/{fname}"}
-            
+                    saved_url = media_manager.download_from_url(img_url, 'image', entity_id)
+                    return {'success': True, 'url': saved_url or img_url}
             logger.error(f"[OpenAI-Compat] Image Fail: {resp.status_code} - {resp.text[:200]}")
             return {'success': False, 'error_msg': resp.text}
         except Exception as e:
@@ -390,11 +332,11 @@ class OpenAICompatibleHandler:
     
 class ComfyUIHandler:
     @staticmethod
-    def generate_image(prompt, save_dir, url_prefix, config):
+    def generate_image(prompt, media_manager, config, entity_id=None):
         return {'success': False, 'error_msg': "ComfyUI generation not implemented yet"}
     
     @staticmethod
-    def fuse_image(prompt, save_dir, url_prefix, config, base_image_path, ref_image_path_list):
+    def fuse_image(prompt, media_manager, config, base_image_path, ref_image_path_list, entity_id=None):
         """
         ComfyUIHandler: 图生图/融合图方法
         ComfyUI 通过工作流可实现强大的 i2i/融合图功能，但这需要解析复杂的工作流 JSON。
@@ -406,26 +348,25 @@ class MockHandler:
     @staticmethod
     def generate_text(messages, config): return {'success': True, 'content': "Mock Text Response"}
     @staticmethod
-    def generate_image(prompt, save_dir, url_prefix, config):
+    def generate_image(prompt, media_manager, config, entity_id=None):
         time.sleep(1)
-        return {'success': True, 'url': "https://placehold.co/600x400/2c3e50/ffffff?text=Mock+Image"}
+        mock_url = "https://placehold.co/600x400/2c3e50/ffffff?text=Mock+Image"
+        # 即使是Mock，也尝试下载以模拟真实流程
+        saved_url = media_manager.download_from_url(mock_url, 'image', entity_id)
+        return {'success': True, 'url': saved_url or mock_url}
     @staticmethod
-    def generate_video(prompt, save_dir, url_prefix, config, start_img=None, end_img=None):
-        time.sleep(2)
+    def generate_video(prompt, media_manager, config, start_img=None, end_img=None, entity_id=None):
+        time.sleep(1)
         return {'success': True, 'url': "https://www.w3schools.com/html/mov_bbb.mp4"}
     @staticmethod
-    def generate_voice(text, save_dir, url_prefix, config):
+    def generate_voice(text, media_manager, config, entity_id=None):
         return {'success': True, 'url': "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3"}
-
     @staticmethod
-    def fuse_image(prompt, save_dir, url_prefix, config, base_image_path, ref_image_path_list):
-        """
-        MockHandler: 图生图/融合图方法 (返回模拟结果)
-        """
+    def fuse_image(prompt, media_manager, config, base_image_path, ref_image_path_list, entity_id=None):
         time.sleep(1)
-        # 模拟返回一个包含 base_image_path 的 fusion 结果
-        mock_url = f"https://placehold.co/600x400/8e44ad/ffffff?text=Mock+Fusion%5B{Path(base_image_path).name}%5D"
-        return {'success': True, 'url': mock_url}
+        mock_url = "https://placehold.co/600x400/8e44ad/ffffff?text=Mock+Fusion"
+        saved_url = media_manager.download_from_url(mock_url, 'image', entity_id)
+        return {'success': True, 'url': saved_url or mock_url}
 
 class ViduHandler:
     """
@@ -444,12 +385,7 @@ class ViduHandler:
         }
     
     @staticmethod
-    def _wait_for_task(task_id, config, save_dir, url_prefix, max_wait=600):
-        """
-        轮询等待任务完成 (Video or Image)
-        max_wait: 最大等待时间(秒)，默认10分钟
-        """
-        import time
+    def _wait_for_task(task_id, config, media_manager, media_type, entity_id, max_wait=600):
         base_url = config.get('base_url', 'https://api.vidu.com')
         url = f"{base_url.rstrip('/')}/ent/v2/tasks/{task_id}/creations" 
         headers = ViduHandler._get_headers(config)
@@ -468,52 +404,17 @@ class ViduHandler:
                         logger.info(f"[VIDU] Task {task_id} Success.")
                         creations = data.get('creations', [])
                         if creations and len(creations) > 0:
-                            # 获取结果 URL
-                            creation = creations[0]
-                            result_url = creation.get('url')
-                            
-                            if not result_url:
-                                return {'success': False, 'error_msg': 'No URL in creation result'}
-                            
-                            # 尝试推断文件扩展名
-                            path = urlparse(result_url).path
-                            ext = os.path.splitext(path)[1].lower()
-                            if not ext:
-                                # 默认根据任务类型推断可能不准确，暂定 .mp4，如果是图片任务通常 URL 会有后缀
-                                ext = '.mp4' 
-                            
-                            fname = f"{task_id}{ext}"
-                            save_path = os.path.join(save_dir, fname)
-                            
+                            result_url = creations[0].get('url')
+                            saved_url = media_manager.download_from_url(result_url, media_type, entity_id)
                             logger.info(f"[VIDU] Downloading result from: {result_url}")
-                            
-                            if download_file(result_url, save_path):
-                                return {'success': True, 'url': f"{url_prefix.rstrip('/')}/{fname}"}
-                            else:
-                                return {'success': True, 'url': result_url}
-                        
-                        else:
-                            return {'success': False, 'error_msg': 'Task succeeded but creation list is empty'}
-                    
+                            return {'success': True, 'url': saved_url or result_url}
                     elif state == 'failed':
                         logger.error(f"[VIDU] Task {task_id} Failed. ErrCode: {err_code}")
-                        # 优先显示 err_code
-                        return {'success': False, 'error_msg': f"Generation failed code: {err_code}"}
-                    
-                    elif state in ['created', 'queueing', 'processing']:
-                        if int(time.time()) % 5 == 0: # 减少日志频率
-                            logger.info(f"[VIDU] Task {task_id} state: {state}")
-                        time.sleep(5)
-                    
-                    else:
-                        logger.warning(f"[VIDU] Unknown state: {state}")
-                        time.sleep(5)
-                else:
-                    logger.error(f"[VIDU] Query failed: {resp.status_code} - {resp.text}")
-                    if resp.status_code == 404:
-                        return {'success': False, 'error_msg': 'Task not found'}
+                        return {'success': False, 'error_msg': f"Failed: {data.get('err_code')}"}
                     time.sleep(5)
-                    
+                else:
+                    logger.warning(f"[VIDU] Unknown state: {state}")
+                    time.sleep(5)
             except Exception as e:
                 logger.error(f"[VIDU] Query error: {e}")
                 time.sleep(5)
@@ -522,7 +423,7 @@ class ViduHandler:
 
     
     @staticmethod
-    def generate_video(prompt, save_dir, url_prefix, config, start_img=None, end_img=None):
+    def generate_video(prompt, media_manager, config, start_img=None, end_img=None, entity_id=None):
         """
         VIDU 首尾帧生成视频 (Start-End to Video)
         必须提供首帧和尾帧
@@ -537,118 +438,55 @@ class ViduHandler:
         if not start_img or not end_img:
             return {'success': False, 'error_msg': "VIDU requires both start frame and end frame images"}
         
-        # 转换图片为 base64
-        start_img_b64 = file_to_base64(start_img)
-        end_img_b64 = file_to_base64(end_img)
         
-        if not start_img_b64 or not end_img_b64:
-            return {'success': False, 'error_msg': "Failed to encode images to base64"}
+        start_b64 = media_manager.file_to_base64(start_img)
+        end_b64 = media_manager.file_to_base64(end_img)
+        if not start_b64 or not end_b64: return {'success': False, 'error_msg': "Images required"}
         
-        # API endpoint
-        url = f"{base_url.rstrip('/')}/ent/v2/start-end2video"
-        
-        # 构建请求参数
         payload = {
-            "model": model,
-            "images": [start_img_b64, end_img_b64],  # 首帧和尾帧
-            "prompt": "",
+            "model": config.get('model_name', 'viduq2-pro-fast'),
+            "images": [start_b64, end_b64],
+            "prompt": prompt,
             "duration": 2,  # 默认5秒，可根据模型调整
-            "resolution": "360p",  # 默认720p，可选: 540p, 720p, 1080p
+            "resolution": "1080p",  # 默认720p，可选: 540p, 720p, 1080p
             "movement_amplitude": "auto",  # auto, small, medium, large
             "off_peak": False,  # 非高峰模式
             "bgm": False  # 不添加背景音乐
         }
         
-        # 可选：如果需要固定随机种子
-        # payload["seed"] = 42
-        
         try:
-            headers = ViduHandler._get_headers(config)
-            logger.info(f"[VIDU] Creating video task with model: {model}, URL: {url}")
-            
-            resp = requests.post(url, json=payload, headers=headers, timeout=60)
+            url = f"{config.get('base_url', 'https://api.vidu.com').rstrip('/')}/ent/v2/start-end2video"
+            resp = requests.post(url, json=payload, headers=ViduHandler._get_headers(config), timeout=60)
             
             if resp.status_code in [200, 201]:
-                data = resp.json()
-                task_id = data.get('task_id')
-                state = data.get('state')
-                
-                logger.info(f"[VIDU] Video Task created: {task_id}, state: {state}")
-                
-                if not task_id:
-                    return {'success': False, 'error_msg': 'No task_id returned from API'}
-                
-                # 等待视频生成完成
-                return ViduHandler._wait_for_task(task_id, config, save_dir, url_prefix)
-            
-            else:
-                # API调用失败
-                error_msg = resp.text
-                try:
-                    error_data = resp.json()
-                    error_msg = error_data.get('error', {}).get('message', error_msg)
-                except:
-                    pass
-                
-                logger.error(f"[VIDU] API Error {resp.status_code}: {error_msg}")
-                return {'success': False, 'error_msg': f"API Error ({resp.status_code}): {error_msg}"}
-                
-        except requests.exceptions.Timeout:
-            return {'success': False, 'error_msg': 'Request timeout'}
+                task_id = resp.json().get('task_id')
+                return ViduHandler._wait_for_task(task_id, config, media_manager, 'video', entity_id)
+            logger.error(f"[VIDU] API Error {resp.status_code}: {resp.text}")
+            return {'success': False, 'error_msg': f"API Error {resp.status_code}"}
         except Exception as e:
             logger.exception("[VIDU] Generation failed")
             return {'success': False, 'error_msg': str(e)}
-    
+
     @staticmethod
-    def generate_image(prompt, save_dir, url_prefix, config):
-        """
-        VIDU 文生图 API
-        Endpoint: /ent/v2/reference2image
-        Model: viduq2 (支持 Text to Image)
-        """
-        api_key = config.get('api_key')
-        base_url = config.get('base_url', 'https://api.vidu.com')
-        model = config.get('model_name', 'viduq2') # 默认使用viduq2以支持更好的效果
-        
-        if not api_key:
-            return {'success': False, 'error_msg': "Missing VIDU API key"}
-            
-        url = f"{base_url.rstrip('/')}/ent/v2/reference2image"
-        
-        # 文生图时 images 为空
+    def generate_image(prompt, media_manager, config, entity_id=None):
         payload = {
-            "model": model,
+            "model": config.get('model_name', 'viduq2'),
             "images": [],
             "prompt": prompt,
             "aspect_ratio": config.get('aspect_ratio', '16:9'),
             "resolution": config.get('resolution', '1080p'),
         }
-        
-        if config.get('seed') is not None:
-            payload['seed'] = int(config.get('seed'))
-
         try:
-            headers = ViduHandler._get_headers(config)
-            logger.info(f"[VIDU] Creating T2I task. Model: {model}, Prompt: {prompt[:30]}")
-            
-            resp = requests.post(url, json=payload, headers=headers, timeout=60)
-            
+            url = f"{config.get('base_url', 'https://api.vidu.com').rstrip('/')}/ent/v2/reference2image"
+            resp = requests.post(url, json=payload, headers=ViduHandler._get_headers(config), timeout=60)
             if resp.status_code in [200, 201]:
                 data = resp.json()
                 task_id = data.get('task_id')
                 state = data.get('state')
-                
                 logger.info(f"[VIDU] Image Task created: {task_id}, state: {state}")
-                
-                if not task_id:
-                    return {'success': False, 'error_msg': 'No task_id returned from API'}
-                
-                # 轮询结果
-                return ViduHandler._wait_for_task(task_id, config, save_dir, url_prefix)
-            else:
-                logger.error(f"[VIDU] API Error {resp.status_code}: {resp.text}")
-                return {'success': False, 'error_msg': f"API Error ({resp.status_code}): {resp.text}"}
-                
+                return ViduHandler._wait_for_task(task_id, config, media_manager, 'image', entity_id)
+            logger.error(f"[VIDU] API Error {resp.status_code}: {resp.text}")
+            return {'success': False, 'error_msg': f"API Error {resp.status_code}"}
         except Exception as e:
             logger.exception("[VIDU] Image generation failed")
             return {'success': False, 'error_msg': str(e)}
@@ -659,9 +497,9 @@ class ViduHandler:
         VIDU 不支持文本生成，返回错误
         """
         return {'success': False, 'error_msg': "VIDU does not support text generation"}
-    
+
     @staticmethod
-    def fuse_image(prompt, save_dir, url_prefix, config, base_image_path, ref_image_path_list):
+    def fuse_image(prompt, media_manager, config, base_image_path, ref_image_path_list, entity_id=None):
         """
         VIDU 图生图 / Reference to Image
         Endpoint: /ent/v2/reference2image
@@ -673,68 +511,39 @@ class ViduHandler:
         
         if not api_key:
             return {'success': False, 'error_msg': "Missing VIDU API key"}
-            
-        # 准备图片列表
         images_payload = []
         
         # 处理 Reference Images
         if ref_image_path_list:
-            for ref_path in ref_image_path_list:
-                ref_b64 = file_to_base64(ref_path)
-                if ref_b64:
-                    images_payload.append(ref_b64)
-                else:
-                    logger.warning(f"[VIDU] Failed to encode ref image: {ref_path}")
-                    
+            for p in ref_image_path_list:
+                b64 = media_manager.file_to_base64(p)
+                if b64: images_payload.append(b64)
         # 处理 Base Image
         if base_image_path:
-            base_b64 = file_to_base64(base_image_path)
-            if base_b64:
-                images_payload.append(base_b64)
-            else:
-                return {'success': False, 'error_msg': f"Failed to encode base image: {base_image_path}"}
-        
-
+            b64 = media_manager.file_to_base64(base_image_path)
+            if b64: images_payload.append(b64)
         # 检查图片数量限制 (viduq2 supports 0-7)
         if len(images_payload) > 7:
             logger.warning("[VIDU] Too many reference images, truncating to 7")
             images_payload = images_payload[:7]
-
-        url = f"{base_url.rstrip('/')}/ent/v2/reference2image"
-        
         payload = {
-            "model": model,
+            "model": config.get('model_name', 'viduq2'),
             "images": images_payload,
             "prompt": prompt,
             "aspect_ratio": config.get('aspect_ratio', '16:9'), # viduq2 supports auto
             "resolution": config.get('resolution', '1080p'),
         }
-        
-        if config.get('seed') is not None:
-            payload['seed'] = int(config.get('seed'))
-
         try:
-            headers = ViduHandler._get_headers(config)
-            logger.info(f"[VIDU] Creating Fusion task. Model: {model}, Images: {len(images_payload)}")
-            
-            resp = requests.post(url, json=payload, headers=headers, timeout=60)
-            
+            url = f"{config.get('base_url', 'https://api.vidu.com').rstrip('/')}/ent/v2/reference2image"
+            resp = requests.post(url, json=payload, headers=ViduHandler._get_headers(config), timeout=60)
             if resp.status_code in [200, 201]:
                 data = resp.json()
                 task_id = data.get('task_id')
                 state = data.get('state')
-                
                 logger.info(f"[VIDU] Fusion Task created: {task_id}, state: {state}")
-                
-                if not task_id:
-                    return {'success': False, 'error_msg': 'No task_id returned from API'}
-                
-                # 轮询结果
-                return ViduHandler._wait_for_task(task_id, config, save_dir, url_prefix)
-            else:
-                logger.error(f"[VIDU] API Error {resp.status_code}: {resp.text}")
-                return {'success': False, 'error_msg': f"API Error ({resp.status_code}): {resp.text}"}
-                
+                return ViduHandler._wait_for_task(task_id, config, media_manager, 'image', entity_id)
+            logger.error(f"[VIDU] API Error {resp.status_code}: {resp.text}")
+            return {'success': False, 'error_msg': f"API Error {resp.status_code}"}
         except Exception as e:
             logger.exception("[VIDU] Fusion generation failed")
             return {'success': False, 'error_msg': str(e)}
@@ -821,82 +630,30 @@ class JimengHandler:
         current_date = t.strftime('%Y%m%dT%H%M%SZ')
         datestamp = t.strftime('%Y%m%d')
         
-        # 查询参数
-        query_params = {
-            'Action': action,
-            'Version': '2022-08-31',
-        }
-        canonical_querystring = JimengHandler._format_query(query_params)
-        
-        # 请求路径
-        canonical_uri = '/'
-        
-        # 计算 payload hash
+        query_params = {'Action': action, 'Version': '2022-08-31'}
+        canonical_querystring = '&'.join([f"{k}={v}" for k,v in sorted(query_params.items())])
         payload_hash = hashlib.sha256(req_body.encode('utf-8')).hexdigest()
         
-        # 请求头
-        content_type = 'application/json'
         signed_headers = 'content-type;host;x-content-sha256;x-date'
-        canonical_headers = (
-            f'content-type:{content_type}\n'
-            f'host:{JimengHandler.HOST}\n'
-            f'x-content-sha256:{payload_hash}\n'
-            f'x-date:{current_date}\n'
-        )
+        canonical_headers = f'content-type:application/json\nhost:{JimengHandler.HOST}\nx-content-sha256:{payload_hash}\nx-date:{current_date}\n'
+        canonical_request = f'{JimengHandler.METHOD}\n/\n{canonical_querystring}\n{canonical_headers}\n{signed_headers}\n{payload_hash}'
         
-        # 构建规范请求
-        canonical_request = (
-            f'{JimengHandler.METHOD}\n'
-            f'{canonical_uri}\n'
-            f'{canonical_querystring}\n'
-            f'{canonical_headers}\n'
-            f'{signed_headers}\n'
-            f'{payload_hash}'
-        )
-        
-        # 构建签名字符串
-        algorithm = 'HMAC-SHA256'
         credential_scope = f'{datestamp}/{JimengHandler.REGION}/{JimengHandler.SERVICE}/request'
-        string_to_sign = (
-            f'{algorithm}\n'
-            f'{current_date}\n'
-            f'{credential_scope}\n'
-            f'{hashlib.sha256(canonical_request.encode("utf-8")).hexdigest()}'
-        )
+        string_to_sign = f'HMAC-SHA256\n{current_date}\n{credential_scope}\n{hashlib.sha256(canonical_request.encode("utf-8")).hexdigest()}'
         
-        # 计算签名
-        signing_key = JimengHandler._get_signature_key(
-            secret_key, datestamp, JimengHandler.REGION, JimengHandler.SERVICE
-        )
-        signature = hmac.new(
-            signing_key, 
-            string_to_sign.encode('utf-8'), 
-            hashlib.sha256
-        ).hexdigest()
+        signing_key = JimengHandler._get_signature_key(secret_key, datestamp, JimengHandler.REGION, JimengHandler.SERVICE)
+        signature = hmac.new(signing_key, string_to_sign.encode('utf-8'), hashlib.sha256).hexdigest()
         
-        # 构建 Authorization 头
-        authorization_header = (
-            f'{algorithm} '
-            f'Credential={access_key}/{credential_scope}, '
-            f'SignedHeaders={signed_headers}, '
-            f'Signature={signature}'
-        )
-        
-        # 最终请求头
         headers = {
             'X-Date': current_date,
-            'Authorization': authorization_header,
+            'Authorization': f'HMAC-SHA256 Credential={access_key}/{credential_scope}, SignedHeaders={signed_headers}, Signature={signature}',
             'X-Content-Sha256': payload_hash,
-            'Content-Type': content_type
+            'Content-Type': 'application/json'
         }
-        
-        # 请求 URL
-        request_url = f'{JimengHandler.ENDPOINT}?{canonical_querystring}'
-        
-        return headers, request_url
+        return headers, f'{JimengHandler.ENDPOINT}?{canonical_querystring}'
     
     @staticmethod
-    def generate_image(prompt, save_dir, url_prefix, config):
+    def generate_image(prompt, media_manager, config, entity_id=None):
         """
         即梦文生图 V3.1 API
         Action: CVSync2AsyncSubmitTask
@@ -904,131 +661,76 @@ class JimengHandler:
         api_key_combined = config.get('api_key')
         # 默认模型 V3.1
         model = config.get('model_name', 'jimeng_t2i_v31')
-        
         try:
-            access_key, secret_key = JimengHandler._parse_credentials(api_key_combined)
-        except ValueError as e:
-            return {'success': False, 'error_msg': str(e)}
+            access_key, secret_key = JimengHandler._parse_credentials(config.get('api_key'))
+        except ValueError as e: return {'success': False, 'error_msg': str(e)}
         
-        # 构建请求参数
         body_params = {
-            "req_key": model,
-            "prompt": prompt,
-            "seed": int(config.get('seed', -1)),
+            "req_key": model, "prompt": prompt, "seed": int(config.get('seed', -1)),
             "use_pre_llm": config.get('use_pre_llm', True)
         }
         
-        # 处理宽高
-        if config.get('width') and config.get('height'):
-            body_params['width'] = int(config.get('width'))
-            body_params['height'] = int(config.get('height'))
-        else:
-            # 默认值，虽然API有默认，但显式传递是个好习惯，或者留空让API决定
-            # 文档说默认 1328*1328
-            pass
-
-        req_body = json.dumps(body_params)
-        
         try:
-            # 1. 提交任务 (Action=CVSync2AsyncSubmitTask)
-            headers, request_url = JimengHandler._sign_request(
-                access_key, secret_key, req_body, action='CVSync2AsyncSubmitTask'
-            )
-            
+            req_body = json.dumps(body_params)
+            headers, request_url = JimengHandler._sign_request(access_key, secret_key, req_body, action='CVSync2AsyncSubmitTask')
             logger.info(f"[Jimeng] Submitting T2I task. Model: {model}, Prompt: {prompt[:30]}...")
-            
+
             resp = requests.post(request_url, headers=headers, data=req_body, timeout=60)
-            
-            if resp.status_code != 200:
-                return {'success': False, 'error_msg': f"Submit failed: {resp.text}"}
+            if resp.status_code != 200: return {'success': False, 'error_msg': f"Submit failed: {resp.text}"}
             
             data = resp.json()
             if data.get('code') != 10000:
                  return {'success': False, 'error_msg': f"API Error: {data.get('message')}"}
                  
             task_id = data.get('data', {}).get('task_id')
-            if not task_id:
-                return {'success': False, 'error_msg': "No task_id returned"}
+            if not task_id: return {'success': False, 'error_msg': "No task_id returned"}
             
-            logger.info(f"[Jimeng] T2I task submitted: {task_id}")
-            
-            # 2. 轮询结果
-            return JimengHandler._wait_for_t2i_result(
-                task_id, model, access_key, secret_key, save_dir, url_prefix
-            )
-            
+            return JimengHandler._wait_for_t2i_result(task_id, model, access_key, secret_key, media_manager, entity_id)
         except Exception as e:
-            logger.exception("[Jimeng] Image generation failed")
             return {'success': False, 'error_msg': str(e)}
 
     @staticmethod
-    def _wait_for_t2i_result(task_id, req_key, access_key, secret_key, save_dir, url_prefix, max_wait=600):
+    def _wait_for_t2i_result(task_id, req_key, access_key, secret_key, media_manager, entity_id, max_wait=600):
         """
         轮询文生图结果
         Action: CVSync2AsyncGetResult
         """
-        import time
-        
-        req_payload = {
-            "req_key": req_key,
-            "task_id": task_id
-        }
-        req_body_str = json.dumps(req_payload)
-        
-        logger.info(f"[Jimeng] Waiting T2I Task {task_id}")
+        req_body_str = json.dumps({"req_key": req_key, "task_id": task_id})
         start_time = time.time()
+        
         while time.time() - start_time < max_wait:
             try:
-                headers, request_url = JimengHandler._sign_request(
-                    access_key, secret_key, req_body_str, action='CVSync2AsyncGetResult'
-                )
-                
+                headers, request_url = JimengHandler._sign_request(access_key, secret_key, req_body_str, action='CVSync2AsyncGetResult')
                 resp = requests.post(request_url, headers=headers, data=req_body_str, timeout=30)
                 
                 if resp.status_code == 200:
                     data = resp.json()
-                    code = data.get('code')
-                    
-                    if code == 10000:
-                        task_data = data.get('data', {})
-                        status = task_data.get('status')
-                        
+                    if data.get('code') == 10000:
+                        status = data.get('data', {}).get('status')
                         logger.info(f"[Jimeng] T2I task {task_id} status: {status}")
-                        
                         if status == 'done':
                             logger.info(f"[Jimeng] Task {task_id} Done")
-                            image_urls = task_data.get('image_urls', [])
-                            binary_data = task_data.get('binary_data_base64', [])
+                            image_urls = data['data'].get('image_urls', [])
+                            binary = data['data'].get('binary_data_base64', [])
                             
-                            if binary_data:
-                                b64 = binary_data[0]
-                                fname = f"{task_id}.png"
-                                save_path = os.path.join(save_dir, fname)
-                                with open(save_path, 'wb') as f:
-                                    f.write(base64.b64decode(b64))
-                                return {'success': True, 'url': f"{url_prefix.rstrip('/')}/{fname}"}
-                            
+                            if binary:
+                                b64_data = base64.b64decode(binary[0])
+                                saved_url = media_manager.save_binary(b64_data, 'image', entity_id, '.png')
+                                return {'success': True, 'url': saved_url}
                             elif image_urls:
-                                url = image_urls[0]
-                                fname = f"{task_id}.png"
-                                save_path = os.path.join(save_dir, fname)
-                                if download_file(url, save_path):
-                                     return {'success': True, 'url': f"{url_prefix.rstrip('/')}/{fname}"}
-                                else:
-                                     return {'success': True, 'url': url}
-                            
-                            return {'success': False, 'error_msg': "Task done but no image data returned"}
-                            
+                                saved_url = media_manager.download_from_url(image_urls[0], 'image', entity_id)
+                                return {'success': True, 'url': saved_url}
+                            return {'success': False, 'error_msg': "No image data returned"}
                         elif status in ['in_queue', 'generating']:
                             time.sleep(2)
                         elif status in ['not_found', 'expired']:
                              logger.warning(f"[Jimeng] Task {task_id} status: {status}")
                              return {'success': False, 'error_msg': f"Task status: {status}"}
                         else:
-                             time.sleep(2)
+                            time.sleep(2)
                     else:
                         logger.error(f"[Jimeng] Query Error: {data.get('message')}")
-                        return {'success': False, 'error_msg': f"Query failed (code={code}): {data.get('message')}"}
+                        return {'success': False, 'error_msg': f"Query failed (code={data.get('code')}): {data.get('message')}"}
                 else:
                     logger.warning(f"[Jimeng] Query HTTP Error: {resp.status_code}")
                     time.sleep(2)
@@ -1040,151 +742,86 @@ class JimengHandler:
         return {'success': False, 'error_msg': "Timeout waiting for T2I result"}
     
     @staticmethod
-    def generate_video(prompt, save_dir, url_prefix, config, start_img=None, end_img=None):
+    def generate_video(prompt, media_manager, config, start_img=None, end_img=None, entity_id=None):
         """
         即梦首尾帧生视频 API (Jimeng Video 3.0)
         Action: CVSync2AsyncSubmitTask
         支持 Start-End 模式 (需2张图)
         """
-        api_key_combined = config.get('api_key')
-        # 默认模型 (V3.0 1080P Start-End)
         model = config.get('model_name', 'jimeng_i2v_first_tail_v30_1080')
-        
         try:
-            access_key, secret_key = JimengHandler._parse_credentials(api_key_combined)
-        except ValueError as e:
-            return {'success': False, 'error_msg': str(e)}
+            access_key, secret_key = JimengHandler._parse_credentials(config.get('api_key'))
+        except ValueError as e: return {'success': False, 'error_msg': str(e)}
         
         # 校验输入
         if not start_img:
             return {'success': False, 'error_msg': "Jimeng video generation requires start frame"}
-            
-        # 针对 Start-End 模型，强制检查 end_img
-        if 'first_tail' in model and not end_img:
-             return {'success': False, 'error_msg': "Jimeng Start-End video generation requires both start and end frames"}
-
-        # 准备图片列表 (纯 Base64，无前缀)
         img_paths = [start_img]
-        if end_img:
-            img_paths.append(end_img)
-            
+        if end_img: img_paths.append(end_img)
         images_b64 = []
         for p in img_paths:
-            b64 = file_to_base64(p)
-            if b64 and ',' in b64:
-                b64 = b64.split(',', 1)[1]
-            if not b64:
-                 return {'success': False, 'error_msg': f"Failed to encode image: {p}"}
-            images_b64.append(b64)
+            b64 = media_manager.file_to_base64(p)
+            if b64 and ',' in b64: images_b64.append(b64.split(',', 1)[1])
             
-        # 参数构建
-        # frames: 5s=121, 10s=241. 默认121
-        frames = int(config.get('frames', 121))
-        
         body_params = {
-            "req_key": model,
-            "binary_data_base64": images_b64,
-            "prompt": prompt,
-            "seed": int(config.get('seed', -1)),
-            "frames": frames
+            "req_key": model, "binary_data_base64": images_b64,
+            "prompt": prompt, "seed": int(config.get('seed', -1)),
+            "frames": int(config.get('frames', 121))
         }
         
-        req_body = json.dumps(body_params)
-        
         try:
-            # 提交任务 (Action=CVSync2AsyncSubmitTask)
-            headers, request_url = JimengHandler._sign_request(
-                access_key, secret_key, req_body, action='CVSync2AsyncSubmitTask'
-            )
-            
+            req_body = json.dumps(body_params)
+            headers, request_url = JimengHandler._sign_request(access_key, secret_key, req_body, action='CVSync2AsyncSubmitTask')
             logger.info(f"[Jimeng] Creating video task with model: {model}")
             resp = requests.post(request_url, headers=headers, data=req_body, timeout=60)
             
-            if resp.status_code != 200:
-                 return {'success': False, 'error_msg': f"Submit failed: {resp.text}"}
+            if resp.status_code != 200: return {'success': False, 'error_msg': f"Submit failed: {resp.text}"}
             
             data = resp.json()
             if data.get('code') != 10000:
                  return {'success': False, 'error_msg': f"API Error: {data.get('message')}"}
                  
             task_id = data.get('data', {}).get('task_id')
-            if not task_id:
-                return {'success': False, 'error_msg': "No task_id returned"}
+            if not task_id: return {'success': False, 'error_msg': "No task_id returned"}
             
             logger.info(f"[Jimeng] Video task submitted: {task_id}")
-            
-            # 轮询等待结果
-            return JimengHandler._wait_for_video_result(
-                task_id, model, access_key, secret_key, save_dir, url_prefix
-            )
-            
+            return JimengHandler._wait_for_video_result(task_id, model, access_key, secret_key, media_manager, entity_id)
         except Exception as e:
             logger.exception("[Jimeng] Video generation failed")
             return {'success': False, 'error_msg': str(e)}
 
     @staticmethod
-    def _wait_for_video_result(task_id, req_key, access_key, secret_key, save_dir, url_prefix, max_wait=600):
+    def _wait_for_video_result(task_id, req_key, access_key, secret_key, media_manager, entity_id, max_wait=600):
         """
         轮询视频结果 (Jimeng Video 3.0)
         Action: CVSync2AsyncGetResult
         """
-        import time
-        
-        # 查询请求体
-        body_params = {
-            "req_key": req_key,
-            "task_id": task_id
-        }
-        req_body_str = json.dumps(body_params)
-        
-        logger.info(f"[Jimeng] Waiting Video Task {task_id}")
+        req_body_str = json.dumps({"req_key": req_key, "task_id": task_id})
         start_time = time.time()
+        logger.info(f"[Jimeng] Waiting Video Task {task_id}")
         while time.time() - start_time < max_wait:
             try:
-                # 签名请求 (Action=CVSync2AsyncGetResult)
-                headers, request_url = JimengHandler._sign_request(
-                    access_key, secret_key, req_body_str, action='CVSync2AsyncGetResult'
-                )
-                
+                headers, request_url = JimengHandler._sign_request(access_key, secret_key, req_body_str, action='CVSync2AsyncGetResult')
                 resp = requests.post(request_url, headers=headers, data=req_body_str, timeout=30)
-                
                 if resp.status_code == 200:
                     data = resp.json()
-                    code = data.get('code')
-                    
-                    if code == 10000:
-                        task_data = data.get('data', {})
-                        status = task_data.get('status')
-                        
-                        logger.info(f"[Jimeng] Video task {task_id} status: {status}")
-                        
+                    if data.get('code') == 10000:
+                        status = data['data'].get('status')
                         if status == 'done':
-                            video_url = task_data.get('video_url')
+                            video_url = data['data'].get('video_url')
                             if video_url:
-                                fname = f"{task_id}.mp4"
-                                save_path = os.path.join(save_dir, fname)
-                                
-                                logger.info(f"[Jimeng] Downloading video from: {video_url}")
-                                if download_file(video_url, save_path):
-                                    return {'success': True, 'url': f"{url_prefix.rstrip('/')}/{fname}"}
-                                else:
-                                    # 下载失败返回原链接
-                                    return {'success': True, 'url': video_url}
-                            
-                            return {'success': False, 'error_msg': "Task done but no video_url found"}
-                            
+                                saved_url = media_manager.download_from_url(video_url, 'video', entity_id)
+                                return {'success': True, 'url': saved_url}
+                            return {'success': False, 'error_msg': "No video URL"}
                         elif status in ['in_queue', 'generating']:
-                            time.sleep(5) # Wait
-                        elif status in ['not_found', 'expired']:
-                             return {'success': False, 'error_msg': f"Task status: {status}"}
+                            time.sleep(5)
                         else:
-                             time.sleep(5)
+                            time.sleep(5)
                     else:
                         # 业务错误 (如审核不通过)
                         logger.error(f"[Jimeng] Query Fail: {data.get('message')}")
                         return {'success': False, 'error_msg': f"Query failed (code={code}): {data.get('message')}"}
                 else:
-                    logger.warning(f"[Jimeng] Query HTTP Error: {resp.status_code}")
                     time.sleep(5)
                     
             except Exception as e:
@@ -1201,166 +838,91 @@ class JimengHandler:
         return {'success': False, 'error_msg': "Jimeng does not support text generation"}
 
     @staticmethod
-    def fuse_image(prompt, save_dir, url_prefix, config, base_image_path, ref_image_path_list):
+    def fuse_image(prompt, media_manager, config, base_image_path, ref_image_path_list, entity_id=None):
         """
         即梦图生图 3.0 (Jimeng Image-to-Image V3.0)
         官方接口: https://visual.volcengineapi.com
         Action: CVSync2AsyncSubmitTask (提交) / CVSync2AsyncGetResult (查询)
         """
-        api_key_combined = config.get('api_key')
-        
         try:
-            access_key, secret_key = JimengHandler._parse_credentials(api_key_combined)
-        except ValueError as e:
-            return {'success': False, 'error_msg': str(e)}
+            access_key, secret_key = JimengHandler._parse_credentials(config.get('api_key'))
+        except ValueError as e: return {'success': False, 'error_msg': str(e)}
 
-        if not base_image_path or not os.path.exists(base_image_path):
-             return {'success': False, 'error_msg': "Base image path is required for fusion"}
-
-         
-        # 准备图片列表
         images_payload = []
         
         # 处理 Reference Images
         if ref_image_path_list:
             for ref_path in ref_image_path_list:
-                ref_b64 = file_to_base64(ref_path)
-                if ref_b64 and ',' in ref_b64:
-                    ref_b64 = ref_b64.split(',', 1)[1]
-                    images_payload.append(ref_b64)
-                else:
-                    logger.warning(f"[Jimeng] Failed to encode ref image: {ref_path}")
-                    
+                ref_b64 = media_manager.file_to_base64(ref_path)
+                if ref_b64 and ',' in ref_b64: images_payload.append(ref_b64.split(',', 1)[1])
+        
+        
         # 准备图片 Base64
         # 注意: 接口需要纯 base64 字符串，不包含 "data:image/png;base64," 前缀
-        img_b64 = file_to_base64(base_image_path)
-        if img_b64 and ',' in img_b64:
-            img_b64 = img_b64.split(',', 1)[1]
-            images_payload.append(img_b64)
-        else:
-            return {'success': False, 'error_msg': f"Failed to encode base image: {base_image_path}"}
+        img_b64 = media_manager.file_to_base64(base_image_path)
+        if img_b64 and ',' in img_b64: images_payload.append(img_b64.split(',', 1)[1])
+        else: return {'success': False, 'error_msg': f"Failed to encode base image"}
 
-        # 构建请求参数
         req_payload = {
-            "req_key": "jimeng_i2i_v30",
-            "binary_data_base64": images_payload,
-            "prompt": prompt,
-            "seed": int(config.get('seed', -1)),
-            "scale": float(config.get('scale', 0.5)),
+            "req_key": "jimeng_i2i_v30", "binary_data_base64": images_payload,
+            "prompt": prompt, "seed": int(config.get('seed', -1)), "scale": float(config.get('scale', 0.5)),
         }
         
-        # 可选参数: width, height
-        if config.get('width') and config.get('height'):
-            req_payload['width'] = int(config.get('width'))
-            req_payload['height'] = int(config.get('height'))
-
-        req_body_str = json.dumps(req_payload)
-
         try:
-            # 1. 提交任务 (Action=CVSync2AsyncSubmitTask)
-            headers, request_url = JimengHandler._sign_request(
-                access_key, secret_key, req_body_str, action='CVSync2AsyncSubmitTask'
-            )
+            req_body_str = json.dumps(req_payload)
+            headers, request_url = JimengHandler._sign_request(access_key, secret_key, req_body_str, action='CVSync2AsyncSubmitTask')
             
             logger.info(f"[Jimeng] Submitting i2i task. Prompt: {prompt[:30]}...")
             resp = requests.post(request_url, headers=headers, data=req_body_str, timeout=60)
             
-            if resp.status_code != 200:
-                 return {'success': False, 'error_msg': f"Submit failed: {resp.text}"}
+            if resp.status_code != 200: return {'success': False, 'error_msg': f"Submit failed: {resp.text}"}
             
-            resp_json = resp.json()
-            if resp_json.get('code') != 10000:
-                return {'success': False, 'error_msg': f"API Error: {resp_json.get('message')}"}
-
-            task_id = resp_json.get('data', {}).get('task_id')
-            if not task_id:
-                return {'success': False, 'error_msg': "No task_id returned"}
-
+            data = resp.json()
+            task_id = data.get('data', {}).get('task_id')
+            if not task_id: return {'success': False, 'error_msg': "No task_id returned"}
+            
             logger.info(f"[Jimeng] i2i task submitted. Task ID: {task_id}")
-
-            # 2. 轮询结果
-            return JimengHandler._wait_for_i2i_result(task_id, access_key, secret_key, save_dir, url_prefix)
-
+            return JimengHandler._wait_for_i2i_result(task_id, access_key, secret_key, media_manager, entity_id)
         except Exception as e:
             logger.exception("[Jimeng] Fusion failed")
             return {'success': False, 'error_msg': str(e)}
-
+            
     @staticmethod
-    def _wait_for_i2i_result(task_id, access_key, secret_key, save_dir, url_prefix, max_wait=600):
+    def _wait_for_i2i_result(task_id, access_key, secret_key, media_manager, entity_id, max_wait=600):
         """
         轮询图生图结果
         """
-        import time
+        req_body_str = json.dumps({"req_key": "jimeng_i2i_v30", "task_id": task_id})
         start_time = time.time()
         
-        req_payload = {
-            "req_key": "jimeng_i2i_v30",
-            "task_id": task_id
-        }
-        req_body_str = json.dumps(req_payload)
-
         logger.info(f"[Jimeng] Waiting i2i Task {task_id}")
-
         while time.time() - start_time < max_wait:
             try:
-                # 签名查询请求 (Action=CVSync2AsyncGetResult)
-                headers, request_url = JimengHandler._sign_request(
-                    access_key, secret_key, req_body_str, action='CVSync2AsyncGetResult'
-                )
-                
+                headers, request_url = JimengHandler._sign_request(access_key, secret_key, req_body_str, action='CVSync2AsyncGetResult')
                 resp = requests.post(request_url, headers=headers, data=req_body_str, timeout=30)
-                
                 if resp.status_code == 200:
                     data = resp.json()
-                    code = data.get('code')
-                    
-                    # 外层 Code 检查
-                    if code == 10000:
-                        task_data = data.get('data', {})
-                        status = task_data.get('status')
-                        
+                    if data.get('code') == 10000:
+                        status = data['data'].get('status')
                         logger.info(f"[Jimeng] i2i task {task_id} status: {status}")
-
                         if status == 'done':
-                            logger.info(f"[Jimeng] i2i Task {task_id} Done")
-                            # 任务完成 (成功或失败需进一步判断)
-                            # 如果成功, binary_data_base64 或 image_urls 会有数据
-                            image_urls = task_data.get('image_urls', [])
-                            binary_data = task_data.get('binary_data_base64', [])
+                            image_urls = data['data'].get('image_urls', [])
+                            binary = data['data'].get('binary_data_base64', [])
                             
-                            if binary_data:
-                                b64 = binary_data[0]
-                                fname = f"{task_id}.png"
-                                save_path = os.path.join(save_dir, fname)
-                                with open(save_path, 'wb') as f:
-                                    f.write(base64.b64decode(b64))
-                                return {'success': True, 'url': f"{url_prefix.rstrip('/')}/{fname}"}
-                            
+                            if binary:
+                                b64_data = base64.b64decode(binary[0])
+                                saved_url = media_manager.save_binary(b64_data, 'image', entity_id, '.png')
+                                return {'success': True, 'url': saved_url}
                             elif image_urls:
-                                url = image_urls[0]
-                                fname = f"{task_id}.png"
-                                save_path = os.path.join(save_dir, fname)
-                                if download_file(url, save_path):
-                                     return {'success': True, 'url': f"{url_prefix.rstrip('/')}/{fname}"}
-                                else:
-                                     # 下载失败则返回原始链接
-                                     return {'success': True, 'url': url}
-                            
-                            # done 但无数据，可能是业务逻辑失败(尽管外层code=10000)
-                            return {'success': False, 'error_msg': "Task done but no image data returned"}
-
+                                saved_url = media_manager.download_from_url(image_urls[0], 'image', entity_id)
+                                return {'success': True, 'url': saved_url}
+                            return {'success': False, 'error_msg': "No data"}
                         elif status in ['in_queue', 'generating']:
-                            # 继续等待
                             time.sleep(2)
-                            continue
-                        elif status in ['not_found', 'expired']:
-                             return {'success': False, 'error_msg': f"Task status: {status}"}
                         else:
-                             # 其他未知状态
                              time.sleep(2)
                     else:
-                        # 外层 Code != 10000，表示明确失败 (如敏感词拦截 code=50413)
-                        return {'success': False, 'error_msg': f"Task failed with code {code}: {data.get('message')}"}
+                        time.sleep(2)
                 else:
                     logger.warning(f"[Jimeng] Query HTTP Error: {resp.status_code}")
                     time.sleep(2)
@@ -1375,13 +937,10 @@ class JimengHandler:
 class MiniMaxHandler:
     @staticmethod
     def _get_headers(config):
-        return {
-            "Authorization": f"Bearer {config.get('api_key')}",
-            "Content-Type": "application/json"
-        }
+        return {"Authorization": f"Bearer {config.get('api_key')}", "Content-Type": "application/json"}
 
     @staticmethod
-    def generate_image(prompt, save_dir, url_prefix, config):
+    def generate_image(prompt, media_manager, config, entity_id=None):
         """
         MiniMax 文生图 API
         官方文档: https://platform.minimaxi.com/docs/api-reference/image/generation/api/text-to-image
@@ -1390,102 +949,36 @@ class MiniMaxHandler:
         model = config.get('model_name', 'image-01')
         base_url = config.get('base_url', 'https://api.minimaxi.com')
         
-        if not api_key:
-            return {'success': False, 'error_msg': "MiniMax API key is required"}
-        
-        # 构建请求参数
-        payload = {
-            "model": model,
-            "prompt": prompt,
-            "response_format": "url",  # 使用URL格式返回图片
-            "n": 1,  # 生成1张图片
-        }
-        
-        # 添加可选参数
-        if config.get('aspect_ratio'):
-            payload["aspect_ratio"] = config.get('aspect_ratio')
-        elif config.get('width') and config.get('height'):
-            # 仅当model为image-01时生效
-            if model == 'image-01':
-                payload["width"] = config.get('width')
-                payload["height"] = config.get('height')
-        
-        # 添加风格参数（仅当model为image-01-live时生效）
-        if model == 'image-01-live' and config.get('style_type'):
-            payload["style"] = {
-                "style_type": config.get('style_type'),
-                "style_weight": config.get('style_weight', 0.8)
-            }
-        
+        payload = {"model": model, "prompt": prompt, "response_format": "url", "n": 1}
         # 添加其他可选参数
         if config.get('seed') is not None:
             payload["seed"] = config.get('seed')
         if config.get('prompt_optimizer') is not None:
-            payload["prompt_optimizer"] = config.get('prompt_optimizer')
+            payload["prompt_optimizer"] = config.get('prompt_optimizer', True)
         if config.get('aigc_watermark') is not None:
-            payload["aigc_watermark"] = config.get('aigc_watermark')
+            payload["aigc_watermark"] = config.get('aigc_watermark', False)
         
         try:
             url = f"{base_url.rstrip('/')}/v1/image_generation"
-            headers = MiniMaxHandler._get_headers(config)
-            
-            logger.info(f"[MiniMax] Generating image with model: {model}, prompt: {prompt[:50]}...")
-            
-            resp = requests.post(url, json=payload, headers=headers, timeout=120)
+            resp = requests.post(url, json=payload, headers=MiniMaxHandler._get_headers(config), timeout=120)
             
             if resp.status_code == 200:
                 data = resp.json()
-                
-                # 检查API响应
-                base_resp = data.get('base_resp', {})
-                status_code = base_resp.get('status_code')
-                
-                if status_code == 0:  # 成功
-                    # 获取图片URL
-                    image_urls = data.get('data', {}).get('image_urls', [])
-                    
-                    if image_urls and len(image_urls) > 0:
-                        img_url = image_urls[0]
-                        
-                        # 下载图片到本地
-                        fname = f"{uuid.uuid4()}.png"
-                        save_path = os.path.join(save_dir, fname)
-                        
-                        if download_file(img_url, save_path):
-                            logger.info(f"[MiniMax] Image saved to: {save_path}")
-                            return {'success': True, 'url': f"{url_prefix.rstrip('/')}/{fname}"}
-                        else:
-                            # 下载失败，返回远程URL
-                            logger.warning(f"[MiniMax] Download failed, returning remote URL")
-                            return {'success': True, 'url': img_url}
-                    
-                    return {'success': False, 'error_msg': "No image URL in response"}
-                else:
-                    # API返回错误
-                    error_msg = base_resp.get('status_msg', 'Unknown error')
-                    logger.error(f"[MiniMax] API Error {status_code}: {error_msg}")
-                    return {'success': False, 'error_msg': f"API Error ({status_code}): {error_msg}"}
-            else:
-                # HTTP请求失败
-                error_msg = resp.text
-                logger.error(f"[MiniMax] HTTP Error {resp.status_code}: {error_msg}")
-                return {'success': False, 'error_msg': f"HTTP Error ({resp.status_code}): {error_msg}"}
-        
-        except requests.exceptions.Timeout:
-            return {'success': False, 'error_msg': 'Request timeout'}
+                if data.get('base_resp', {}).get('status_code') == 0:
+                    img_url = data['data']['image_urls'][0]
+                    saved_url = media_manager.download_from_url(img_url, 'image', entity_id)
+                    return {'success': True, 'url': saved_url or img_url}
+                return {'success': False, 'error_msg': f"API Error: {data.get('base_resp', {}).get('status_msg')}"}
+            
+            return {'success': False, 'error_msg': f"HTTP {resp.status_code}: {resp.text}"}
         except Exception as e:
-            logger.exception("[MiniMax] Image generation failed")
             return {'success': False, 'error_msg': str(e)}
     
     @staticmethod
-    def generate_text(messages, config):
-        """
-        MiniMax 不支持文本生成，返回错误
-        """
-        return {'success': False, 'error_msg': "MiniMax does not support text generation"}
+    def generate_text(messages, config): return {'success': False, 'error_msg': "MiniMax does not support text generation"}
     
     @staticmethod
-    def generate_video(prompt, save_dir, url_prefix, config, start_img=None, end_img=None):
+    def generate_video(prompt, media_manager, config, start_img=None, end_img=None, entity_id=None):
         """
         MiniMax 首尾帧生成视频 API
         官方文档: https://platform.minimaxi.com/docs/api-reference/video/generation/api/start-end-to-video
@@ -1494,90 +987,34 @@ class MiniMaxHandler:
         model = config.get('model_name', 'MiniMax-Hailuo-02')
         base_url = config.get('base_url', 'https://api.minimaxi.com')
         
-        if not api_key:
-            return {'success': False, 'error_msg': "MiniMax API key is required"}
+        start_b64 = media_manager.file_to_base64(start_img)
+        end_b64 = media_manager.file_to_base64(end_img)
+        if not start_b64 or not end_b64: return {'success': False, 'error_msg': "Failed to encode images"}
         
-        if not start_img or not end_img:
-            return {'success': False, 'error_msg': "MiniMax video generation requires both start and end frame images"}
-        
-        # 转换图片为 base64
-        start_img_b64 = file_to_base64(start_img)
-        end_img_b64 = file_to_base64(end_img)
-        
-        if not start_img_b64 or not end_img_b64:
-            return {'success': False, 'error_msg': "Failed to encode images to base64"}
-        
-        # 构建请求参数
         payload = {
-            "model": model,
-            "first_frame_image": start_img_b64,
-            "last_frame_image": end_img_b64,
-            "prompt": prompt,
-            "prompt_optimizer": config.get('prompt_optimizer', True),
+            "model": model, "first_frame_image": start_b64, "last_frame_image": end_b64,
+            "prompt": prompt, "prompt_optimizer": config.get('prompt_optimizer', True),
             "duration": config.get('duration', 6),
             "resolution": config.get('resolution', '768P')
         }
         
-        # 添加可选参数
-        if config.get('callback_url'):
-            payload["callback_url"] = config.get('callback_url')
-        if config.get('aigc_watermark') is not None:
-            payload["aigc_watermark"] = config.get('aigc_watermark')
-        
         try:
             url = f"{base_url.rstrip('/')}/v1/video_generation"
-            headers = MiniMaxHandler._get_headers(config)
-            
-            logger.info(f"[MiniMax] Creating video task with model: {model}, prompt: {prompt[:50]}...")
-            
-            resp = requests.post(url, json=payload, headers=headers, timeout=60)
+            resp = requests.post(url, json=payload, headers=MiniMaxHandler._get_headers(config), timeout=60)
             
             if resp.status_code == 200:
                 data = resp.json()
-                
-                # 检查API响应
-                base_resp = data.get('base_resp', {})
-                status_code = base_resp.get('status_code')
-                
-                if status_code == 0:  # 成功
+                if data.get('base_resp', {}).get('status_code') == 0:
                     task_id = data.get('task_id')
-                    
-                    if not task_id:
-                        return {'success': False, 'error_msg': "No task_id returned from API"}
-                    
-                    logger.info(f"[MiniMax] Video task created: {task_id}")
-                    
-                    # 轮询等待视频生成完成
                     result = MiniMaxHandler._wait_for_video(task_id, config, max_wait=600)
-                    
                     if result['success'] and result.get('url'):
-                        video_url = result['url']
-                        
-                        # 下载视频到本地
-                        fname = f"{task_id}.mp4"
-                        save_path = os.path.join(save_dir, fname)
-                        
-                        logger.info(f"[MiniMax] Downloading video from: {video_url}")
-                        
-                        if download_file(video_url, save_path):
-                            logger.info(f"[MiniMax] Video saved to: {save_path}")
-                            return {'success': True, 'url': f"{url_prefix.rstrip('/')}/{fname}"}
-                        else:
-                            # 下载失败，返回远程URL
-                            logger.warning(f"[MiniMax] Download failed, returning remote URL")
-                            return {'success': True, 'url': video_url}
-                    
+                        saved_url = media_manager.download_from_url(result['url'], 'video', entity_id)
+                        return {'success': True, 'url': saved_url or result['url']}
                     return result
-                else:
-                    # API返回错误
-                    error_msg = base_resp.get('status_msg', 'Unknown error')
-                    logger.error(f"[MiniMax] API Error {status_code}: {error_msg}")
-                    return {'success': False, 'error_msg': f"API Error ({status_code}): {error_msg}"}
-            else:
-                # HTTP请求失败
-                error_msg = resp.text
-                logger.error(f"[MiniMax] HTTP Error {resp.status_code}: {error_msg}")
-                return {'success': False, 'error_msg': f"HTTP Error ({resp.status_code}): {error_msg}"}
+                logger.error(f"[MiniMax] API Error {data.get('base_resp', {}).get('status_code')}: {data.get('base_resp', {}).get('status_msg')}")
+                return {'success': False, 'error_msg': f"API Error: {data.get('base_resp', {}).get('status_msg')}"}
+            
+            return {'success': False, 'error_msg': f"HTTP {resp.status_code}"}
         
         except requests.exceptions.Timeout:
             return {'success': False, 'error_msg': 'Request timeout'}
@@ -1591,298 +1028,134 @@ class MiniMaxHandler:
         轮询等待视频生成完成
         max_wait: 最大等待时间(秒)
         """
-        import time
         base_url = config.get('base_url', 'https://api.minimaxi.com')
         url = f"{base_url.rstrip('/')}/v1/query/video_generation?task_id={task_id}"
         headers = MiniMaxHandler._get_headers(config)
         
         start_time = time.time()
-        logger.info(f"[MiniMax] Waiting Video Task {task_id}")
-
         while time.time() - start_time < max_wait:
             try:
                 resp = requests.get(url, headers=headers, timeout=30)
                 if resp.status_code == 200:
                     data = resp.json()
-                    base_resp = data.get('base_resp', {})
-                    status_code = base_resp.get('status_code')
-                    
-                    if status_code == 0:
+                    if data.get('base_resp', {}).get('status_code') == 0:
                         status = data.get('status')
-                        file_id = data.get('file_id')
-                        
-                        logger.info(f"[MiniMax] Task {task_id} status: {status}")
-                        
                         if status == 'Success':
-                            # 成功，获取视频URL
-                            video_url = data.get('video_url')
-                            if video_url:
-                                return {'success': True, 'url': video_url, 'data': data}
-                            else:
-                                return {'success': False, 'error_msg': 'No video URL in response'}
-                        
+                            return {'success': True, 'url': data.get('video_url')}
                         elif status == 'Failed':
-                            error_msg = data.get('error_message', 'Generation failed')
-                            logger.error(f"[MiniMax] Task Failed: {error_msg}")
-                            return {'success': False, 'error_msg': error_msg}
-                        
-                        elif status in ['Processing', 'Queueing']:
-                            # 继续等待
-                            time.sleep(10)  # 每10秒查询一次
-                        
+                            return {'success': False, 'error_msg': data.get('error_message')}
                         else:
-                            logger.warning(f"[MiniMax] Unknown status: {status}")
                             time.sleep(10)
                     else:
-                        logger.error(f"[MiniMax] Query failed: {status_code} - {base_resp.get('status_msg')}")
                         time.sleep(10)
                 else:
-                    logger.error(f"[MiniMax] Query HTTP error: {resp.status_code}")
                     time.sleep(10)
-            
-            except Exception as e:
-                logger.error(f"[MiniMax] Query error: {e}")
+            except Exception:
                 time.sleep(10)
-        
-        return {'success': False, 'error_msg': f'Timeout after {max_wait}s waiting for video generation'}
+        return {'success': False, 'error_msg': 'Timeout'}
 
     @staticmethod
-    def fuse_image(prompt, save_dir, url_prefix, config, base_image_path, ref_image_path_list):
-
-        """
-        MiniMax 图生图 API
-        官方文档: https://platform.minimaxi.com/docs/api-reference/image/generation/api/image-to-image
-        当前只支持角色图生图
-        """
+    def fuse_image(prompt, media_manager, config, base_image_path, ref_image_path_list, entity_id=None):
         api_key = config.get('api_key')
         model = config.get('model_name', 'image-01')
         base_url = config.get('base_url', 'https://api.minimaxi.com')
         
-        if not api_key:
-            return {'success': False, 'error_msg': "MiniMax API key is required"}
-        
-        # 海螺AI支持支角色图生图
         ref_image_path_list.append(base_image_path)
-        
-        # 转换参考图为 base64
         subject_references = []
         for image_path in ref_image_path_list:
-            image_b64 = file_to_base64(image_path)
-            if not image_b64:
-                return {'success': False, 'error_msg': f"Failed to encode reference image {image_path} to base64"}
-            
-            subject_references.append({
-                "type": "character",
-                "image_file": image_b64
-            })
+            image_b64 = media_manager.file_to_base64(image_path)
+            if image_b64: subject_references.append({"type": "character", "image_file": image_b64})
         
-        # 构建请求参数
         payload = {
-            "model": model,
-            "prompt": prompt,
-            "subject_reference": subject_references,
-            "response_format": "url",
-            "n": 1
+            "model": model, "prompt": prompt, "subject_reference": subject_references,
+            "response_format": "url", "n": 1
         }
-        
-        # 添加可选参数
-        if config.get('aspect_ratio'):
-            payload["aspect_ratio"] = config.get('aspect_ratio')
-        elif config.get('width') and config.get('height'):
-            if model == 'image-01':
-                payload["width"] = config.get('width')
-                payload["height"] = config.get('height')
-        
-        if model == 'image-01-live' and config.get('style_type'):
-            payload["style"] = {
-                "style_type": config.get('style_type'),
-                "style_weight": config.get('style_weight', 0.8)
-            }
-        
-        if config.get('seed') is not None:
-            payload["seed"] = config.get('seed')
-        if config.get('prompt_optimizer') is not None:
-            payload["prompt_optimizer"] = config.get('prompt_optimizer')
-        if config.get('aigc_watermark') is not None:
-            payload["aigc_watermark"] = config.get('aigc_watermark')
         
         try:
             url = f"{base_url.rstrip('/')}/v1/image_generation"
-            headers = MiniMaxHandler._get_headers(config)
-            
-            logger.info(f"[MiniMax] Generating image from image with model: {model}, prompt: {prompt[:50]}...")
-            
-            resp = requests.post(url, json=payload, headers=headers, timeout=120)
-            
+            resp = requests.post(url, json=payload, headers=MiniMaxHandler._get_headers(config), timeout=120)
             if resp.status_code == 200:
                 data = resp.json()
-                base_resp = data.get('base_resp', {})
-                status_code = base_resp.get('status_code')
-                
-                if status_code == 0:
-                    image_urls = data.get('data', {}).get('image_urls', [])
-                    
-                    if image_urls and len(image_urls) > 0:
-                        img_url = image_urls[0]
-                        fname = f"{uuid.uuid4()}.png"
-                        save_path = os.path.join(save_dir, fname)
-                        
-                        if download_file(img_url, save_path):
-                            logger.info(f"[MiniMax] Image saved to: {save_path}")
-                            return {'success': True, 'url': f"{url_prefix.rstrip('/')}/{fname}"}
-                        else:
-                            logger.warning(f"[MiniMax] Download failed, returning remote URL")
-                            return {'success': True, 'url': img_url}
-                    
-                    return {'success': False, 'error_msg': "No image URL in response"}
-                else:
-                    error_msg = base_resp.get('status_msg', 'Unknown error')
-                    logger.error(f"[MiniMax] API Error {status_code}: {error_msg}")
-                    return {'success': False, 'error_msg': f"API Error ({status_code}): {error_msg}"}
-            else:
-                error_msg = resp.text
-                logger.error(f"[MiniMax] HTTP Error {resp.status_code}: {error_msg}")
-                return {'success': False, 'error_msg': f"HTTP Error ({resp.status_code}): {error_msg}"}
-        
-        except requests.exceptions.Timeout:
-            return {'success': False, 'error_msg': 'Request timeout'}
+                if data.get('base_resp', {}).get('status_code') == 0:
+                    img_url = data['data']['image_urls'][0]
+                    saved_url = media_manager.download_from_url(img_url, 'image', entity_id)
+                    return {'success': True, 'url': saved_url or img_url}
+                return {'success': False, 'error_msg': f"API Error: {data}"}
+            return {'success': False, 'error_msg': f"HTTP {resp.status_code}"}
         except Exception as e:
-            logger.exception("[MiniMax] Image generation from image failed")
             return {'success': False, 'error_msg': str(e)}
-
 
 class ZhipuHandler:
     @staticmethod
     def generate_text(messages, config):
         try:
             api_key = config.get('api_key')
-            if not api_key:
-                return {'success': False, 'error_msg': "Zhipu API key is required"}
-            
             model = config.get('model_name') or 'glm-4.6'
             client = ZhipuAiClient(api_key=api_key)
             
-            logger.info(f"[Zhipu] Text Req: {model}")
-            response = client.chat.completions.create(
-                model=model,
-                messages=messages
-            )
-            
+            response = client.chat.completions.create(model=model, messages=messages)
             if response.choices:
-                logger.info("[Zhipu] Text Success")
                 return {'success': True, 'content': response.choices[0].message.content}
-            return {'success': False, 'error_msg': "No response from Zhipu API"}
-            
+            return {'success': False, 'error_msg': "No response"}
         except Exception as e:
-            logger.error(f"[Zhipu] Text generation error: {e}")
             return {'success': False, 'error_msg': str(e)}
 
     @staticmethod
-    def generate_image(prompt, save_dir, url_prefix, config):
+    def generate_image(prompt, media_manager, config, entity_id=None):
         try:
             api_key = config.get('api_key')
-            if not api_key:
-                return {'success': False, 'error_msg': "Zhipu API key is required"}
-            
             model = config.get('model_name') or 'cogview-3'
             client = ZhipuAiClient(api_key=api_key)
             
-            logger.info(f"[Zhipu] Image Req: {model}, Prompt: {prompt[:30]}")
             response = client.images.generations(
-                model=model,
-                prompt=prompt,
+                model=model, prompt=prompt,
                 size=config.get('size', "1024x1024"),
                 quality=config.get('quality', "standard")
             )
             
-            if response.data and len(response.data) > 0:
+            if response.data:
                 img_url = response.data[0].url
-                fname = f"{uuid.uuid4()}.png"
-                save_path = os.path.join(save_dir, fname)
-                
-                if download_file(img_url, save_path):
-                    return {'success': True, 'url': f"{url_prefix.rstrip('/')}/{fname}"}
-                return {'success': False, 'error_msg': "Failed to download image"}
-            
-            return {'success': False, 'error_msg': "No image data in response"}
-            
+                saved_url = media_manager.download_from_url(img_url, 'image', entity_id)
+                return {'success': True, 'url': saved_url or img_url}
+            return {'success': False, 'error_msg': "No image data"}
         except Exception as e:
-            logger.error(f"[Zhipu] Image generation error: {e}")
             return {'success': False, 'error_msg': str(e)}
 
     @staticmethod
-    def generate_video(prompt, save_dir, url_prefix, config, start_img=None, end_img=None):
+    def generate_video(prompt, media_manager, config, start_img=None, end_img=None, entity_id=None):
         try:
             api_key = config.get('api_key')
-            if not api_key:
-                return {'success': False, 'error_msg': "Zhipu API key is required"}
-            
-            if not start_img:
-                return {'success': False, 'error_msg': "Zhipu video generation requires start image"}
-            
-            # 处理起始图片为base64
-            start_img_b64 = file_to_base64(start_img)
-            end_img_b64 = file_to_base64(end_img)
-            if not start_img_b64 or not end_img_b64:
-                return {'success': False, 'error_msg': "Failed to encode start image to base64"}
+            start_img_b64 = media_manager.file_to_base64(start_img)
+            end_img_b64 = media_manager.file_to_base64(end_img)
+            if not start_img_b64: return {'success': False, 'error_msg': "Zhipu requires start image"}
             
             model = config.get('model_name') or 'cogvideox-2'
             client = ZhipuAiClient(api_key=api_key)
             
-            logger.info(f"[Zhipu] Video Submit: {model}")
-            
-            # 提交视频生成任务
             response = client.videos.generations(
-                model=model,
-                image_url=[start_img_b64, end_img_b64],
-                prompt=prompt,
-                quality=config.get('quality', "speed"),
-                with_audio=config.get('with_audio', True),
-                size=config.get('size', "1280x720"),
-                fps=config.get('fps', 30)
+                model=model, image_url=[start_img_b64, end_img_b64] if end_img_b64 else [start_img_b64],
+                prompt=prompt, quality=config.get('quality', "speed"),
+                with_audio=config.get('with_audio', True)
             )
             
-            if not response.id:
-                return {'success': False, 'error_msg': "No task ID returned from API"}
-            
-            logger.info(f"[Zhipu] Video Task ID: {response.id}")
-            
-            # 轮询等待结果
             max_wait = config.get('max_wait', 600)
             start_time = time.time()
             while time.time() - start_time < max_wait:
                 result = client.videos.retrieve_videos_result(id=response.id)
-                
                 if result.status == 'succeeded':
                     video_url = result.data[0].url if result.data else None
                     if video_url:
-                        fname = f"{response.id}.mp4"
-                        save_path = os.path.join(save_dir, fname)
-                        
-                        if download_file(video_url, save_path):
-                            return {'success': True, 'url': f"{url_prefix.rstrip('/')}/{fname}"}
-                        return {'success': True, 'url': video_url}
-                    return {'success': False, 'error_msg': "No video URL in response"}
-                
-                if result.status == 'failed':
-                    return {'success': False, 'error_msg': f"Video generation failed: {result.failure_details}"}
-                
-                time.sleep(10)  # 每10秒查询一次
-            
-            return {'success': False, 'error_msg': f"Timeout after {max_wait}s waiting for video"}
-            
+                        saved_url = media_manager.download_from_url(video_url, 'video', entity_id)
+                        return {'success': True, 'url': saved_url or video_url}
+                elif result.status == 'failed':
+                    return {'success': False, 'error_msg': str(result.failure_details)}
+                time.sleep(10)
+            return {'success': False, 'error_msg': "Timeout"}
         except Exception as e:
-            logger.error(f"[Zhipu] Video generation error: {e}")
             return {'success': False, 'error_msg': str(e)}
 
     @staticmethod
-    def fuse_image(prompt, save_dir, url_prefix, config, base_image_path, ref_image_path_list):
-        """
-        ZhipuHandler: 图生图/融合图方法
-        智谱 AI (ZhipuAi) SDK 目前主要提供文生图和文生视频 API。
-        通用 i2i 或融合图功能可能需要专门的接口或通过多模态 chat 接口实现。
-        当前实现为占位符。
-        """
+    def fuse_image(prompt, media_manager, config, base_image_path, ref_image_path_list, entity_id=None):
         return {'success': False, 'error_msg': "智谱目前无提供融合图模型"}
     
 # ============================================================
@@ -1909,7 +1182,7 @@ def run_text_generation(messages, config):
     return handler.generate_text(messages, config)
 
 
-def run_image_generation(visual_desc, style_desc, consistency_text, frame_type, config, save_dir, url_prefix, start_prompt_ref=None, prev_shot_context=""):
+def run_image_generation(visual_desc, style_desc, consistency_text, frame_type, config, media_manager, start_prompt_ref=None, prev_shot_context="", entity_id=None):
     """
     图片生成流程：包含 Prompt 优化逻辑 (Prompt Chaining)
 
@@ -1969,49 +1242,36 @@ def run_image_generation(visual_desc, style_desc, consistency_text, frame_type, 
     4. 使用中文，仅直接输出提示词文本，无额外说明。"""
         user_prompt = f"起始帧提示词：{start_prompt_ref}\n\n结束帧动作：{visual_desc}\n\n强制约束：生成结果为电影/短剧的结束分镜帧，无水印、无宣传文案、无海报风格，仅为纯分镜画面；禁止修改起始帧的画风（笔触/色彩/光影/质感/渲染方式）、摄影机参数（机位/视角/焦距/景别/高度/轴线），仅调整人物动作/姿势，且动作需符合连续镜头的分镜逻辑，严格遵守180度轴线规则。"   
     
-    # 默认的简单 Prompt (降级策略)
     optimized_prompt = f"{style_desc}, {visual_desc}" 
     if consistency_text: optimized_prompt += f", {consistency_text}"
 
     # 2. 尝试使用文本模型优化 Prompt
     handler = get_handler('aliyun')
-    
-    # 检查 handler 是否支持文本生成，并且当前配置是否有效
     if hasattr(handler, 'generate_text'):
         try:
-            # 创建一个用于文本生成的临时配置
-            # 主要是为了处理模型名称的问题：用户在生图配置里选的是生图模型 (如 qwen-image-plus)，
-            # 我们需要换成一个文本模型 (如 qwen-plus) 来生成 Prompt。
             text_config = config.copy()
-            if config.get('type') == 'aliyun':
-                text_config['model_name'] = 'qwen-plus'
-            elif config.get('type') in ['siliconflow', 'runninghub']:
-                # 如果用户没指定文本模型，尝试用通用模型
-                text_config['model_name'] = 'Qwen/Qwen2.5-7B-Instruct'
-            elif config.get('type') == 'zai':
-                text_config['model_name'] = 'glm-4.6'
+            if config.get('type') == 'aliyun': text_config['model_name'] = 'qwen-plus'
+            elif config.get('type') in ['siliconflow', 'runninghub']: text_config['model_name'] = 'Qwen/Qwen2.5-7B-Instruct'
+            elif config.get('type') == 'zai': text_config['model_name'] = 'glm-4.6'
             
-            # 执行 Prompt 优化
             logger.info("[Prompt Eng] Starting optimization...")
             res = handler.generate_text([{'role': 'system', 'content': sys_prompt + " 使用中文回答"}, {'role': 'user', 'content': user_prompt}], text_config)
             
             if res['success']:
                 optimized_prompt = res['content']
-                logger.info(f"[Prompt Eng] Optimized Prompt: {optimized_prompt[:50]}...")
+                logger.info(f"[Prompt Eng] Optimized: {optimized_prompt[:50]}...")
             else:
-                logger.warning(f"[Prompt Eng] Failed, using raw prompt. Reason: {res.get('error_msg')}")
+                logger.warning(f"[Prompt Eng] Failed: {res.get('error_msg')}")
         except Exception as e:
-            logger.error(f"[Prompt Eng] Exception during optimization: {e}")
-            # 保持 optimized_prompt 为默认值
+            logger.error(f"[Prompt Eng] Error: {e}")
 
-    # 3. 调用生图 API
-    # 这里使用原始配置（包含生图模型名称）
+    # Call actual image generation with version control
     img_handler = get_handler(config.get('type'))
-    result = img_handler.generate_image(optimized_prompt, save_dir, url_prefix, config)
+    result = img_handler.generate_image(optimized_prompt, media_manager, config, entity_id)
     
     return result, optimized_prompt
 
-def run_video_generation(prompt, start_img_path, end_img_path, config, save_dir, url_prefix):
+def run_video_generation(prompt, start_img_path, end_img_path, config, media_manager, entity_id=None):
     """
     视频生成逻辑入口 (Video Generation Entry Point)
 
@@ -2042,33 +1302,25 @@ def run_video_generation(prompt, start_img_path, end_img_path, config, save_dir,
             - 'url' (str, optional): 生成视频文件的公开访问 URL。
             - 'error_msg' (str, optional): 错误信息（如果 'success' 为 False）。
     """
-    logger.info(f"[Main] Run Video Gen. Provider: {config.get('type')}, StartImg: {start_img_path}, EndImg: {end_img_path}")
+    logger.info(f"[Main] Run Video Gen. Provider: {config.get('type')}, EntityID: {entity_id}")
     handler = get_handler(config.get('type'))
-    return handler.generate_video(prompt, save_dir, url_prefix, config, start_img=start_img_path, end_img=end_img_path)
+    return handler.generate_video(prompt, media_manager, config, start_img=start_img_path, end_img=end_img_path, entity_id=entity_id)
 
-def run_simple_image_generation(prompt, config, save_dir, url_prefix):
+def run_simple_image_generation(prompt, config, media_manager, entity_id=None):
     """
     不带提示词工程的简单图片生成方法
     直接使用用户提供的prompt，不进行任何优化
     """
-    logger.info(f"[Main] Run Simple Image Gen. Provider: {config.get('type')}, Prompt: {prompt[:30]}...")
-    
+    logger.info(f"[Main] Run Simple Image Gen. Provider: {config.get('type')}, EntityID: {entity_id}")
     handler = get_handler(config.get('type', 'mock'))
-    result = handler.generate_image(prompt, save_dir, url_prefix, config)
-    
-    if result.get('success'):
-        logger.info(f"[Simple Image Gen] Generation successful. URL: {result.get('url', 'N/A')}")
-    else:
-        logger.error(f"[Simple Image Gen] Generation failed. Error: {result.get('error_msg', 'Unknown error')}")
-    
-    return result
+    return handler.generate_image(prompt, media_manager, config, entity_id)
 
-def run_voice_generation(text, config, save_dir, url_prefix):
-    logger.info(f"[Main] Run Voice Gen. Provider: {config.get('type')}, TextLen: {len(text)}")
+def run_voice_generation(text, config, media_manager, entity_id=None):
+    logger.info(f"[Main] Run Voice Gen. Provider: {config.get('type')}, EntityID: {entity_id}")
     handler = get_handler(config.get('type'))
-    return handler.generate_voice(text, save_dir, url_prefix, config)
+    return handler.generate_voice(text, media_manager, config, entity_id)
 
-def run_fusion_generation(base_image_path, fusion_prompt, config, save_dir, url_prefix, element_image_paths):
+def run_fusion_generation(base_image_path, fusion_prompt, config, media_manager, element_image_paths, entity_id=None):
     """
     融图/图生图逻辑入口 (Image Fusion / Image-to-Image Generation)
 
@@ -2102,9 +1354,6 @@ def run_fusion_generation(base_image_path, fusion_prompt, config, save_dir, url_
             - 'url' (str, optional): 生成图片的公开访问 URL。
             - 'error_msg' (str, optional): 错误信息（如果 'success' 为 False）。
     """
-    logger.info(f"[Main] Run Fusion Gen. Provider: {config.get('type')}, Base: {base_image_path}, Elements: {len(element_image_paths)}")
+    logger.info(f"[Main] Run Fusion Gen. Provider: {config.get('type')}, EntityID: {entity_id}")
     handler = get_handler(config.get('type', 'mock'))
-    
-    # 传入 ref_image_path 参数，Handler 内部会判断是否调用图生图接口
-    result = handler.fuse_image(fusion_prompt, save_dir, url_prefix, config, base_image_path, ref_image_path_list=element_image_paths)
-    return result
+    return handler.fuse_image(fusion_prompt, media_manager, config, base_image_path, ref_image_path_list=element_image_paths, entity_id=entity_id)

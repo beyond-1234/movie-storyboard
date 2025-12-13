@@ -1286,6 +1286,7 @@
                     try {
                         const res = await this.request('POST', '/api/generate/character_views', {
                             character_description: character.description,
+                            character_id: character.id,
                             project_id: this.currentProjectId,
                             provider_id: this.genOptions.imageProviderId,
                             model_name: this.genOptions.imageModelName
@@ -1986,7 +1987,9 @@
                 async handleBaseUpload(e) {
                     const file = e.target.files[0];
                     if (!file) return;
-                    const fd = new FormData(); fd.append('file', file);
+                    const fd = new FormData(); 
+                    fd.append('file', file);
+                    fd.append('fusion_id', this.fusionForm.id);
                     try {
                         this.startGlobalLoading('上传中...', '正在上传底图');
                         const res = await axios.post('/api/upload/base_image', fd);
@@ -2288,6 +2291,7 @@
                     
                     const formData = new FormData();
                     formData.append('file', file);
+                    formData.append('element_id', this.elementForm.id)
                     
                     try {
                         this.generatingElement = true; // 使用 element loading indicator if available
@@ -2325,6 +2329,7 @@
                     try {
                         // 调用新的元素生成接口
                         const res = await this.request('POST', '/api/generate/element_image', {
+                            element_id: this.elementForm.id,
                             prompt: this.elementForm.prompt,
                             provider_id: this.genOptions.imageProviderId,
                             model_name: this.genOptions.imageModelName
