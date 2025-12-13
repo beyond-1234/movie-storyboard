@@ -1606,7 +1606,7 @@
                     this.loadingShots = true; 
                     try { 
                         this.shotList = await this.request('GET', `/api/projects/${pid}/shots`);
-                        this.$nextTick(() => this.initShotSortable()); 
+                        //this.$nextTick(() => this.initShotSortable()); 
                     } finally { this.loadingShots = false; } 
                 },
                 editShot(row) { this.shotForm = JSON.parse(JSON.stringify(row)); this.videoUrl=row.video_url||''; this.shotDialogVisible = true; },
