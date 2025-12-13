@@ -928,7 +928,7 @@
                 <el-row :gutter="20">
                     <el-col :span="24">
                         <el-form-item label="场景说明">
-                            <el-input type="textarea" v-model="fusionForm.scene_description" :rows="2" readonly></el-input>
+                            <el-input type="textarea" v-model="fusionForm.scene_description" :rows="2"></el-input>
                         </el-form-item>
                     </el-col>
                 </el-row>
@@ -936,9 +936,15 @@
                     <el-col :span="24">
                         <el-form-item label="分镜描述">
                                 <template slot-scope="scope">
-                                    <div><strong>画面:</strong> {{ fusionForm.visual_description }}</div>
-                                    <div style="margin-top: 5px; color: #409EFF;"><i class="el-icon-microphone"></i> {{ fusionForm.dialogue }}</div>
-                                    <div style="margin-top: 5px; color: #666;"><strong>声音:</strong> {{ fusionForm.audio_description }}</div>
+                                    <el-form-item>
+                                    <strong>画面:</strong> <el-input type="textarea" v-model="fusionForm.visual_description" :rows="2"></el-input>
+                                    </el-form-item>
+                                    <el-form-item>
+                                    <strong>台词:</strong></i> <el-input type="textarea" v-model="fusionForm.dialogue" :rows="2"></el-input>
+                                    </el-form-item>
+                                    <el-form-item>
+                                   <strong>声音:</strong> <el-input type="textarea" v-model="fusionForm.audio_description" :rows="2"></el-input>
+                                    </el-form-item>
                                 </template>
                         </el-form-item>
                     </el-col>
@@ -1191,7 +1197,11 @@
                     fusion_prompt: '', // 融合提示词
                     end_frame_image: '', // 尾帧视频
                     end_frame_prompt: '', // 尾帧提示词
-                    video_url: '' // 融合视频
+                    video_url: '', // 融合视频
+                    scene_description: '', // 场景说明 (新)
+                    visual_description: '', // 画面描述 (新)
+                    dialogue: '', // 对白 (新)
+                    audio_description: '', // 声音描述 (新)
                 },
                 elementDialogVisible: false,
                 elementForm: {
@@ -2256,7 +2266,7 @@
                         // 从后端获取融图任务列表
                         this.fusionList = await this.request('GET', `/api/projects/${this.currentProjectId}/fusions`) || []; 
                         // 确保每个融图任务都有场景说明和分镜描述
-                        for (let i = 0; i < this.fusionList.length; i++) {
+                        /*for (let i = 0; i < this.fusionList.length; i++) {
                             const fusion = this.fusionList[i];
                             if (!fusion.scene_description && fusion.shot_id) {
                                 // 尝试从分镜列表中获取对应的数据
@@ -2265,9 +2275,10 @@
                                     this.$set(fusion, 'scene_description', shot.scene_description || shot.description || '');
                                     this.$set(fusion, 'visual_description', shot.visual_description || shot.description || '');
                                     this.$set(fusion, 'dialogue', shot.dialogue || shot.dialogue || '');
-                                    this.$set(fusion, 'audio_description', shot.audio_description || shot.audio_description || '');                                }
+                                    this.$set(fusion, 'audio_description', shot.audio_description || shot.audio_description || '');
+                                }
                             }
-                        }
+                        }*/
                     } catch (e) {
                         console.error(e);
                         this.fusionList = [];
@@ -2305,6 +2316,7 @@
                 },
                 editFusion(row) {
                     const formData = JSON.parse(JSON.stringify(row));
+                    /*
                     if (!formData.scene_description && formData.shot_id) {
                         // 尝试从分镜列表中获取对应的数据
                         const shot = this.shotList.find(s => s.id === formData.shot_id);
@@ -2314,7 +2326,7 @@
                             formData.dialogue = shot.dialogue || '';
                             formData.audio_description = shot.audio_description || shot.description || '';
                         }
-                    }
+                    }*/
                     this.fusionForm = formData;
                     this.fusionDialogTitle = '编辑融图任务';
                     this.fusionDialogVisible = true;
@@ -2471,7 +2483,11 @@
                                     base_image: shot.scene_image || '',
                                     elements: elements,
                                     result_image: '',
-                                    fusion_prompt: ''
+                                    fusion_prompt: '',
+                                    scene_description: shot.scene_description || '',
+                                    visual_description: shot.visual_description || '',
+                                    dialogue: shot.dialogue || '',
+                                    audio_description: shot.audio_description || '',
                                 };
                                 
                                 // 调用 POST 接口创建任务并获取完整数据（包含ID）
@@ -2479,11 +2495,13 @@
                                 
                                 // 确保响应数据包含必要字段
                                 if (res) {
+                                    /*
                                     // 设置场景说明和分镜描述
                                     res.scene_description = shot.scene_description || shot.description || '',
                                     res.visual_description = shot.visual_description || shot.description || '',
                                     res.dialogue = shot.dialogue || '',
                                     res.audio_description = shot.audio_description || ''
+                                    */
                                 
                                     newFusions.push(res);
                                 }
@@ -2526,12 +2544,12 @@
                 async saveFusionData(fusion) {
                     try {
                         // 备份瞬态字段
-                        const transientFields = {
+                        /*const transientFields = {
                             scene_description: fusion.scene_description || '',
                             visual_description: fusion.visual_description || '',
                             dialogue: fusion.dialogue || '',
                             audio_description: fusion.audio_description || ''
-                        };
+                        };*/
 
                         const method = fusion.id ? 'PUT' : 'POST';
                         const url = fusion.id 
@@ -2546,7 +2564,7 @@
                         const res = await this.request(method, url, fusion);
                         
                         // 合并结果
-                        const mergedResult = { ...res, ...transientFields };
+                        const mergedResult = res;
 
                         if (method === 'POST') {
                             fusion.id = res.id;
@@ -2592,7 +2610,7 @@
                             this.fusionForm.scene = targetShot.scene;
                             this.fusionForm.shot_number = targetShot.shot_number;
                             
-                            // 自动回填描述信息（配合 saveFusionData 的不落地显示逻辑）
+                            // 自动回填描述信息
                             this.fusionForm.scene_description = targetShot.scene_description || '';
                             this.fusionForm.visual_description = targetShot.visual_description || '';
                             this.fusionForm.dialogue = targetShot.dialogue || '';

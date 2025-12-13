@@ -94,6 +94,10 @@ class FusionTask:
     end_frame_prompt: str = ""
     shot_id: str = ""
     video_url: str = ""
+    scene_description: str = ""  # 场景说明
+    visual_description: str = "" # 画面描述
+    dialogue: str = ""           # 对白
+    audio_description: str = ""  # 声音描述
     created_time: str = field(default_factory=lambda: datetime.now().isoformat())
     updated_time: str = field(default_factory=lambda: datetime.now().isoformat())
     
