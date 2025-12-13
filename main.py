@@ -565,7 +565,6 @@ def generate_fusion_video():
     
     config = db.get_provider_config(data.get('provider_id'))
     if data.get('model_name'): config['model_name'] = data.get('model_name')
-    
     result = ai_service.run_video_generation(
         current_fusion.get('fusion_prompt') or "high quality video",
         s_path, e_path, config, 

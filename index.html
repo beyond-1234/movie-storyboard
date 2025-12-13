@@ -530,17 +530,30 @@
                                         </div>
                                     </template>
                                 </el-table-column>
-                                <el-table-column label="融合提示词" prop="fusion_prompt" min-width="250">
+                                <el-table-column label="首帧融合提示词" prop="fusion_prompt" min-width="250">
                                     <template slot-scope="scope">
-                                                {{ scope.row.fusion_prompt || '未设置' }}
+                                               首帧： {{ scope.row.fusion_prompt || '未设置' }}
                                     </template>
                                 </el-table-column>
-                                <el-table-column label="结果图片" width="150">
+                                <el-table-column label="尾帧融合提示词" prop="fusion_prompt" min-width="250">
                                     <template slot-scope="scope">
-                                        <div v-if="scope.row.result_image" style="position: relative; width: 100px; height: 70px; background: #f0f0f0; display: flex; align-items: center; justify-content: center; border-radius: 4px; overflow: hidden;">
-                                            <el-image :src="scope.row.result_image" :preview-src-list="[scope.row.result_image]" fit="cover" style="width: 100%; height: 100%;"></el-image>
+                                               尾帧： {{ scope.row.end_frame_prompt || '未设置' }}
+                                    </template>
+                                </el-table-column>
+                                <el-table-column label="生成画面 (首帧/尾帧)" width="220">
+                                    <template slot-scope="scope">
+                                        <div style="display: flex; gap: 5px;">
+                                            <div style="position: relative; width: 90px; height: 60px; background: #f0f0f0; display: flex; align-items: center; justify-content: center; border-radius: 4px; overflow: hidden; border: 1px solid #ddd;">
+                                                <el-image v-if="scope.row.result_image" :src="scope.row.result_image" :preview-src-list="[scope.row.result_image]" fit="cover" style="width: 100%; height: 100%;"></el-image>
+                                                <span v-else style="font-size: 10px; color: #999;">首帧未生成</span>
+                                                <div style="position:absolute; bottom:0; right:0; background:rgba(0,0,0,0.5); color:#fff; font-size:10px; padding:0 3px;">Start</div>
+                                            </div>
+                                            <div style="position: relative; width: 90px; height: 60px; background: #f0f0f0; display: flex; align-items: center; justify-content: center; border-radius: 4px; overflow: hidden; border: 1px solid #ddd;">
+                                                <el-image v-if="scope.row.end_frame_image" :src="scope.row.end_frame_image" :preview-src-list="[scope.row.end_frame_image]" fit="cover" style="width: 100%; height: 100%;"></el-image>
+                                                <span v-else style="font-size: 10px; color: #999;">尾帧未生成</span>
+                                                <div style="position:absolute; bottom:0; right:0; background:rgba(0,0,0,0.5); color:#fff; font-size:10px; padding:0 3px;">End</div>
+                                            </div>
                                         </div>
-                                        <div v-else style="color: #ccc; font-size: 12px;">未生成</div>
                                     </template>
                                 </el-table-column>
                                 <el-table-column label="结果视频" width="160" align="center">
@@ -556,7 +569,12 @@
                                     <template slot-scope="scope">
                                         <el-tooltip content="编辑任务" placement="top"><el-button size="mini" icon="el-icon-edit" circle plain @click="editFusion(scope.row)"></el-button></el-tooltip>
                                         <el-tooltip content="生成提示词" placement="top"><el-button size="mini" type="warning" icon="el-icon-magic-stick" circle plain @click="generateFusionPrompt(scope.row)"></el-button></el-tooltip>
-                                        <el-tooltip content="生成融合图" placement="top"><el-button size="mini" type="success" icon="el-icon-picture" circle plain @click="generateFusionImage(scope.row)"></el-button></el-tooltip>
+                                        <el-tooltip content="生成首帧" placement="top">
+                                            <el-button size="mini" type="success" icon="el-icon-picture" circle plain @click="generateFusionImage(scope.row)"></el-button>
+                                        </el-tooltip>
+                                        <el-tooltip content="生成尾帧" placement="top">
+                                            <el-button size="mini" type="success" icon="el-icon-picture-outline" circle plain @click="generateFusionEndFrameImage(scope.row)"></el-button>
+                                        </el-tooltip>
                                         <el-tooltip content="生成视频" placement="top"><el-button size="mini" type="primary" icon="el-icon-video-camera" circle plain @click="generateFusionVideo(scope.row)" :disabled="!scope.row.result_image"></el-button></el-tooltip>
                                         <el-tooltip content="删除" placement="top"><el-button size="mini" type="danger" icon="el-icon-delete" circle plain @click="deleteFusion(scope.row)"></el-button></el-tooltip>
                                         <el-tooltip content="向下插入一行" placement="top"><el-button size="mini" type="primary" icon="el-icon-plus" circle plain @click="insertFusion(scope.$index)"></el-button></el-tooltip> 
@@ -724,7 +742,7 @@
         </el-dialog>
         
         <!-- 融图任务编辑/创建对话框 -->
-        <el-dialog :title="fusionDialogTitle" :visible.sync="fusionDialogVisible" width="60%">
+        <el-dialog :title="fusionDialogTitle" :visible.sync="fusionDialogVisible" width="80%">
             <el-form :model="fusionForm" label-width="100px" size="small">
                 <el-row :gutter="20">
                     <el-col :span="8">
@@ -792,10 +810,6 @@
                     </div>
                 </el-form-item>
                 
-                <el-form-item label="融合提示词" required>
-                    <el-input type="textarea" v-model="fusionForm.fusion_prompt" :rows="6" placeholder="描述你希望图片如何与元素融合以及最终的视觉效果"></el-input>
-                </el-form-item>
-
                 <el-form-item label="元素列表">
                     <div style="margin-bottom: 10px;">
                         <div v-for="element in fusionForm.elements" :key="element.id" style="display: inline-block; margin-right: 8px; margin-bottom: 8px; position: relative;">
@@ -809,13 +823,50 @@
                         <el-button type="text" size="small" icon="el-icon-plus" @click="addElement(fusionForm)">添加新元素</el-button>
                     </div>
                 </el-form-item>
-                
-                <el-form-item label="结果图片">
-                    <div v-if="fusionForm.result_image" style="width: 200px; height: 150px; border-radius: 4px; overflow: hidden; border: 1px solid #eee;">
-                        <el-image :src="fusionForm.result_image" :preview-src-list="[fusionForm.result_image]" fit="cover" style="width: 100%; height: 100%;"></el-image>
-                    </div>
-                    <div v-else style="color: #ccc; font-size: 14px; height: 150px; display: flex; align-items: center;">未生成</div>
-                </el-form-item>
+
+                <el-row :gutter="20">
+                    <el-col :span="12">
+                        <el-form-item label="首帧提示词" required>
+                            <el-input type="textarea" v-model="fusionForm.fusion_prompt" :rows="10" placeholder="描述首帧画面..."></el-input>
+                        </el-form-item>
+                    </el-col>
+                    <el-col :span="12">
+                        <el-form-item label="首帧图片 (Result)">
+                            <div v-if="fusionForm.result_image" style="width: 100%; height: 150px; border-radius: 4px; overflow: hidden; border: 1px solid #eee; position:relative;">
+                                <el-image :src="fusionForm.result_image" :preview-src-list="[fusionForm.result_image]" fit="cover" style="width: 100%; height: 100%;"></el-image>
+                                <i class="el-icon-close" style="position: absolute; top: 5px; right: 5px; color: #fff; background: rgba(0,0,0,0.5); border-radius: 50%; padding: 3px; cursor: pointer;" @click="fusionForm.result_image = ''"></i>
+                            </div>
+                            <div v-else style="color: #ccc; font-size: 12px; height: 150px; display: flex; align-items: center; justify-content: center; border: 1px dashed #ddd; border-radius: 4px;">未生成</div>
+                            
+                            <div style="margin-top: 10px; display: flex; gap: 10px;">
+                                <el-button size="small" type="success" icon="el-icon-picture" :disabled="!fusionForm.base_image || !fusionForm.fusion_prompt" @click="generateFusionImage(fusionForm)">生成首帧</el-button>
+                                <el-button size="small" icon="el-icon-upload2" @click="$refs.startFrameUpload.click()">上传</el-button>
+                                <input type="file" ref="startFrameUpload" style="display: none;" @change="handleStartFrameUpload" accept="image/*">
+                            </div>
+                        </el-form-item>
+                    </el-col>
+                </el-row>
+                <el-row :gutter="20">
+                    <el-col :span="12">
+                        <el-form-item label="尾帧提示词">
+                            <el-input type="textarea" v-model="fusionForm.end_frame_prompt" :rows="10" placeholder="描述尾帧画面（如运镜后的变化）..."></el-input>
+                        </el-form-item>
+                    </el-col>
+                    <el-col :span="12">
+                        <el-form-item label="尾帧图片">
+                            <div v-if="fusionForm.end_frame_image" style="width: 100%; height: 150px; border-radius: 4px; overflow: hidden; border: 1px solid #eee; position:relative;">
+                                <el-image :src="fusionForm.end_frame_image" :preview-src-list="[fusionForm.end_frame_image]" fit="cover" style="width: 100%; height: 100%;"></el-image>
+                                <i class="el-icon-close" style="position: absolute; top: 5px; right: 5px; color: #fff; background: rgba(0,0,0,0.5); border-radius: 50%; padding: 3px; cursor: pointer;" @click="fusionForm.end_frame_image = ''"></i>
+                            </div>
+                            <div v-else style="color: #ccc; font-size: 12px; height: 150px; display: flex; align-items: center; justify-content: center; border: 1px dashed #ddd; border-radius: 4px;">未生成</div>
+                            <div style="margin-top: 10px; display: flex; gap: 10px;">
+                                <el-button size="small" type="success" plain icon="el-icon-picture-outline" :disabled="!fusionForm.base_image || !fusionForm.end_frame_prompt" @click="generateFusionEndFrameImage(fusionForm)">生成尾帧</el-button>
+                                <el-button size="small" icon="el-icon-upload2" @click="$refs.endFrameUpload.click()">上传</el-button>
+                                <input type="file" ref="endFrameUpload" style="display: none;" @change="handleEndFrameUpload" accept="image/*">
+                            </div>
+                        </el-form-item>
+                    </el-col>
+                </el-row>
 
                 <el-form-item label="融合视频">
                     <div v-if="fusionForm.video_url" class="media-generated-box"><video :src="fusionForm.video_url" controls class="video-preview"></video><div style="margin-top: 5px;"><a :href="fusionForm.video_url" target="_blank" download style="font-size: 12px;">下载视频</a></div></div>
@@ -827,7 +878,12 @@
                 <el-button type="warning" icon="el-icon-magic-stick" @click="generateFusionPrompt(fusionForm)">
                     生成提示词
                 </el-button>
-                <el-button type="warning" icon="el-icon-picture" :disabled="!fusionForm.base_image || !fusionForm.fusion_prompt" @click="generateFusionImage(fusionForm)">生成融合图</el-button>
+                <el-button type="success" icon="el-icon-picture" :disabled="!fusionForm.base_image || !fusionForm.fusion_prompt" @click="generateFusionImage(fusionForm)">
+                    生成首帧
+                </el-button>
+                <el-button type="success" plain icon="el-icon-picture-outline" :disabled="!fusionForm.base_image || !fusionForm.end_frame_prompt" @click="generateFusionEndFrameImage(fusionForm)">
+                    生成尾帧
+                </el-button>
                 <el-button type="warning" icon="el-icon-video-camera" :disabled="!fusionForm.result_image" @click="generateFusionVideo(fusionForm)">生成视频</el-button>
                 <el-button type="primary" @click="saveFusion">保 存</el-button>
             </div>
@@ -896,10 +952,18 @@
         <el-dialog title="融图批量生成设置" :visible.sync="fusionBatchDialogVisible" width="400px">
             <el-form label-position="top">
                 <el-form-item label="生成类型">
+                    <el-radio-group v-model="fusionBatchConfig.target" size="small">
+                        <el-radio-button label="prompt">提示词 (首+尾)</el-radio-button>
+                        <el-radio-button label="image">首帧图片</el-radio-button>
+                        <el-radio-button label="end_image">尾帧图片</el-radio-button> 
+                        <el-radio-button label="video">视频</el-radio-button>
+                    </el-radio-group>
+                </el-form-item>
+                <!-- <el-form-item label="生成类型">
                     <el-tag v-if="fusionBatchConfig.target === 'prompt'" type="warning">融图提示词 (Fusion Prompt)</el-tag>
                     <el-tag v-if="fusionBatchConfig.target === 'image'" type="success">融合图片 (Fusion Image)</el-tag>
                     <el-tag v-if="fusionBatchConfig.target === 'video'" type="danger">融图视频 (Fusion Video)</el-tag>
-                </el-form-item>
+                </el-form-item> -->
 
                 <el-form-item label="选择生成范围">
                     <el-radio-group v-model="fusionBatchConfig.scope" style="display: flex; flex-direction: column; gap: 10px;">
@@ -980,6 +1044,8 @@
                     elements: [], // 融合元素列表
                     result_image: '', // 结果图片
                     fusion_prompt: '', // 融合提示词
+                    end_frame_image: '', // 尾帧视频
+                    end_frame_prompt: '', // 尾帧提示词
                     video_url: '' // 融合视频
                 },
                 elementDialogVisible: false,
@@ -1938,6 +2004,8 @@
                         base_image: '', 
                         fusion_prompt: '', 
                         result_image: '', 
+                        end_frame_image: '', // 尾帧图片
+                        end_frame_prompt: '', // 尾帧提示词
                         elements: [],
                         scene_description: '',
                         visual_description: '',
@@ -2425,19 +2493,21 @@
                         }, { signal: this.currentAbortController.signal });
 
                         if (res.success) {
-                            const newPrompt = res.prompt;
+                            const updates = {
+                                fusion_prompt: res.prompt,
+                                end_frame_prompt: res.end_frame_prompt || '' // 获取后端返回的尾帧提示词
+                            };
                             
                             // 更新后端
-                            await this.request('PUT', `/api/projects/${this.currentProjectId}/fusions/${fusion.id}`, {
-                                fusion_prompt: newPrompt
-                            });
+                            await this.request('PUT', `/api/projects/${this.currentProjectId}/fusions/${fusion.id}`, updates);
 
                             // 更新前端
-                            fusion.fusion_prompt = newPrompt;
+                            fusion.fusion_prompt = updates.fusion_prompt;
+                            fusion.end_frame_prompt = updates.end_frame_prompt;
+                            
                             const idx = this.fusionList.findIndex(f => f.id === fusion.id);
                             if(idx !== -1) {
-                                // 使用 $set 确保视图更新
-                                this.$set(this.fusionList, idx, { ...this.fusionList[idx], fusion_prompt: newPrompt });
+                                this.$set(this.fusionList, idx, { ...this.fusionList[idx], ...updates });
                             }
                             
                             this.$message.success('已生成包含图片引用的提示词');
@@ -2452,6 +2522,110 @@
                         }
                     } finally {
                         this.stopGlobalLoading();
+                    }
+                },
+                async generateFusionEndFrameImage(row) {
+                    const target = (row && row.id) ? row : this.fusionForm;
+                    
+                    if (!target.base_image) return this.$message.warning('请先设置底图');
+                    if (!target.end_frame_prompt) return this.$message.warning('请填写尾帧提示词');
+                    
+                    if (!target.id) {
+                        await this.saveFusionData(target);
+                        row = target;
+                    }
+                    
+                    this.startGlobalLoading('正在生成尾帧...', 'AI 正在根据尾帧提示词进行重绘...');
+                    try {
+                        // 复用融图接口，但传入尾帧提示词
+                        const res = await this.request('POST', '/api/generate/fusion_image', {
+                            fusion_id: target.id, 
+                            project_id: this.currentProjectId, 
+                            fusion_prompt: target.end_frame_prompt, // <--- 使用尾帧提示词
+                            provider_id: this.genOptions.fusionProviderId,
+                            model_name: this.genOptions.fusionModelName
+                        });
+                        
+                        if (res.success) {
+                            target.end_frame_image = res.url;
+                            // 保存结果到 end_frame_image 字段
+                            await this.request('PUT', `/api/projects/${this.currentProjectId}/fusions/${target.id}`, { end_frame_image: res.url });
+                            
+                            const idx = this.fusionList.findIndex(f => f.id === target.id);
+                            if(idx !== -1) {
+                                this.$set(this.fusionList, idx, { ...this.fusionList[idx], end_frame_image: res.url });
+                            }
+                            this.$message.success('尾帧生成成功！');
+                        }
+                    } catch (e) {
+                        console.error(e);
+                        this.$message.error('生成失败');
+                    } finally {
+                        this.stopGlobalLoading();
+                    }
+                },
+                async handleStartFrameUpload(e) {
+                    const file = e.target.files[0];
+                    if (!file) return;
+                    
+                    // 1. 准备上传参数
+                    const fd = new FormData(); 
+                    fd.append('file', file);
+                    // 借用通用的图片上传接口，只要返回 url 即可
+                    fd.append('fusion_id', this.fusionForm.id); 
+                    
+                    try {
+                        this.startGlobalLoading('上传中...', '正在上传首帧图片');
+                        const res = await axios.post('/api/upload/base_image', fd);
+                        
+                        if (res.data.success) {
+                            // 2. 更新前端数据
+                            this.fusionForm.result_image = res.data.url;
+                            
+                            // 3. 如果任务已存在，同步更新到后端数据库
+                            if (this.fusionForm.id) {
+                                await this.request('PUT', `/api/projects/${this.currentProjectId}/fusions/${this.fusionForm.id}`, { result_image: res.data.url });
+                                
+                                // 4. 同步更新列表视图
+                                const idx = this.fusionList.findIndex(f => f.id === this.fusionForm.id);
+                                if(idx !== -1) {
+                                    this.$set(this.fusionList, idx, { ...this.fusionList[idx], result_image: res.data.url });
+                                }
+                            }
+                            this.$message.success('首帧上传成功');
+                        }
+                    } catch(e) { 
+                        this.$message.error('上传失败'); 
+                    } finally {
+                        this.stopGlobalLoading();
+                        e.target.value = ''; // 清空 input，允许重复上传同一文件
+                    }
+                },
+                async handleEndFrameUpload(e) {
+                    const file = e.target.files[0];
+                    if (!file) return;
+                    const fd = new FormData(); 
+                    fd.append('file', file);
+                    // 复用 base_image 的上传接口或者 fusion_id 关联接口，这里借用 base_image 接口上传到 fusion 实体下
+                    // 更好的方式是后端有一个通用的 upload 接口，或者复用 base_image 接口但前端只取 url
+                    // 因为 MediaManager 主要是根据 id 存文件，复用接口没问题，只要把返回的 url 存对字段就行
+                    fd.append('fusion_id', this.fusionForm.id); 
+                    
+                    try {
+                        this.startGlobalLoading('上传中...', '正在上传图片');
+                        const res = await axios.post('/api/upload/base_image', fd); // 复用接口
+                        if (res.data.success) {
+                            this.fusionForm.end_frame_image = res.data.url;
+                            if (this.fusionForm.id) {
+                                await this.request('PUT', `/api/projects/${this.currentProjectId}/fusions/${this.fusionForm.id}`, { end_frame_image: res.data.url });
+                            }
+                            this.$message.success('上传成功');
+                        }
+                    } catch(e) { 
+                        this.$message.error('上传失败'); 
+                    } finally {
+                        this.stopGlobalLoading();
+                        e.target.value = '';
                     }
                 },
                 async batchGenerateFusionPrompts(tasks) {
@@ -2563,59 +2737,59 @@
                     });
                 },
                 // 批量生成融合图
-                async batchGenerateFusionImages(tasks) {
-                    
-                    // 检查是否有未生成提示词的任务
-                    const tasksWithoutPrompt = tasks.filter(f => !f.fusion_prompt || f.fusion_prompt.trim() === '');
-                    if (tasksWithoutPrompt.length > 0) {
-                        this.$message.warning(`以下任务尚未生成提示词，请先生成提示词：${tasksWithoutPrompt.map(f => f.shot_number || '未知').join(', ')}`);
-                        return;
-                    }
+                async batchGenerateFusionImages(tasks, type = 'start') {
+                    const promptField = type === 'end' ? 'end_frame_prompt' : 'fusion_prompt';
+                        const imageField = type === 'end' ? 'end_frame_image' : 'result_image';
+                        const actionName = type === 'end' ? '尾帧' : '首帧';
 
-                    this.startGlobalLoading('正在批量生成融合图...', `共 ${tasks.length}  个任务，请勿关闭页面`);
-
-                    const total = tasks.length;
-                    let successCount = 0;
-                    let failCount = 0;
-
-                    // 遍历选中的任务，逐个生成融合图
-                    for (let i = 0; i < total; i++) {
-                        const fusion = tasks[i];
-                        this.loadingTitle = `正在处理第 ${i + 1}/${total} 个融合图...`;
-
-                        try {
-                            if (this.currentAbortController.signal.aborted) break;
-                            // 调用融合图生成API
-                            const res = await this.request('POST', '/api/generate/fusion_image', {
-                                fusion_id: fusion.id,
-                                project_id: this.currentProjectId,
-                                fusion_prompt: fusion.fusion_prompt,
-                                provider_id: this.genOptions.fusionProviderId,
-                                model_name: this.genOptions.fusionModelName
-                            });
-
-                            if (res.success) {
-                                fusion.result_image = res.url;
-
-                                // 保存更新
-                                await this.request('PUT', `/api/projects/${this.currentProjectId}/fusions/${fusion.id}`, { result_image: res.url });
-
-                                successCount++;
-                            }  else {
-                                throw new Error(res.error || '生成失败');
-                            }
-
-                        } catch (e) {
-                            console.error('批量生成融合图失败:', e);
-                            failCount++;
+                        // 检查提示词
+                        const tasksWithoutPrompt = tasks.filter(f => !f[promptField] || f[promptField].trim() === '');
+                        if (tasksWithoutPrompt.length > 0) {
+                            this.$message.warning(`部分任务缺少${actionName}提示词，无法生成`);
+                            return;
                         }
-                    }
 
-                    this.stopGlobalLoading();
-                    this.$message({ 
-                        type: failCount === 0 ? 'success' : 'warning', 
-                        message: `批量任务完成！成功: ${successCount}, 失败: ${failCount}` 
-                    });
+                        this.startGlobalLoading(`批量生成${actionName}...`, `共 ${tasks.length} 个任务`);
+                        let successCount = 0;
+                        let failCount = 0;
+
+                        for (let i = 0; i < tasks.length; i++) {
+                            const fusion = tasks[i];
+                            this.loadingTitle = `正在生成第 ${i + 1}/${tasks.length} 个${actionName}...`;
+
+                            try {
+                                if (this.currentAbortController.signal.aborted) break;
+
+                                const res = await this.request('POST', '/api/generate/fusion_image', {
+                                    fusion_id: fusion.id,
+                                    project_id: this.currentProjectId,
+                                    fusion_prompt: fusion[promptField], // 动态取提示词
+                                    provider_id: this.genOptions.fusionProviderId,
+                                    model_name: this.genOptions.fusionModelName
+                                });
+
+                                if (res.success) {
+                                    fusion[imageField] = res.url; // 动态更新前端字段
+                                    
+                                    // 动态构建更新对象
+                                    const updatePayload = {};
+                                    updatePayload[imageField] = res.url;
+                                    
+                                    await this.request('PUT', `/api/projects/${this.currentProjectId}/fusions/${fusion.id}`, updatePayload);
+                                    successCount++;
+                                } else {
+                                    throw new Error(res.error);
+                                }
+                            } catch (e) {
+                                console.error(e);
+                                failCount++;
+                            }
+                        }
+                        this.stopGlobalLoading();
+                        this.$message({ 
+                            type: failCount === 0 ? 'success' : 'warning', 
+                            message: `批量${actionName}完成！成功: ${successCount}, 失败: ${failCount}` 
+                        });
                 },
 
                 // 提交元素
@@ -2694,6 +2868,11 @@
                     const { target, scope } = this.fusionBatchConfig;
                     
                     // 检查模型选择
+                    if (target === 'end_image') {
+                        if (!this.genOptions.fusionProviderId || !this.genOptions.fusionModelName) {
+                            return this.$message.warning('请先在顶部选择图生图模型');
+                        }
+                    }
                     if (target === 'prompt') {
                         if (!this.genOptions.textProviderId || !this.genOptions.textModelName) {
                             return this.$message.warning('请先在顶部选择文本生成模型');
@@ -2726,6 +2905,13 @@
                         }
                     }
 
+                    if (scope === 'missing') {
+                        if (target === 'prompt') tasks = this.fusionList.filter(f => !f.fusion_prompt);
+                        else if (target === 'image') tasks = this.fusionList.filter(f => !f.result_image);
+                        else if (target === 'end_image') tasks = this.fusionList.filter(f => !f.end_frame_image); // 新增
+                        else if (target === 'video') tasks = this.fusionList.filter(f => !f.video_url);
+                    }
+
                     if (tasks.length === 0) {
                         this.$message.info("没有符合条件及范围的任务需要生成");
                         return;
@@ -2740,7 +2926,9 @@
                     if (target === 'prompt') {
                         this.batchGenerateFusionPrompts(tasks);
                     } else if (target === 'image') {
-                        this.batchGenerateFusionImages(tasks);
+                        this.batchGenerateFusionImages(tasks, 'start'); // 稍微修改一下这个函数接受类型
+                    } else if (target === 'end_image') {
+                        this.batchGenerateFusionImages(tasks, 'end'); // 调用同一函数但传入类型
                     } else if (target === 'video') {
                         // [新增] 调用批量视频生成
                         this.batchGenerateFusionVideos(tasks);

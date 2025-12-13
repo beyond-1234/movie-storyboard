@@ -455,7 +455,7 @@ class ViduHandler:
         }
         
         try:
-            url = f"{config.get('base_url', 'https://api.vidu.com').rstrip('/')}/ent/v2/start-end2video"
+            url = f"{base_url.rstrip('/')}/ent/v2/start-end2video"
             resp = requests.post(url, json=payload, headers=ViduHandler._get_headers(config), timeout=60)
             
             if resp.status_code in [200, 201]:
