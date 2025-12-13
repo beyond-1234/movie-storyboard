@@ -611,6 +611,60 @@ def get_project_history(project_id):
     print(history_list)
     return jsonify(history_list)
 
+@app.route('/api/generate/analyze_image', methods=['POST'])
+def analyze_uploaded_image():
+    # 1. 检查文件
+    if 'file' not in request.files:
+        return jsonify({'success': False, 'error': 'No file uploaded'}), 400
+    
+    file = request.files['file']
+    if file.filename == '':
+        return jsonify({'success': False, 'error': 'No file selected'}), 400
+
+    # 2. 保存文件
+    temp_id = f"analysis_{uuid.uuid4().hex[:8]}"
+    url, err = media_mgr.save_uploaded_file(file, media_type='image', entity_id=temp_id)
+    if err: return jsonify({'success': False, 'error': err}), 500
+    
+    image_abs_path = media_mgr.get_absolute_path(url)
+
+    VISUAL_STYLE_PROMPT = """
+    请作为一个专业的电影美术指导与摄影指导分析这张图片。
+    请忽略图片中的具体剧情内容，重点提取画面的【视觉风格要素】，以便我将其作为Prompt输入给AI绘画工具来复制这种风格。
+
+    请严格按照以下维度进行提取和描述：
+    1. **艺术风格/流派** (Art Style): 如赛博朋克、吉卜力风格、诺兰电影感、80年代复古胶片等。
+    2. **光影与氛围** (Lighting & Atmosphere): 如伦勃朗光、霓虹漫射、体积光(丁达尔效应)、高对比度黑白等。
+    3. **色彩体系** (Color Palette): 如青橙色调、低饱和度莫兰迪色、高饱和度波普色等。
+    4. **材质与渲染质感** (Texture & Rendering): 如胶片颗粒感、8K超高清、虚幻引擎5渲染等。
+
+    最后，请将上述分析汇总为一段连贯的、高质量的中文Prompt描述（不需要分点，直接输出一段描述文本）。
+    """
+
+    # 3. 获取配置
+    config = None
+    settings = db.get_settings()
+    for p in settings.get('providers', []):
+        if p.get('type') == 'aliyun' and p.get('enabled', True):
+            config = p
+            break
+    
+    if not config:
+        return jsonify({'success': False, 'error': 'No Aliyun provider configuration found.'}), 400
+    
+    # 4. 调用 AI Service (传入 image_path, PROMPT, config)
+    result = ai_service.run_visual_analysis(image_abs_path, VISUAL_STYLE_PROMPT, config, media_mgr)
+    
+    # 5. 返回结果
+    if result.get('success'):
+        return jsonify({
+            'success': True, 
+            'style_description': result['content'],
+            'image_url': url
+        })
+    else:
+        return jsonify(result), 500
+
 if __name__ == '__main__':
     print(f"Server started on http://127.0.0.1:5000")
     app.run(debug=True, port=5000)

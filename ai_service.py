@@ -261,7 +261,70 @@ class AliyunHandler:
         except Exception as e:
             logger.exception("[Aliyun] Fusion generation failed")
             return {'success': False, 'error_msg': str(e)}
+        
+    @staticmethod
+    def run_visual_analysis(image_path, prompt, config, media_manager):
+        """
+        通用视觉分析接口。
+        
+        Args:
+            image_path (str): 本地图片绝对路径
+            prompt (str):  由 Controller 传入的具体指令/提示词
+            config (dict): API 配置信息
+            
+        Returns:
+            dict: API 响应结果
+        """
+        if not DASHSCOPE_AVAILABLE:
+            return {'success': False, 'error_msg': "DashScope SDK not installed"}
 
+        api_key = config.get('api_key') or os.getenv("DASHSCOPE_API_KEY")
+        # 默认模型 qwen-vl-max
+        model = "qwen-vl-max"
+        
+        logger.info(f"[Visual Analysis] Processing image: {image_path}")
+        
+        base_b64 = media_manager.file_to_base64(image_path)
+
+        # 2. 构建消息体 (将 Controller 传进来的 prompt 填入 text 字段)
+        messages = [
+            {
+                "role": "user",
+                "content": [
+                    {"image": base_b64}, 
+                    {"text": prompt},  # <--- 这里直接使用传入的参数
+                ],
+            },
+        ]
+
+        try:
+            # 调用 DashScope
+            rsp = MultiModalConversation.call(
+                api_key=api_key,
+                model=model,
+                messages=messages,
+            )
+            
+            if rsp.status_code == HTTPStatus.OK:
+                # 解析逻辑保留在 Service 层
+                content_list = rsp.output.choices[0].message.content
+                final_text = ""
+                if isinstance(content_list, list):
+                    for item in content_list:
+                        if 'text' in item:
+                            final_text += item['text']
+                else:
+                    final_text = str(content_list)
+                    
+                return {'success': True, 'content': final_text}
+            
+            logger.error(f"[Visual Analysis] Failed: {rsp.message}")
+            return {'success': False, 'error_msg': getattr(rsp, 'message', 'Unknown Error')}
+
+        except Exception as e:
+            logger.exception("[Visual Analysis] Exception")
+            return {'success': False, 'error_msg': str(e)}
+    
 class OpenAICompatibleHandler:
     @staticmethod
     def _get_headers(config):
@@ -1367,3 +1430,28 @@ def run_fusion_generation(base_image_path, fusion_prompt, config, media_manager,
     logger.info(f"[Main] Run Fusion Gen. Provider: {config.get('type')}, EntityID: {entity_id}")
     handler = get_handler(config.get('type', 'mock'))
     return handler.fuse_image(fusion_prompt, media_manager, config, base_image_path, ref_image_path_list=element_image_paths, entity_id=entity_id)
+
+def run_visual_analysis(base_image_path, prompt, config, media_manager):
+    """
+    视觉理解/图片分析逻辑入口 (Visual Analysis Entry Point)
+
+    此方法调用具体的 AI Handler（目前主要支持阿里云 Qwen-VL）对上传的图片进行视觉内容分析。
+    它接收 Controller 层传入的具体 Prompt（如风格分析、情绪分析等），并返回分析结果文本。
+
+    Args:
+        base_image_path (str): 待分析图片的本地文件路径。
+        prompt (str): 指导 AI 进行分析的具体指令/提示词（由 Controller 注入，决定分析方向）。
+        config (Dict[str, Any]): AI 服务配置字典，包含以下关键信息：
+            - 'type' (str): 服务提供商类型（目前通常为 'aliyun'）。
+            - 'api_key' (str): API 密钥。
+            - 'model_name' (str, optional): 使用的多模态模型名称（如 'qwen-vl-max'）。
+        media_manager (MediaManager): 媒体资源管理器，用于处理文件路径转换或 Base64 编码。
+
+    Returns:
+        Dict[str, Any]: 包含分析结果的字典：
+            - 'success' (bool): 操作是否成功。
+            - 'content' (str, optional): AI 返回的分析文本内容。
+            - 'error_msg' (str, optional): 错误信息（如果 'success' 为 False）。
+    """
+    logger.info(f"[Main] Run visual analysis. Provider: Aliyun")
+    return AliyunHandler.run_visual_analysis(base_image_path, prompt, config, media_manager)

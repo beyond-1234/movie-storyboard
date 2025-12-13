@@ -78,6 +78,7 @@
                             <p style="margin: 5px 0 0; color: #666;">{{ currentSeries.description }}</p>
                         </div>
                         <div>
+                            <el-button type="primary" icon="el-icon-view" style="font-size: 16px;" @click="openVisualAnalysis">风格分析</el-button>
                             <el-button type="primary" icon="el-icon-plus" @click="openCreateEpisode">新建分集</el-button>
                         </div>
                     </div>
@@ -113,6 +114,41 @@
             </div>
         </div>
 
+        <el-dialog title="视觉风格分析 (Visual Analysis)" :visible.sync="visualAnalysisVisible" width="600px" append-to-body>
+            <div style="text-align: center; margin-bottom: 20px;">
+                <div class="upload-area" style="border: 2px dashed #dcdfe6; border-radius: 6px; padding: 20px; cursor: pointer; position: relative; transition: .3s;" 
+                    @click="$refs.analysisUploadInput.click()" 
+                    @drop.prevent="handleAnalysisDrop" 
+                    @dragover.prevent>
+                    
+                    <div v-if="!visualAnalysisImage">
+                        <i class="el-icon-upload" style="font-size: 48px; color: #c0c4cc;"></i>
+                        <div class="el-upload__text" style="margin-top: 10px;">将参考图拖到此处，或<em>点击上传</em></div>
+                    </div>
+                    
+                    <div v-else style="position: relative; height: 300px;">
+                        <img :src="visualAnalysisImage" style="max-width: 100%; max-height: 100%; border-radius: 4px; object-fit: contain;">
+                        <div style="position: absolute; bottom: 0; left: 0; right: 0; background: rgba(0,0,0,0.6); color: #fff; padding: 5px;">点击更换图片</div>
+                    </div>
+                    
+                    <input type="file" ref="analysisUploadInput" style="display: none;" @change="handleAnalysisFileChange" accept="image/*">
+                </div>
+            </div>
+
+            <div v-if="visualAnalysisResult" style="background: #f4f4f5; padding: 15px; border-radius: 4px; border: 1px solid #e9e9eb;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                    <span style="font-weight: bold; color: #606266;"><i class="el-icon-magic-stick"></i> 风格分析结果：</span>
+                    <el-button type="text" size="mini" icon="el-icon-document-copy" @click="copyAnalysisResult">复制内容</el-button>
+                </div>
+                <el-input type="textarea" :rows="6" v-model="visualAnalysisResult" resize="none"></el-input>
+            </div>
+
+            <span slot="footer" class="dialog-footer">
+                <el-button @click="visualAnalysisVisible = false">关 闭</el-button>
+                <el-button type="primary" icon="el-icon-cpu" :loading="analyzingVisual" @click="startVisualAnalysis" :disabled="!visualAnalysisFile">开始分析</el-button>
+            </span>
+        </el-dialog>
+
         <el-dialog :title="seriesForm.id ? '编辑剧集' : '新建剧集'" :visible.sync="seriesDialogVisible" width="80%">
             <el-form :model="seriesForm" label-width="100px">
                 <el-form-item label="剧集名称" required>
@@ -134,7 +170,7 @@
                     <el-input type="textarea" v-model="seriesForm.basic_info" rows="3" placeholder="世界观、时代背景、通用人物小传等"></el-input>
                 </el-form-item>
                 <el-form-item label="色彩体系">
-                    <el-input v-model="seriesForm.visual_color_system" placeholder="例如：黑金冷色调"></el-input>
+                    <el-input type="textarea" rows="5" v-model="seriesForm.visual_color_system" placeholder="例如：黑金冷色调"></el-input>
                 </el-form-item>
                 <el-form-item label="视觉设定">
                     <el-input type="textarea" v-model="seriesForm.visual_consistency_prompt" rows="8" placeholder="固定角色的视觉描述 Prompt..."></el-input>
@@ -165,7 +201,7 @@
                 </el-form-item>
                 
                 <el-form-item label="色彩体系">
-                    <el-input v-model="episodeForm.visual_color_system"></el-input>
+                    <el-input type="textarea" rows="5" v-model="episodeForm.visual_color_system"></el-input>
                 </el-form-item>
                 <el-form-item label="视觉设定">
                     <el-input type="textarea" v-model="episodeForm.visual_consistency_prompt" rows="8"></el-input>
@@ -195,7 +231,12 @@
                 seriesForm: { name: '', description: '' },
                 
                 episodeDialogVisible: false,
-                episodeForm: { film_name: '', script_core_conflict: '', basic_info: '' }
+                episodeForm: { film_name: '', script_core_conflict: '', basic_info: '' },
+                visualAnalysisVisible: false,
+                visualAnalysisImage: '',
+                visualAnalysisFile: null,
+                visualAnalysisResult: '',
+                analyzingVisual: false,
             },
             mounted() {
                 this.fetchSeries();
@@ -303,7 +344,72 @@
                 enterStudio(ep) {
                     // 跳转到 index.html 并带上 project_id 参数
                     window.location.href = `/project?project_id=${ep.id}&series_id=${ep.series_id}`;
-                }
+                },
+                // === 风格分析逻辑 ===
+                openVisualAnalysis() {
+                    this.visualAnalysisVisible = true;
+                    this.visualAnalysisImage = '';
+                    this.visualAnalysisFile = null;
+                    this.visualAnalysisResult = '';
+                },
+
+                handleAnalysisFileChange(e) {
+                    const file = e.target.files[0];
+                    this.processAnalysisFile(file);
+                    e.target.value = '';
+                },
+
+                handleAnalysisDrop(e) {
+                    const file = e.dataTransfer.files[0];
+                    this.processAnalysisFile(file);
+                },
+
+                processAnalysisFile(file) {
+                    if (!file) return;
+                    if (file.type.indexOf('image/') !== 0) {
+                        this.$message.error('请上传图片文件');
+                        return;
+                    }
+                    this.visualAnalysisFile = file;
+                    this.visualAnalysisImage = URL.createObjectURL(file);
+                    this.visualAnalysisResult = '';
+                },
+
+                async startVisualAnalysis() {
+                    if (!this.visualAnalysisFile) return;
+
+                    const formData = new FormData();
+                    formData.append('file', this.visualAnalysisFile);
+
+                    this.analyzingVisual = true;
+                    
+                    try {
+                        const res = await axios.post('/api/generate/analyze_image', formData, {
+                            headers: { 'Content-Type': 'multipart/form-data' }
+                        });
+
+                        if (res.data.success) {
+                            this.visualAnalysisResult = res.data.style_description;
+                            this.$message.success('分析完成！');
+                        } else {
+                            this.$message.error(res.data.error || '分析失败');
+                        }
+                    } catch (e) {
+                        console.error(e);
+                        this.$message.error('分析请求失败: ' + (e.response?.data?.error || e.message));
+                    } finally {
+                        this.analyzingVisual = false;
+                    }
+                },
+
+                copyAnalysisResult() {
+                    if (!this.visualAnalysisResult) return;
+                    navigator.clipboard.writeText(this.visualAnalysisResult).then(() => {
+                        this.$message.success('已复制到剪贴板');
+                    }).catch(() => {
+                        this.$message.error('复制失败');
+                    });
+                },
             }
         });
     </script>

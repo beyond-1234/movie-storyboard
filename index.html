@@ -329,6 +329,7 @@
                             <el-button type="text" icon="el-icon-edit" @click="openEditProject">编辑详情</el-button>
                             <el-button type="text" icon="el-icon-delete" style="color: #f56c6c;" @click="deleteProject">删除项目</el-button>
                             <el-button type="text" icon="el-icon-time" @click="openGlobalHistory">历史回溯</el-button>
+                            <el-button type="text" icon="el-icon-view" style="color: #67C23A;" @click="openVisualAnalysis">风格分析</el-button>
                         </div>
                     </div>
                     <el-descriptions :column="4" border size="small">
@@ -344,42 +345,6 @@
 
                 <div v-if="currentProject" style="background: #fff; border-radius: 4px; padding: 20px; box-shadow: 0 2px 12px 0 rgba(0,0,0,0.1);">
                     <el-tabs v-model="activeTab" @tab-click="handleTabClick">
-                        <!-- Script Tab (Enhanced with Text Model Config) -->
-                        <el-tab-pane label="剧本创作" name="script">
-                            <div style="margin-bottom: 15px; display: flex; justify-content: space-between; align-items: center; background: #f5f7fa; padding: 10px; border-radius: 4px;">
-                                <div style="display:flex; align-items:center; gap: 15px;">
-                                    <div><el-checkbox v-model="allScriptsSelected" @change="toggleAllScripts">全选</el-checkbox><span style="margin-left: 10px; color: #666; font-size: 13px;">已选 {{ selectedScriptCount }} 项</span></div>
-                                    <div style="border-left:1px solid #ddd; padding-left:15px; display:flex; align-items:center; gap:10px;">
-                                        <span style="font-size:13px; color:#606266; font-weight:bold;">AI 模型:</span>
-                                        <el-select v-model="genOptions.textProviderId" size="mini" placeholder="供应商" style="width: 120px;" @change="updateTextModelDefault">
-                                            <el-option v-for="p in providers" :key="p.id" :label="p.name" :value="p.id"></el-option>
-                                        </el-select>
-                                        <el-select v-model="genOptions.textModelName" size="mini" placeholder="模型" style="width: 150px;">
-                                            <el-option v-for="m in availableTextModels" :key="m.name" :label="m.name" :value="m.name"></el-option>
-                                        </el-select>
-                                        <span>建议选参数量大的模型，比如qwen3-max</span>
-                                    </div>
-                                </div>
-                                <div><el-button type="danger" size="small" icon="el-icon-delete" plain :disabled="selectedScriptCount === 0" @click="deleteSelectedScripts">批量删除</el-button><el-button type="danger" size="small" icon="el-icon-delete-solid" @click="deleteAllScripts">清空全部</el-button></div>
-                            </div>
-
-                            <div ref="scriptListRef" class="script-list-container">
-                                <div v-for="(section, index) in scriptSections" :key="index" class="script-section-block">
-                                    <div class="script-checkbox"><el-checkbox v-model="section._checked"></el-checkbox></div>
-                                    <div class="script-content-wrapper">
-                                        <div class="script-index">#{{ index + 1 }}</div>
-                                        <el-input type="textarea" :autosize="{ minRows: 3, maxRows: 10}" placeholder="请输入剧本内容..." v-model="section.content" @change="saveScript"></el-input>
-                                        <div class="script-toolbar">
-                                            <i class="el-icon-rank" style="cursor: move; margin-right: 10px; margin-top: 5px;" title="拖拽排序"></i>
-                                            <el-button size="mini" type="success" icon="el-icon-magic-stick" plain @click="generateScriptContinuation(index)">AI 续写</el-button>
-                                            <el-button size="mini" type="primary" icon="el-icon-video-camera" plain @click="convertScriptToShot(section, index)">一键转分镜</el-button>
-                                            <el-button size="mini" type="danger" icon="el-icon-delete" plain @click="removeScriptSection(index)">删除</el-button>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-                            <div style="margin-top: 20px;"><el-button type="primary" icon="el-icon-plus" style="width: 100%" @click="addScriptSection">添加新段落</el-button></div>
-                        </el-tab-pane>
 
                         <el-tab-pane label="角色设定" name="characters">
                             <!-- 角色生成配置 -->
@@ -464,6 +429,43 @@
                                     </el-card>
                                 </el-col>
                             </el-row>
+                        </el-tab-pane>
+
+                        <!-- Script Tab (Enhanced with Text Model Config) -->
+                        <el-tab-pane label="剧本创作" name="script">
+                            <div style="margin-bottom: 15px; display: flex; justify-content: space-between; align-items: center; background: #f5f7fa; padding: 10px; border-radius: 4px;">
+                                <div style="display:flex; align-items:center; gap: 15px;">
+                                    <div><el-checkbox v-model="allScriptsSelected" @change="toggleAllScripts">全选</el-checkbox><span style="margin-left: 10px; color: #666; font-size: 13px;">已选 {{ selectedScriptCount }} 项</span></div>
+                                    <div style="border-left:1px solid #ddd; padding-left:15px; display:flex; align-items:center; gap:10px;">
+                                        <span style="font-size:13px; color:#606266; font-weight:bold;">AI 模型:</span>
+                                        <el-select v-model="genOptions.textProviderId" size="mini" placeholder="供应商" style="width: 120px;" @change="updateTextModelDefault">
+                                            <el-option v-for="p in providers" :key="p.id" :label="p.name" :value="p.id"></el-option>
+                                        </el-select>
+                                        <el-select v-model="genOptions.textModelName" size="mini" placeholder="模型" style="width: 150px;">
+                                            <el-option v-for="m in availableTextModels" :key="m.name" :label="m.name" :value="m.name"></el-option>
+                                        </el-select>
+                                        <span>建议选参数量大的模型，比如qwen3-max</span>
+                                    </div>
+                                </div>
+                                <div><el-button type="danger" size="small" icon="el-icon-delete" plain :disabled="selectedScriptCount === 0" @click="deleteSelectedScripts">批量删除</el-button><el-button type="danger" size="small" icon="el-icon-delete-solid" @click="deleteAllScripts">清空全部</el-button></div>
+                            </div>
+
+                            <div ref="scriptListRef" class="script-list-container">
+                                <div v-for="(section, index) in scriptSections" :key="index" class="script-section-block">
+                                    <div class="script-checkbox"><el-checkbox v-model="section._checked"></el-checkbox></div>
+                                    <div class="script-content-wrapper">
+                                        <div class="script-index">#{{ index + 1 }}</div>
+                                        <el-input type="textarea" :autosize="{ minRows: 3, maxRows: 10}" placeholder="请输入剧本内容..." v-model="section.content" @change="saveScript"></el-input>
+                                        <div class="script-toolbar">
+                                            <i class="el-icon-rank" style="cursor: move; margin-right: 10px; margin-top: 5px;" title="拖拽排序"></i>
+                                            <el-button size="mini" type="success" icon="el-icon-magic-stick" plain @click="generateScriptContinuation(index)">AI 续写</el-button>
+                                            <el-button size="mini" type="primary" icon="el-icon-video-camera" plain @click="convertScriptToShot(section, index)">一键转分镜</el-button>
+                                            <el-button size="mini" type="danger" icon="el-icon-delete" plain @click="removeScriptSection(index)">删除</el-button>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            <div style="margin-top: 20px;"><el-button type="primary" icon="el-icon-plus" style="width: 100%" @click="addScriptSection">添加新段落</el-button></div>
                         </el-tab-pane>
 
                         <!-- Scene Tab -->
@@ -697,6 +699,41 @@
             </el-main>
         </el-container>
 
+        <el-dialog title="视觉风格分析 (Visual Analysis)" :visible.sync="visualAnalysisVisible" width="600px" append-to-body>
+            <div style="text-align: center; margin-bottom: 20px;">
+                <div class="upload-area" style="border: 2px dashed #dcdfe6; border-radius: 6px; padding: 20px; cursor: pointer; position: relative; transition: .3s;" 
+                    @click="$refs.analysisUploadInput.click()" 
+                    @drop.prevent="handleAnalysisDrop" 
+                    @dragover.prevent>
+                    
+                    <div v-if="!visualAnalysisImage">
+                        <i class="el-icon-upload" style="font-size: 48px; color: #c0c4cc;"></i>
+                        <div class="el-upload__text" style="margin-top: 10px;">将参考图拖到此处，或<em>点击上传</em></div>
+                    </div>
+                    
+                    <div v-else style="position: relative; height: 300px;">
+                        <img :src="visualAnalysisImage" style="max-width: 100%; max-height: 100%; border-radius: 4px; object-fit: contain;">
+                        <div style="position: absolute; bottom: 0; left: 0; right: 0; background: rgba(0,0,0,0.6); color: #fff; padding: 5px;">点击更换图片</div>
+                    </div>
+                    
+                    <input type="file" ref="analysisUploadInput" style="display: none;" @change="handleAnalysisFileChange" accept="image/*">
+                </div>
+            </div>
+
+            <div v-if="visualAnalysisResult" style="background: #f4f4f5; padding: 15px; border-radius: 4px; border: 1px solid #e9e9eb;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                    <span style="font-weight: bold; color: #606266;"><i class="el-icon-magic-stick"></i> 风格分析结果：</span>
+                    <el-button type="text" size="mini" icon="el-icon-document-copy" @click="copyAnalysisResult">复制内容</el-button>
+                </div>
+                <el-input type="textarea" :rows="6" v-model="visualAnalysisResult" resize="none"></el-input>
+            </div>
+
+            <span slot="footer" class="dialog-footer">
+                <el-button @click="visualAnalysisVisible = false">关 闭</el-button>
+                <el-button type="primary" icon="el-icon-cpu" :loading="analyzingVisual" @click="startVisualAnalysis" :disabled="!visualAnalysisFile">开始分析</el-button>
+            </span>
+        </el-dialog>
+
         <el-dialog :visible.sync="videoPlayerVisible" width="60%" title="视频预览">
             <div style="text-align: center;"><video v-if="playerVideoUrl" :src="playerVideoUrl" controls autoplay style="width: 100%; max-height: 500px;"></video></div>
         </el-dialog>
@@ -713,7 +750,7 @@
                     </el-tab-pane>
                     <el-tab-pane label="视觉风格" name="visual">
                         <el-form-item label="人物设定" prop="visual_consistency_prompt"><el-input type="textarea" v-model="projectForm.visual_consistency_prompt" :rows="4" placeholder="例：男主角张三，35岁..."></el-input></el-form-item>
-                        <el-form-item label="色彩体系"><el-input v-model="projectForm.visual_color_system"></el-input></el-form-item>
+                        <el-form-item label="色彩体系"><el-input type="textarea" rows="5" v-model="projectForm.visual_color_system"></el-input></el-form-item>
                     </el-tab-pane>
                 </el-tabs>
             </el-form>
@@ -907,7 +944,7 @@
                     </el-col>
                 </el-row>
                 
-                <el-form-item label="基础图片 (底图)" required>
+                <el-form-item label="场景底图" required>
                     <div style="display: flex; align-items: center; gap: 15px;">
                         <div v-if="fusionForm.base_image" style="position: relative; width: 150px; height: 100px; border-radius: 4px; overflow: hidden; border: 1px solid #eee;">
                             <el-image :src="fusionForm.base_image" :preview-src-list="[fusionForm.base_image]" fit="cover" style="width: 100%; height: 100%;"></el-image>
@@ -939,7 +976,7 @@
                         </el-form-item>
                     </el-col>
                     <el-col :span="12">
-                        <el-form-item label="首帧图片 (Result)">
+                        <el-form-item label="首帧图片">
                             <div v-if="fusionForm.result_image" style="width: 100%; height: 150px; border-radius: 4px; overflow: hidden; border: 1px solid #eee; position:relative;">
                                 <el-image :src="fusionForm.result_image" :preview-src-list="[fusionForm.result_image]" fit="cover" style="width: 100%; height: 100%;"></el-image>
                                 <i class="el-icon-close" style="position: absolute; top: 5px; right: 5px; color: #fff; background: rgba(0,0,0,0.5); border-radius: 50%; padding: 3px; cursor: pointer;" @click="fusionForm.result_image = ''"></i>
@@ -1106,7 +1143,7 @@
             el: '#app',
             data: {
                 projectList: [], currentProjectId: '', currentProject: null, shotList: [], loadingShots: false,
-                activeTab: 'script', scriptSections: [],
+                activeTab: 'characters', scriptSections: [],
                 allScriptsSelected: false, multipleSceneSelection: [],
                 globalLoading: false, loadingTitle: '', loadingSubText: '', currentAbortController: null, 
                 settingsVisible: false, providers: [], editingProvider: null, 
@@ -1177,6 +1214,11 @@
                 loadingHistory: false,
                 historyFilterType: 'all',
                 historySearch: '',
+                visualAnalysisVisible: false,
+                visualAnalysisImage: '', // 用于预览的URL
+                visualAnalysisFile: null, // 实际的文件对象
+                visualAnalysisResult: '', // 分析结果文本
+                analyzingVisual: false,   // Loading状态
             },
             computed: {
                 getModelsByProviderId() {
@@ -1514,15 +1556,15 @@
                         this.handleProjectChange(list[0].id); 
                     } 
                 },
-                async handleProjectChange(pid) { this.currentProject = this.projectList.find(p => p.id === pid); this.activeTab='script'; this.fetchScript(); this.fetchCharacters(); this.fetchFusions(); },
+                async handleProjectChange(pid) { this.currentProject = this.projectList.find(p => p.id === pid); this.activeTab='characters'; this.fetchScript(); this.fetchCharacters(); this.fetchFusions(); },
                 openCreateProject() { 
                     this.projectForm = { 
                         film_name: '',
-                        script_core_conflict: '',
-                        script_emotional_keywords: '',
-                        basic_info: '',
-                        visual_color_system: '',
-                        visual_consistency_prompt: '',
+                        script_core_conflict: this.currentProject.script_core_conflict || '',
+                        script_emotional_keywords: this.currentProject.script_emotional_keywords || '',
+                        basic_info: this.currentProject.basic_info || '',
+                        visual_color_system: this.currentProject.visual_color_system || '',
+                        visual_consistency_prompt: this.currentProject.visual_consistency_prompt || '',
                         series_id: this.currentSeriesId
                     }; 
                     this.projectDialogVisible = true; 
@@ -3349,6 +3391,76 @@
                             this.$message.error("恢复失败");
                         }
                     }
+                },
+                openVisualAnalysis() {
+                    this.visualAnalysisVisible = true;
+                    this.visualAnalysisImage = '';
+                    this.visualAnalysisFile = null;
+                    this.visualAnalysisResult = '';
+                },
+
+                // 2. 处理文件选择
+                handleAnalysisFileChange(e) {
+                    const file = e.target.files[0];
+                    this.processAnalysisFile(file);
+                    e.target.value = ''; // 重置 input 允许重复选同一文件
+                },
+
+                // 3. 处理拖拽上传
+                handleAnalysisDrop(e) {
+                    const file = e.dataTransfer.files[0];
+                    this.processAnalysisFile(file);
+                },
+
+                // 4. 文件处理通用逻辑
+                processAnalysisFile(file) {
+                    if (!file) return;
+                    if (file.type.indexOf('image/') !== 0) {
+                        this.$message.error('请上传图片文件');
+                        return;
+                    }
+                    this.visualAnalysisFile = file;
+                    // 创建本地预览 URL
+                    this.visualAnalysisImage = URL.createObjectURL(file);
+                    this.visualAnalysisResult = ''; // 清空旧结果
+                },
+
+                // 5. 调用后端接口开始分析
+                async startVisualAnalysis() {
+                    if (!this.visualAnalysisFile) return;
+
+                    const formData = new FormData();
+                    formData.append('file', this.visualAnalysisFile);
+
+                    this.analyzingVisual = true;
+                    
+                    // 使用全局 loading 遮罩体验更好，或者只用按钮 loading
+                    // 这里使用按钮 loading，因为弹窗已经遮盖了主界面
+                    try {
+                        const res = await this.request('POST', '/api/generate/analyze_image', formData, {
+                            headers: { 'Content-Type': 'multipart/form-data' }
+                        });
+
+                        if (res.success) {
+                            this.visualAnalysisResult = res.style_description;
+                            this.$message.success('分析完成！');
+                        }
+                    } catch (e) {
+                        console.error(e);
+                        this.$message.error('分析失败，请检查是否配置了阿里云 Key');
+                    } finally {
+                        this.analyzingVisual = false;
+                    }
+                },
+
+                // 6. 复制结果到剪贴板
+                copyAnalysisResult() {
+                    if (!this.visualAnalysisResult) return;
+                    navigator.clipboard.writeText(this.visualAnalysisResult).then(() => {
+                        this.$message.success('已复制到剪贴板');
+                    }).catch(() => {
+                        this.$message.error('复制失败');
+                    });
                 },
             }
         });
