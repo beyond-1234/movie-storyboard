@@ -820,7 +820,7 @@ class JimengHandler:
                     else:
                         # 业务错误 (如审核不通过)
                         logger.error(f"[Jimeng] Query Fail: {data.get('message')}")
-                        return {'success': False, 'error_msg': f"Query failed (code={code}): {data.get('message')}"}
+                        return {'success': False, 'error_msg': f"Query failed (code={resp.status_code}): {data.get('message')}"}
                 else:
                     time.sleep(5)
                     
@@ -975,7 +975,7 @@ class MiniMaxHandler:
             return {'success': False, 'error_msg': str(e)}
     
     @staticmethod
-    def generate_text(messages, config): return {'success': False, 'error_msg': "MiniMax does not support text generation"}
+    def generate_text(messages, config): return {'success': False, 'error_msg': "海螺AI目前无提供文本模型"}
     
     @staticmethod
     def generate_video(prompt, media_manager, config, start_img=None, end_img=None, entity_id=None):
@@ -988,8 +988,10 @@ class MiniMaxHandler:
         base_url = config.get('base_url', 'https://api.minimaxi.com')
         
         start_b64 = media_manager.file_to_base64(start_img)
-        end_b64 = media_manager.file_to_base64(end_img)
-        if not start_b64 or not end_b64: return {'success': False, 'error_msg': "Failed to encode images"}
+        end_b64 = None
+        if end_img:
+            end_b64 = media_manager.file_to_base64(end_img)
+        if not start_b64 : return {'success': False, 'error_msg': "Failed to encode images"}
         
         payload = {
             "model": model, "first_frame_image": start_b64, "last_frame_image": end_b64,
@@ -1011,79 +1013,87 @@ class MiniMaxHandler:
                         saved_url = media_manager.download_from_url(result['url'], 'video', entity_id)
                         return {'success': True, 'url': saved_url or result['url']}
                     return result
-                logger.error(f"[MiniMax] API Error {data.get('base_resp', {}).get('status_code')}: {data.get('base_resp', {}).get('status_msg')}")
                 return {'success': False, 'error_msg': f"API Error: {data.get('base_resp', {}).get('status_msg')}"}
-            
             return {'success': False, 'error_msg': f"HTTP {resp.status_code}"}
-        
-        except requests.exceptions.Timeout:
-            return {'success': False, 'error_msg': 'Request timeout'}
         except Exception as e:
             logger.exception("[MiniMax] Video generation failed")
             return {'success': False, 'error_msg': str(e)}
+        
+    @staticmethod
+    def _retrieve_file(file_id, config):
+        """
+        [NEW] 使用 /v1/files/retrieve 接口获取下载地址
+        """
+        base_url = config.get('base_url', 'https://api.minimaxi.com')
+        url = f"{base_url.rstrip('/')}/v1/files/retrieve"
+        headers = MiniMaxHandler._get_headers(config)
+        params = {"file_id": file_id}
+        
+        try:
+            logger.info(f"[MiniMax] Retrieving file_id: {file_id}")
+            resp = requests.get(url, headers=headers, params=params, timeout=30)
+            if resp.status_code == 200:
+                data = resp.json()
+                if data.get('base_resp', {}).get('status_code') == 0:
+                    return data.get('file', {}).get('download_url')
+                else:
+                    logger.error(f"[MiniMax] File Retrieve Error: {data}")
+            else:
+                logger.error(f"[MiniMax] File Retrieve HTTP Error: {resp.status_code}")
+        except Exception as e:
+            logger.error(f"[MiniMax] File Retrieve Exception: {e}")
+        return None
     
     @staticmethod
     def _wait_for_video(task_id, config, max_wait=600):
-        """
-        轮询等待视频生成完成
-        max_wait: 最大等待时间(秒)
-        """
         base_url = config.get('base_url', 'https://api.minimaxi.com')
         url = f"{base_url.rstrip('/')}/v1/query/video_generation?task_id={task_id}"
         headers = MiniMaxHandler._get_headers(config)
         
+        logger.info(f"Step 1: 开始轮询视频任务 [ID: {task_id}], 最大等待: {max_wait}秒")
         start_time = time.time()
+        
         while time.time() - start_time < max_wait:
+            elapsed_time = int(time.time() - start_time)
             try:
                 resp = requests.get(url, headers=headers, timeout=30)
                 if resp.status_code == 200:
                     data = resp.json()
-                    if data.get('base_resp', {}).get('status_code') == 0:
+                    base_resp = data.get('base_resp', {})
+                    if base_resp.get('status_code') == 0:
                         status = data.get('status')
+                        logger.info(f"任务 [{task_id}] 状态: {status} | 已耗时: {elapsed_time}s")
+                        
                         if status == 'Success':
-                            return {'success': True, 'url': data.get('video_url')}
+                            # 1. 尝试直接获取 video_url (旧版本或某些情况)
+                            video_url = data.get('video_url')
+                            
+                            # 2. 如果没有 video_url 但有 file_id，调用 retrieve 接口
+                            if not video_url and data.get('file_id'):
+                                video_url = MiniMaxHandler._retrieve_file(data.get('file_id'), config)
+                                
+                            if video_url:
+                                logger.info(f"✅ 视频生成成功! URL: {video_url}")
+                                return {'success': True, 'url': video_url}
+                            else:
+                                return {'success': False, 'error_msg': "Success status but no video URL or File ID found"}
+                        
                         elif status == 'Failed':
                             return {'success': False, 'error_msg': data.get('error_message')}
-                        else:
-                            time.sleep(10)
                     else:
-                        time.sleep(10)
+                        logger.warning(f"API 返回非0状态码: {base_resp.get('status_msg')}")
                 else:
-                    time.sleep(10)
-            except Exception:
-                time.sleep(10)
+                    logger.warning(f"HTTP 请求失败, 状态码: {resp.status_code}")
+            except Exception as e:
+                logger.error(f"轮询请求发生异常: {str(e)}")
+            time.sleep(10)
+
+        logger.error(f"❌ 任务 [{task_id}] 等待超时")
         return {'success': False, 'error_msg': 'Timeout'}
 
     @staticmethod
     def fuse_image(prompt, media_manager, config, base_image_path, ref_image_path_list, entity_id=None):
-        api_key = config.get('api_key')
-        model = config.get('model_name', 'image-01')
-        base_url = config.get('base_url', 'https://api.minimaxi.com')
-        
-        ref_image_path_list.append(base_image_path)
-        subject_references = []
-        for image_path in ref_image_path_list:
-            image_b64 = media_manager.file_to_base64(image_path)
-            if image_b64: subject_references.append({"type": "character", "image_file": image_b64})
-        
-        payload = {
-            "model": model, "prompt": prompt, "subject_reference": subject_references,
-            "response_format": "url", "n": 1
-        }
-        
-        try:
-            url = f"{base_url.rstrip('/')}/v1/image_generation"
-            resp = requests.post(url, json=payload, headers=MiniMaxHandler._get_headers(config), timeout=120)
-            if resp.status_code == 200:
-                data = resp.json()
-                if data.get('base_resp', {}).get('status_code') == 0:
-                    img_url = data['data']['image_urls'][0]
-                    saved_url = media_manager.download_from_url(img_url, 'image', entity_id)
-                    return {'success': True, 'url': saved_url or img_url}
-                return {'success': False, 'error_msg': f"API Error: {data}"}
-            return {'success': False, 'error_msg': f"HTTP {resp.status_code}"}
-        except Exception as e:
-            return {'success': False, 'error_msg': str(e)}
+        return {'success': False, 'error_msg': "海螺AI目前无提供融合图模型"}
 
 class ZhipuHandler:
     @staticmethod
