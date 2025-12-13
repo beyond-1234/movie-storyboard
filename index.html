@@ -1232,7 +1232,15 @@
                     });
                 },
             },
-            mounted() { 
+            mounted() {
+                try {
+                    const saved = localStorage.getItem('media_gen_options');
+                    if (saved) {
+                        const parsed = JSON.parse(saved);
+                        // 合并数据，防止字段缺失
+                        this.genOptions = { ...this.genOptions, ...parsed };
+                    }
+                } catch(e) { console.error(e); } 
                 this.fetchSettings(); 
                 // [新增] 优先从 URL 获取剧集 ID
                 const urlParams = new URLSearchParams(window.location.search);
@@ -1257,6 +1265,15 @@
                         }
                     }
                 });
+            },
+            // 监听 genOptions 变化并保存
+            watch: {
+                genOptions: {
+                    handler(val) {
+                        localStorage.setItem('media_gen_options', JSON.stringify(val));
+                    },
+                    deep: true
+                }
             },
             methods: {
                 async request(method, url, data = null, config = {}) {
@@ -1435,12 +1452,53 @@
                     this.updateFusionModelDefault();
                 },
                 
-                updateImageModelDefault() { const m = this.availableImageModels; if(m.length) this.genOptions.imageModelName = m[0].name; else this.genOptions.imageModelName = ''; },
-                updateVideoModelDefault() { const m = this.availableVideoModels; if(m.length) this.genOptions.videoModelName = m[0].name; else this.genOptions.videoModelName = ''; },
-                updateVoiceModelDefault() { const m = this.availableVoiceModels; if(m.length) this.genOptions.voiceModelName = m[0].name; else this.genOptions.voiceModelName = ''; },
-                updateTextModelDefault() { const m = this.availableTextModels; if(m.length) this.genOptions.textModelName = m[0].name; else this.genOptions.textModelName = ''; },
-                updateFusionModelDefault() { const m = this.availableFusionModels; if(m.length) this.genOptions.fusionModelName = m[0].name; else this.genOptions.fusionModelName = ''; },
-                
+// [修改] 优化模型默认值逻辑：仅当当前值无效时才重置
+                updateImageModelDefault() { 
+                    const m = this.availableImageModels; 
+                    const curr = this.genOptions.imageModelName;
+                    if(m.length) { 
+                        // 如果当前为空，或者当前选的值不在列表中，则选第一个
+                        if (!curr || !m.some(x => x.name === curr)) this.genOptions.imageModelName = m[0].name; 
+                    } else { 
+                        this.genOptions.imageModelName = ''; 
+                    } 
+                },
+                updateVideoModelDefault() { 
+                    const m = this.availableVideoModels; 
+                    const curr = this.genOptions.videoModelName;
+                    if(m.length) {
+                        if (!curr || !m.some(x => x.name === curr)) this.genOptions.videoModelName = m[0].name; 
+                    } else { 
+                        this.genOptions.videoModelName = ''; 
+                    } 
+                },
+                updateVoiceModelDefault() { 
+                    const m = this.availableVoiceModels; 
+                    const curr = this.genOptions.voiceModelName;
+                    if(m.length) {
+                        if (!curr || !m.some(x => x.name === curr)) this.genOptions.voiceModelName = m[0].name; 
+                    } else { 
+                        this.genOptions.voiceModelName = ''; 
+                    } 
+                },
+                updateTextModelDefault() { 
+                    const m = this.availableTextModels; 
+                    const curr = this.genOptions.textModelName;
+                    if(m.length) {
+                        if (!curr || !m.some(x => x.name === curr)) this.genOptions.textModelName = m[0].name; 
+                    } else { 
+                        this.genOptions.textModelName = ''; 
+                    } 
+                },
+                updateFusionModelDefault() { 
+                    const m = this.availableFusionModels; 
+                    const curr = this.genOptions.fusionModelName;
+                    if(m.length) {
+                        if (!curr || !m.some(x => x.name === curr)) this.genOptions.fusionModelName = m[0].name; 
+                    } else { 
+                        this.genOptions.fusionModelName = ''; 
+                    } 
+                },
                 handleProviderChange() { this.initDefaultSelections(); },
 
                 async fetchProjects() { 
