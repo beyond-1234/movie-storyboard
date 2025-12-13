@@ -1426,12 +1426,30 @@
                 async exportJianyingDraft() {
                     this.startGlobalLoading('导出剪映草稿...', '正在组装媒体资源');
                     try {
-                        const res = await this.request('POST', `/api/projects/${this.currentProjectId}/export/jianying`);
-                        if (res.success) {
-                            this.$alert(`导出成功！<br>草稿路径：<b>${res.path}</b>`, '导出完成', {
-                                dangerouslyUseHTMLString: true,
-                                confirmButtonText: '确定'
-                            });
+                        const response = await fetch(`/api/projects/${this.currentProjectId}/export/jianying`, {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json'
+                            },
+                            body: JSON.stringify({}) // 如果需要传参
+                        });                        
+                        if (response.ok) {
+                            // 1. 获取 Blob 对象
+                            const blob = await response.blob();
+                            // 2. 创建临时下载链接
+                            const url = window.URL.createObjectURL(blob);
+                            const a = document.createElement('a');
+                            a.href = url;
+                            // 尝试从 header 获取文件名，或者自己定义
+                            a.download = `project_${this.currentProjectId}_jianying.zip`; 
+                            document.body.appendChild(a);
+                            a.click();
+                            // 3. 清理
+                            window.URL.revokeObjectURL(url);
+                            a.remove();
+                        } else {
+                            const err = await response.json();
+                            alert('导出失败: ' + err.error);
                         }
                     } catch (e) {
                         if (e.message !== '已取消') console.error(e);

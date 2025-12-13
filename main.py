@@ -4,7 +4,7 @@ import re
 import uuid
 import json
 from typing import List, Optional, Dict, Any
-from flask import Flask, request, jsonify, send_file
+from flask import Flask, request, jsonify, send_file, after_this_request
 
 import ai_service 
 from jianying_exporter import export_draft
@@ -337,10 +337,46 @@ def generate_image():
 @app.route('/api/projects/<project_id>/export/jianying', methods=['POST'])
 def export_jianying(project_id):
     project_info = db.get_project(project_id)
-    shots = db.get_shots(project_id)
-    # 导出模块可能还需要适配，暂维持原样，假设导出目录已由 MediaManager 创建
-    result = export_draft(project_info, shots, STATIC_FOLDER, "exports")
-    return jsonify(result) if result['success'] else (jsonify(result), 500)
+    
+    # === 修改点 1: 获取 Fusion 数据而不是 Shots ===
+    # fusions = db.get_fusions(project_id) 
+    # 为了防止数据库返回乱序，这里在 Python 层面做一个排序
+    # 假设 fusion 对象里有 'scene' (场号) 和 'shot_number' (镜号)
+    raw_fusions = db.get_fusions(project_id)
+    
+    # 排序逻辑: 先按场号(scene)排，再按镜号(shot_number)排
+    # 使用 float() 是为了兼容 "1.5" 这种插入镜号，如果没有则默认为 0
+    # fusions = sorted(raw_fusions, key=lambda x: (float(x.get('scene', 0)), float(x.get('shot_number', 0))))
+
+    # 定义导出目录
+    export_dir = os.path.join(STATIC_FOLDER, "exports")
+    
+    # === 修改点 2: 传入 fusions ===
+    result = export_draft(project_info, raw_fusions, STATIC_FOLDER, export_dir)
+    
+    if result['success']:
+        zip_path = result['zip_path']
+        filename = os.path.basename(zip_path)
+
+        # 可选：在发送完成后删除文件以节省空间
+        # @after_this_request
+        # def remove_file(response):
+        #     try:
+        #         os.remove(zip_path)
+        #         # shutil.rmtree(result['folder_path']) # 如果想连文件夹一起删
+        #     except Exception as error:
+        #         app.logger.error("Error removing or closing downloaded file handle", error)
+        #     # return response
+
+        # 发送文件给用户下载
+        return send_file(
+            zip_path, 
+            as_attachment=True,         # 强制作为附件下载
+            download_name=filename,     # 下载时的文件名
+            mimetype='application/zip'
+        )
+    else:
+        return jsonify(result), 500
 
 # === Character API ===
 @app.route('/api/projects/<project_id>/characters', methods=['GET'])

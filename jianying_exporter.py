@@ -3,6 +3,7 @@ import json
 import shutil
 import uuid
 import logging
+from urllib.parse import unquote, urlparse # 新增：用于处理URL解码
 
 # 配置日志
 logging.basicConfig(level=logging.INFO)
@@ -17,7 +18,7 @@ except ImportError:
     logger.warning("pyJianYingDraft library not found. Export features will be disabled.")
 
 def parse_duration(duration_str):
-    """解析时长字符串，如 '3s', '3.5'，返回浮点数秒。默认 3.0s"""
+    """解析时长字符串"""
     if not duration_str: return 3.0
     try:
         clean = str(duration_str).lower().replace('s', '').strip()
@@ -26,28 +27,53 @@ def parse_duration(duration_str):
     except:
         return 3.0
 
-def copy_asset(source_path, dest_folder, prefix=""):
+def resolve_local_path(static_folder, url_path):
     """
-    复制资源文件到目标目录，并返回新的绝对路径
+    【核心修复】将网页URL转换为本地绝对路径
+    1. 解码 URL (处理空格 %20 等)
+    2. 去除 http/https 前缀
+    3. 拼接 static_folder
     """
-    if not source_path:
+    if not url_path:
         return None
         
-    # 处理相对路径转绝对路径
-    if not os.path.isabs(source_path):
-        # 假设是相对于当前工作目录
-        source_path = os.path.abspath(source_path)
+    # 1. 解码: "/uploads/image%201.png" -> "/uploads/image 1.png"
+    path = unquote(str(url_path))
+    
+    # 2. 如果是完整 URL (http://localhost...), 只取路径部分
+    if path.startswith('http'):
+        parsed = urlparse(path)
+        path = parsed.path # 只取 /uploads/xxx
+        
+    # 3. 去除开头的斜杠，防止 os.path.join 把它当做绝对路径处理
+    # Windows下也要去除反斜杠
+    path = path.lstrip('/\\')
+    
+    # 4. 拼接绝对路径
+    full_path = os.path.join(static_folder, path)
+    abs_path = os.path.abspath(full_path)
+    
+    return abs_path
 
-    if not os.path.exists(source_path):
-        logger.warning(f"Source file not found: {source_path}")
+def copy_asset(source_full_path, dest_folder, prefix=""):
+    """
+    复制资源文件
+    """
+    if not source_full_path:
+        return None
+        
+    # --- 调试打印 ---
+    # 如果控制台打印了 "❌ 未找到文件"，说明路径拼错了
+    if not os.path.exists(source_full_path):
+        print(f"❌ [文件缺失] 试图寻找: {source_full_path}") 
         return None
     
     if not os.path.exists(dest_folder):
         os.makedirs(dest_folder, exist_ok=True)
         
-    filename = os.path.basename(source_path)
-    # 简单的文件名清洗，防止特殊字符报错
+    filename = os.path.basename(source_full_path)
     clean_filename = "".join([c for c in filename if c.isalnum() or c in '._-'])
+    
     if prefix:
         new_filename = f"{prefix}_{clean_filename}"
     else:
@@ -56,90 +82,85 @@ def copy_asset(source_path, dest_folder, prefix=""):
     dest_path = os.path.join(dest_folder, new_filename)
     
     try:
-        shutil.copy2(source_path, dest_path)
+        shutil.copy2(source_full_path, dest_path)
+        print(f"✅ [复制成功] {new_filename}") # 打印成功信息
         return dest_path
     except Exception as e:
-        logger.error(f"Error copying file {source_path} to {dest_path}: {e}")
+        print(f"❌ [复制出错] {e}")
         return None
 
-def export_draft(project_info, shots, static_folder, export_dir):
+def export_draft(project_info, tasks, static_folder, export_dir): 
+    # 注意：这里第二个参数名我改成了 tasks，代表传入的是 fusion 列表
     """
-    生成剪映草稿工程
+    生成剪映草稿工程 (适配 Fusion 数据源)
     """
     if not JIANYING_AVAILABLE:
         return {"success": False, "error": "pyJianYingDraft library not installed."}
 
     film_name = project_info.get('film_name', 'Untitled_Project')
-    # 移除文件名中的非法字符
     film_name = "".join([c for c in film_name if c.isalnum() or c in ' _-']).strip()
     if not film_name: film_name = "Project_Export"
     
-    # 确保导出根目录存在
     if not os.path.exists(export_dir):
         os.makedirs(export_dir, exist_ok=True)
 
     try:
-        # 1. 设置草稿文件夹
+        # 1. 准备目录
         draft_folder = draft.DraftFolder(export_dir)
-        
-        # 2. 创建剪映草稿
         script = draft_folder.create_draft(film_name, 1920, 1080, allow_replace=True)
-        
-        # 获取草稿的实际物理路径 (pyJianYingDraft 会在 export_dir 下创建同名文件夹)
         draft_sys_path = os.path.join(export_dir, film_name)
-        
-        # 在草稿内部创建一个 media 文件夹
         assets_target_dir = os.path.join(draft_sys_path, "media")
+        os.makedirs(assets_target_dir, exist_ok=True)
         
-        # 3. 添加轨道
+        # 2. 轨道设置
         script.add_track(draft.TrackType.video).add_track(draft.TrackType.audio).add_track(draft.TrackType.text)
         
         current_time = 0.0
         
-        for idx, shot in enumerate(shots):
-            duration_sec = parse_duration(shot.get('duration', '3s'))
+        print(f"========== 开始导出 (Fusion 模式) ==========")
+        print(f"数据源数量: {len(tasks)}")
+
+        for idx, item in enumerate(tasks):
+            # item 现在是一个 fusion 对象
+            
+            # === 调试打印 ===
+            scene = item.get('scene', '?')
+            shot_no = item.get('shot_number', '?')
+            print(f"--- 处理第 {idx+1} 项: 场{scene}-镜{shot_no} ---")
+            
+            # === 字段适配 (关键修改) ===
+            # Fusion 对象通常包含：
+            # - video_url: 生成的视频
+            # - result_image: 融图生成的最终图片
+            # - base_image: 底图 (备选)
+            raw_url = item.get('video_url') or ''
+            
+            # 打印一下找到的路径，方便你调试
+            print(f"   关键字段 video_url: {item.get('video_url')}")
+            print(f"   关键字段 result_image: {item.get('result_image')}")
+            print(f"   👉 最终决定使用: {raw_url}")
+
+            # 时长 (Fusion 如果没有 duration 字段，默认 3s)
+            duration_sec = parse_duration(item.get('duration', '3s'))
             start_time_str = f"{current_time:.3f}s"
             duration_str = f"{duration_sec:.3f}s"
-            
-            # trange 参数: (start, duration)
             target_trange = trange(start_time_str, duration_str)
-            
-            file_prefix = f"{idx+1:03d}_shot"
+            file_prefix = f"{idx+1:03d}_sc{scene}_sh{shot_no}" # 文件名前缀带上场号镜号方便识别
 
-            # --- 视频轨道 (优先视频 > 首帧) ---
-            media_source_path = None
-            video_url = shot.get('video_url', '')
-            start_frame = shot.get('start_frame', '')
+            # === 视频/图片处理逻辑 (使用 resolve_local_path) ===
+            media_source_path = resolve_local_path(static_folder, raw_url)
             
-            if video_url:
-                # 拼接本地路径
-                clean_url = video_url.lstrip('/')
-                media_source_path = os.path.join(static_folder, clean_url)
-            elif start_frame:
-                clean_url = start_frame.lstrip('/')
-                media_source_path = os.path.join(static_folder, clean_url)
-            
-            if media_source_path:
-                copied_media_path = copy_asset(media_source_path, assets_target_dir, prefix=file_prefix)
-                if copied_media_path:
-                    # 视频片段
-                    segment = draft.VideoSegment(copied_media_path, target_trange)
+            if media_source_path and os.path.exists(media_source_path):
+                copied_path = copy_asset(media_source_path, assets_target_dir, prefix=file_prefix)
+                if copied_path:
+                    segment = draft.VideoSegment(copied_path, target_trange)
                     script.add_segment(segment)
-            
-            # --- 音频轨道 ---
-            audio_url = shot.get('audio_url', '')
-            if audio_url:
-                clean_url = audio_url.lstrip('/')
-                abs_audio = os.path.join(static_folder, clean_url)
-                copied_audio_path = copy_asset(abs_audio, assets_target_dir, prefix=file_prefix)
-                
-                if copied_audio_path:
-                    # 音频片段
-                    audio_seg = draft.AudioSegment(copied_audio_path, target_trange)
-                    script.add_segment(audio_seg)
-            
-            # --- 文本轨道 ---
-            text_content = shot.get('dialogue') or shot.get('visual_description')
+            else:
+                print(f"   ⚠️ 跳过: 文件不存在或路径为空 -> {media_source_path}")
+
+            # === 文本 (Fusion 可能没有 dialogue，看你需求) ===
+            # 如果想显示 Prompt 作为字幕，可以用 item.get('fusion_prompt')
+            text_content = item.get('dialogue') or item.get('fusion_prompt')
             if text_content:
                 text_seg = draft.TextSegment(text_content, target_trange)
                 text_seg.style = draft.TextStyle(color=(1.0, 1.0, 1.0)) 
@@ -147,13 +168,16 @@ def export_draft(project_info, shots, static_folder, export_dir):
 
             current_time += duration_sec
             
-        # 4. 保存草稿
         script.save()
+        
+        zip_output_name = os.path.join(export_dir, f"{film_name}_archive")
+        shutil.make_archive(zip_output_name, 'zip', export_dir, film_name)
         
         return {
             "success": True, 
-            "message": f"剪映草稿生成成功，素材已打包至 {draft_sys_path}", 
-            "path": draft_sys_path
+            "message": "打包成功", 
+            "zip_path": zip_output_name + ".zip",
+            "folder_path": draft_sys_path
         }
 
     except Exception as e:
