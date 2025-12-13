@@ -1811,7 +1811,17 @@
                     this.sceneDialogVisible = true;
                 },
                 openEditScene(shot) {
+                    // 深拷贝数据
                     this.sceneForm = JSON.parse(JSON.stringify(shot));
+                    
+                    // [新增] 检查 characters 里的数据格式
+                    // 如果表格里存的是对象 [{id:1, name:'A'}], 需要转换成 ID 数组 [1] 给 el-select 回显
+                    if (this.sceneForm.characters && this.sceneForm.characters.length > 0) {
+                        if (typeof this.sceneForm.characters[0] === 'object') {
+                            this.sceneForm.characters = this.sceneForm.characters.map(c => c.id);
+                        }
+                    }
+                    
                     this.sceneDialogTitle = '编辑场景';
                     this.sceneDialogVisible = true;
                 },
@@ -1826,24 +1836,45 @@
                         this.$message.error('请输入场次和场景编号');
                         return;
                     }
+
+                    // [新增] 1. 预先根据选中的ID，从全局角色列表中找到对应的完整角色对象
+                    // 这样是为了确保更新到表格时，能立即显示出人名，而不需要刷新页面
+                    const selectedCharObjects = this.characterList.filter(c => 
+                        this.sceneForm.characters.includes(c.id)
+                    );
+
                     // 更新分镜数据
-                    const idx = this.shotList.findIndex(s=>s.id===this.sceneForm.id);
+                    const idx = this.shotList.findIndex(s => s.id === this.sceneForm.id);
+                    
                     if(idx !== -1) {
+                        // === 编辑模式 ===
                         const updatedShot = { ...this.shotList[idx], ...this.sceneForm };
+                        
+                        // [新增] 2. 强制将 UI 数据中的 characters 替换为对象数组
+                        updatedShot.characters = selectedCharObjects;
+
                         await this.request('PUT', `/api/projects/${this.currentProjectId}/shots/${updatedShot.id}`, updatedShot);
                         this.$set(this.shotList, idx, updatedShot);
                     } else {
-                        // 如果是新的分镜，添加到列表
+                        // === 新建模式 ===
                         const newShot = {
                             movie_id: this.currentProjectId,
                             ...this.sceneForm,
                             visual_description: '',
-                            insert_index: this.currentInsertIndex > -1 ? this.currentInsertIndex : undefined // 传递插入位置
+                            insert_index: this.currentInsertIndex > -1 ? this.currentInsertIndex : undefined 
                         };
+                        
+                        // 发送给后端（后端通常只需要ID列表，或者能处理ID列表）
                         const res = await this.request('POST', `/api/projects/${this.currentProjectId}/shots`, newShot);
                         
+                        // [新增] 3. 后端返回的数据可能 characters 只是 ID 或者是空的
+                        // 我们手动把前端已知的角色对象填进去，保证列表立刻显示名字
+                        if (res) {
+                            res.characters = selectedCharObjects;
+                        }
+
                         if (this.currentInsertIndex > -1) {
-                            this.shotList.splice(this.currentInsertIndex, 0, res); // 前端也同步插入
+                            this.shotList.splice(this.currentInsertIndex, 0, res); 
                         } else {
                             this.shotList.push(res);
                         }
