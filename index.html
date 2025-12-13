@@ -3005,20 +3005,23 @@
                             }, { signal: this.currentAbortController.signal });
 
                             if (res.success) {
-                                const newPrompt = res.prompt;
+                                const updates = {
+                                    fusion_prompt: res.prompt,
+                                    end_frame_prompt: res.end_frame_prompt || '' // 获取后端返回的尾帧提示词
+                                };
                                 
-                                // 3. 更新后端数据
-                                await this.request('PUT', `/api/projects/${this.currentProjectId}/fusions/${fusion.id}`, {
-                                    fusion_prompt: newPrompt
-                                });
+                                // 更新后端
+                                await this.request('PUT', `/api/projects/${this.currentProjectId}/fusions/${fusion.id}`, updates);
+
+                                // 更新前端
+                                fusion.fusion_prompt = updates.fusion_prompt;
+                                fusion.end_frame_prompt = updates.end_frame_prompt;
                                 
-                                // 4. 更新本地 Vue 数据
-                                fusion.fusion_prompt = newPrompt;
                                 const idx = this.fusionList.findIndex(f => f.id === fusion.id);
                                 if(idx !== -1) {
-                                    this.$set(this.fusionList, idx, { ...this.fusionList[idx], fusion_prompt: newPrompt });
+                                    this.$set(this.fusionList, idx, { ...this.fusionList[idx], ...updates });
                                 }
-
+                                
                                 successCount++;
                             } else {
                                 throw new Error(res.error || '生成失败');
