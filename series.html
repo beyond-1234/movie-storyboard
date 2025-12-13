@@ -302,7 +302,7 @@
                 },
                 enterStudio(ep) {
                     // 跳转到 index.html 并带上 project_id 参数
-                    window.location.href = `/project?project_id=${ep.id}`;
+                    window.location.href = `/project?project_id=${ep.id}&series_id=${ep.series_id}`;
                 }
             }
         });

@@ -996,6 +996,7 @@
                 // 融图批量弹框状态
                 fusionBatchDialogVisible: false,
                 fusionBatchConfig: { target: '', scope: 'all' },
+                currentSeriesId: ''
             },
             computed: {
                 getModelsByProviderId() {
@@ -1017,6 +1018,12 @@
             },
             mounted() { 
                 this.fetchSettings(); 
+                // [新增] 优先从 URL 获取剧集 ID
+                const urlParams = new URLSearchParams(window.location.search);
+                const sid = urlParams.get('series_id');
+                if (sid) {
+                    this.currentSeriesId = sid;
+                }
                 this.fetchProjects().then(() => {
                     // [新增] 检查 URL 参数
                     const urlParams = new URLSearchParams(window.location.search);
@@ -1220,19 +1227,32 @@
                 
                 handleProviderChange() { this.initDefaultSelections(); },
 
-                async fetchProjects() { const list = await this.request('GET', '/api/projects'); this.projectList = list; if(list.length && !this.currentProjectId) { this.currentProjectId = list[0].id; this.handleProjectChange(list[0].id); } },
+                async fetchProjects() { 
+                    // [修改] 如果存在 currentSeriesId，则带上它
+                    let url = `/api/projects`;
+                    if (this.currentSeriesId) {
+                        url += `?series_id=${this.currentSeriesId}`;
+                    }
+                    const list = await this.request('GET', url); 
+                    this.projectList = list; 
+                    if(list.length && !this.currentProjectId) { 
+                        this.currentProjectId = list[0].id; 
+                        this.handleProjectChange(list[0].id); 
+                    } 
+                },
                 async handleProjectChange(pid) { this.currentProject = this.projectList.find(p => p.id === pid); this.activeTab='script'; this.fetchScript(); this.fetchCharacters(); this.fetchFusions(); },
                 openCreateProject() { 
-    this.projectForm = { 
-        film_name: '',
-        script_core_conflict: '',
-        script_emotional_keywords: '',
-        basic_info: '',
-        visual_color_system: '',
-        visual_consistency_prompt: ''
-    }; 
-    this.projectDialogVisible = true; 
-},
+                    this.projectForm = { 
+                        film_name: '',
+                        script_core_conflict: '',
+                        script_emotional_keywords: '',
+                        basic_info: '',
+                        visual_color_system: '',
+                        visual_consistency_prompt: '',
+                        series_id: this.currentSeriesId
+                    }; 
+                    this.projectDialogVisible = true; 
+                },
                 openEditProject() { this.projectForm = JSON.parse(JSON.stringify(this.currentProject)); this.projectDialogVisible = true; },
                 async submitProject() { if(!this.projectForm.film_name) return; const method = this.projectForm.id ? 'PUT' : 'POST'; const url = this.projectForm.id ? `/api/projects/${this.projectForm.id}` : '/api/projects'; const res = await this.request(method, url, this.projectForm); if(!this.projectForm.id) { this.projectList.unshift(res); this.currentProjectId=res.id; this.handleProjectChange(res.id); } else { const idx = this.projectList.findIndex(p=>p.id===res.id); this.$set(this.projectList, idx, res); this.currentProject=res; } this.projectDialogVisible = false; },
                 async deleteProject() { await this.request('DELETE', `/api/projects/${this.currentProjectId}`); this.currentProject=null; this.currentProjectId=''; this.fetchProjects(); },

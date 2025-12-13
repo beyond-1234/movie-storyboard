@@ -193,7 +193,7 @@ class DataManager:
         # 获取所有项目并筛选
         all_projs = self.get_all_projects()
         filtered = [p for p in all_projs if p.get('series_id') == series_id]
-        filtered.sort(key=lambda x: x.get('film_name', ''))
+        filtered.sort(key=lambda x: x.get('created_time', ''))
         return filtered
 
     def get_project(self, project_id):

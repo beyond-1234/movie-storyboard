@@ -107,7 +107,34 @@ def delete_provider(pid):
 # === Project API ===
 @app.route('/api/projects', methods=['GET'])
 def get_projects():
-    return jsonify(db.get_all_projects())
+    # 支持通过 query param 过滤剧集
+    series_id_filter = request.args.get('series_id')
+
+    # 1. 获取项目列表
+    if series_id_filter:
+        # 如果指定了 series_id，只获取该剧集下的项目
+        projects = db.get_projects_by_series(series_id_filter)
+    else:
+        # 否则获取全部项目
+        projects = db.get_all_projects()
+    
+    # 2. 获取所有剧集并建立 ID -> Name 映射
+    series_list = db.get_all_series()
+    series_map = {s['id']: s['name'] for s in series_list}
+    
+    # 3. 注入剧集名称
+    for p in projects:
+        sid = p.get('series_id')
+        if sid and sid in series_map:
+            s_name = series_map[sid]
+            p['series_name'] = s_name
+            # 生成前端展示用的名称，格式：【剧集名】项目名
+            p['display_name'] = f"【{s_name}】{p.get('film_name', '')}"
+        else:
+            p['series_name'] = ""
+            p['display_name'] = p.get('film_name', '未命名项目')
+            
+    return jsonify(projects)
 
 @app.route('/api/projects', methods=['POST'])
 def create_project():
