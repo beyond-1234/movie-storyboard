@@ -266,19 +266,42 @@ def analyze_script():
         try:
             cleaned = re.sub(r'^```json\s*|\s*```$', '', result['content'].strip(), flags=re.MULTILINE | re.DOTALL)
             shots_data = json.loads(cleaned)
-            # 辅助函数
-            def map_character_names(names, char_data):
+            
+            # --- 修复开始 ---
+            # 辅助函数：将名字映射为对象，如果是新角色则保存到数据库
+            def map_character_names(names, char_data, pid):
                 mapped = []
                 for name in names:
+                    # 1. 先尝试在现有列表中查找
                     found = next((c for c in char_data if c.get('name') == name), None)
-                    mapped.append(found if found else {'name': name, 'description': '新角色', 'id': str(uuid.uuid4())})
+                    
+                    if found:
+                        mapped.append(found)
+                    else:
+                        # 2. 如果没找到，说明是 AI 识别出的新角色
+                        # 构造新角色数据
+                        new_char_data = {
+                            'name': name,
+                            'description': 'AI 剧本分析自动识别的新角色'
+                        }
+                        # 3. 【关键修复】立即调用 db 保存到数据库
+                        saved_char = db.create_character(pid, new_char_data)
+                        
+                        # 4. 将保存后的角色添加到当前的 char_data 列表中
+                        # 这样如果后续的分镜再次出现这个名字，就能在第1步被找到了，避免重复创建
+                        char_data.append(saved_char)
+                        mapped.append(saved_char)
                 return mapped
 
             for shot in shots_data:
                 if 'characters' in shot:
-                    shot['characters'] = map_character_names(shot['characters'], character_list)
+                    # 传入 project_id 以便保存数据
+                    shot['characters'] = map_character_names(shot['characters'], character_list, project_id)
+            # --- 修复结束 ---
+
             return jsonify({'shots': shots_data})
         except Exception as e:
+            print(f"JSON Parse Error: {e}") # 建议加上打印以便调试
             return jsonify({'error': 'Invalid JSON from AI'}), 500
     return jsonify(result), 500
 
