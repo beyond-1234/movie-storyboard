@@ -2080,9 +2080,10 @@
                     fd.append('fusion_id', this.fusionForm.id);
                     try {
                         this.startGlobalLoading('上传中...', '正在上传底图');
-                        const res = await axios.post('/api/upload/base_image', fd);
-                        if (res.data.success) {
-                            this.fusionForm.base_image = res.data.url;
+                        // 修改处：使用 this.request，移除 res.data 层级
+                        const res = await this.request('POST', '/api/upload/base_image', fd);
+                        if (res.success) {
+                            this.fusionForm.base_image = res.url;
                             this.$message.success('上传成功');
                             // 自动保存，确保 base_image 持久化
                             if (this.fusionForm.id) {
@@ -2090,7 +2091,8 @@
                             }
                         }
                     } catch(e) { 
-                        this.$message.error('上传失败'); 
+                        // request 方法会自动提示错误，这里也可以保留或者仅做清理
+                        if (e.message !== '操作失败') this.$message.error('上传失败'); 
                     } finally {
                         this.stopGlobalLoading();
                         // 清空 input value 允许重复上传同一文件
@@ -2576,26 +2578,27 @@
                     
                     try {
                         this.startGlobalLoading('上传中...', '正在上传首帧图片');
-                        const res = await axios.post('/api/upload/base_image', fd);
+                        // 修改处：使用 this.request，移除 res.data 层级
+                        const res = await this.request('POST', '/api/upload/base_image', fd);
                         
-                        if (res.data.success) {
-                            // 2. 更新前端数据
-                            this.fusionForm.result_image = res.data.url;
+                        if (res.success) {
+                            // 2. 更新前端数据 (注意这里用 res.url 而不是 res.data.url)
+                            this.fusionForm.result_image = res.url;
                             
                             // 3. 如果任务已存在，同步更新到后端数据库
                             if (this.fusionForm.id) {
-                                await this.request('PUT', `/api/projects/${this.currentProjectId}/fusions/${this.fusionForm.id}`, { result_image: res.data.url });
+                                await this.request('PUT', `/api/projects/${this.currentProjectId}/fusions/${this.fusionForm.id}`, { result_image: res.url });
                                 
                                 // 4. 同步更新列表视图
                                 const idx = this.fusionList.findIndex(f => f.id === this.fusionForm.id);
                                 if(idx !== -1) {
-                                    this.$set(this.fusionList, idx, { ...this.fusionList[idx], result_image: res.data.url });
+                                    this.$set(this.fusionList, idx, { ...this.fusionList[idx], result_image: res.url });
                                 }
                             }
                             this.$message.success('首帧上传成功');
                         }
                     } catch(e) { 
-                        this.$message.error('上传失败'); 
+                        if (e.message !== '操作失败') this.$message.error('上传失败'); 
                     } finally {
                         this.stopGlobalLoading();
                         e.target.value = ''; // 清空 input，允许重复上传同一文件
@@ -2606,23 +2609,24 @@
                     if (!file) return;
                     const fd = new FormData(); 
                     fd.append('file', file);
-                    // 复用 base_image 的上传接口或者 fusion_id 关联接口，这里借用 base_image 接口上传到 fusion 实体下
-                    // 更好的方式是后端有一个通用的 upload 接口，或者复用 base_image 接口但前端只取 url
-                    // 因为 MediaManager 主要是根据 id 存文件，复用接口没问题，只要把返回的 url 存对字段就行
+                    // 复用接口
                     fd.append('fusion_id', this.fusionForm.id); 
                     
                     try {
                         this.startGlobalLoading('上传中...', '正在上传图片');
-                        const res = await axios.post('/api/upload/base_image', fd); // 复用接口
-                        if (res.data.success) {
-                            this.fusionForm.end_frame_image = res.data.url;
+                        // 修改处：使用 this.request，移除 res.data 层级
+                        const res = await this.request('POST', '/api/upload/base_image', fd); 
+                        
+                        if (res.success) {
+                            // 注意这里用 res.url 而不是 res.data.url
+                            this.fusionForm.end_frame_image = res.url;
                             if (this.fusionForm.id) {
-                                await this.request('PUT', `/api/projects/${this.currentProjectId}/fusions/${this.fusionForm.id}`, { end_frame_image: res.data.url });
+                                await this.request('PUT', `/api/projects/${this.currentProjectId}/fusions/${this.fusionForm.id}`, { end_frame_image: res.url });
                             }
                             this.$message.success('上传成功');
                         }
                     } catch(e) { 
-                        this.$message.error('上传失败'); 
+                        if (e.message !== '操作失败') this.$message.error('上传失败'); 
                     } finally {
                         this.stopGlobalLoading();
                         e.target.value = '';
