@@ -373,7 +373,7 @@
                             </div>
                         
                             <!-- 角色列表 -->
-                            <el-row :gutter="20">
+                            <el-row :gutter="20" type="flex" style="flex-wrap: wrap;">
                                 <el-col :span="8" v-for="char in characterList" :key="char.id">
                                     <el-card class="character-card" style="margin-bottom: 20px; height: 100%;">
                                         <div slot="header" class="character-header">
