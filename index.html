@@ -171,10 +171,117 @@
         ::-webkit-scrollbar { width: 8px; height: 8px; }
         ::-webkit-scrollbar-thumb { background: #ccc; border-radius: 4px; }
         ::-webkit-scrollbar-track { background: #f1f1f1; }
+        /* 历史版本弹窗样式 */
+        .history-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 15px;
+            max-height: 500px;
+            overflow-y: auto;
+            padding: 5px;
+        }
+        .history-item {
+            border: 1px solid #eee;
+            border-radius: 6px;
+            overflow: hidden;
+            position: relative;
+            background: #fff;
+            transition: all 0.3s;
+        }
+        .history-item:hover {
+            box-shadow: 0 2px 12px 0 rgba(0,0,0,0.1);
+            transform: translateY(-2px);
+        }
+        .history-item.current-version {
+            border: 2px solid #67C23A;
+            background: #f0f9eb;
+        }
+        .history-tag {
+            position: absolute;
+            top: 5px;
+            left: 5px;
+            background: rgba(0,0,0,0.6);
+            color: #fff;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-size: 12px;
+            z-index: 2;
+        }
+        .history-preview-box {
+            width: 100%;
+            height: 150px;
+            background: #f5f7fa;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .history-actions {
+            padding: 10px;
+            text-align: center;
+            border-top: 1px solid #eee;
+        }
     </style>
 </head>
 <body>
     <div id="app">
+        <el-dialog title="项目资源历史回溯" :visible.sync="globalHistoryVisible" width="80%" top="5vh">
+            <div style="margin-bottom: 15px; display: flex; gap: 15px;">
+                <el-radio-group v-model="historyFilterType" size="small">
+                    <el-radio-button label="all">全部</el-radio-button>
+                    <el-radio-button label="character">角色</el-radio-button>
+                    <el-radio-button label="shot">场景/分镜</el-radio-button>
+                    <el-radio-button label="fusion">融图/视频</el-radio-button>
+                </el-radio-group>
+                <el-input v-model="historySearch" placeholder="搜索名称..." size="small" style="width: 200px;" prefix-icon="el-icon-search"></el-input>
+            </div>
+
+            <el-table :data="filteredHistoryList" height="600" border stripe v-loading="loadingHistory" row-key="id">
+                <el-table-column label="预览" width="400">
+                    <template slot-scope="scope">
+                        <el-image 
+                            v-if="scope.row.media_type === 'image'" 
+                            :src="scope.row.url" 
+                            :preview-src-list="[scope.row.url]"
+                            fit="cover" 
+                            lazy
+                            style="width: 100%; height: 150px; border-radius: 4px; cursor: pointer;">
+                        </el-image>
+
+                        <video v-else-if="scope.row.media_type === 'video'" 
+                            :src="scope.row.url" 
+                            controls 
+                            style="width: 100%; height: 150px; object-fit: cover;"></video>
+
+                        <div v-else style="color: #999; font-size: 12px; text-align: center;">
+                            不支持预览
+                        </div>
+                    </template>
+                </el-table-column>
+                
+                <el-table-column prop="entity_name" label="所属对象" min-width="200" sortable></el-table-column>
+                <el-table-column label="类型" width="100" prop="entity_type">
+                    <template slot-scope="scope">
+                        <el-tag size="mini" v-if="scope.row.entity_type==='character'">角色</el-tag>
+                        <el-tag size="mini" type="success" v-else-if="scope.row.entity_type==='shot'">场景</el-tag>
+                        <el-tag size="mini" type="warning" v-else-if="scope.row.entity_type==='fusion'">融图</el-tag>
+                        <el-tag size="mini" type="info" v-else>其他</el-tag>
+                    </template>
+                </el-table-column>
+                <el-table-column prop="version" label="版本" width="80" sortable>
+                    <template slot-scope="scope">v{{ scope.row.version }}</template>
+                </el-table-column>
+                <el-table-column prop="date_str" label="生成时间" width="160" sortable></el-table-column>
+                <el-table-column label="操作" fixed="right" min-width="120">
+                    <template slot-scope="scope">
+                        <el-button type="primary" size="mini" plain icon="el-icon-refresh-left" 
+                            @click="restoreHistoryItem(scope.row)">恢复/使用</el-button>
+                        <a :href="scope.row.url" :download="scope.row.filename" style="margin-left: 10px;">
+                            <el-button type="text" size="mini" icon="el-icon-download"></el-button>
+                        </a>
+                    </template>
+                </el-table-column>
+            </el-table>
+        </el-dialog>
         <!-- Global Loading Mask -->
         <div v-if="globalLoading" class="global-loading-mask">
             <div class="loading-dialog-box">
@@ -221,6 +328,7 @@
                             <el-button type="text" icon="el-icon-film" style="color: #E6A23C;" @click="exportJianyingDraft">导出剪映草稿</el-button>
                             <el-button type="text" icon="el-icon-edit" @click="openEditProject">编辑详情</el-button>
                             <el-button type="text" icon="el-icon-delete" style="color: #f56c6c;" @click="deleteProject">删除项目</el-button>
+                            <el-button type="text" icon="el-icon-time" @click="openGlobalHistory">历史回溯</el-button>
                         </div>
                     </div>
                     <el-descriptions :column="4" border size="small">
@@ -1062,7 +1170,13 @@
                 // 融图批量弹框状态
                 fusionBatchDialogVisible: false,
                 fusionBatchConfig: { target: '', scope: 'all' },
-                currentSeriesId: ''
+                currentSeriesId: '',
+                // 全局历史相关
+                globalHistoryVisible: false,
+                fullHistoryList: [], // 原始列表
+                loadingHistory: false,
+                historyFilterType: 'all',
+                historySearch: '',
             },
             computed: {
                 getModelsByProviderId() {
@@ -1080,7 +1194,43 @@
                 
                 currentProviderImageModels() { return this.availableImageModels; },
                 currentProviderVideoModels() { return this.availableVideoModels; },
-                currentProviderAudioModels() { return this.availableVoiceModels; }
+                currentProviderAudioModels() { return this.availableVoiceModels; },
+                // 过滤列表逻辑
+                filteredHistoryList() {
+                    // 基础保护：如果列表尚未加载，返回空数组
+                    if (!this.fullHistoryList) return [];
+
+                    return this.fullHistoryList.filter(item => {
+                        // 1. 类型过滤逻辑
+                        if (this.historyFilterType !== 'all') {
+                            // 特殊逻辑：选择"融图(fusion)"时，同时保留"元素(element)"类型
+                            if (this.historyFilterType === 'fusion') {
+                                if (item.entity_type !== 'fusion' && item.entity_type !== 'element') {
+                                    return false;
+                                }
+                            } else {
+                                // 其他情况（character, shot 等）严格匹配
+                                if (item.entity_type !== this.historyFilterType) {
+                                    return false;
+                                }
+                            }
+                        }
+
+                        // 2. 搜索过滤逻辑
+                        if (this.historySearch && this.historySearch.trim()) {
+                            const kw = this.historySearch.trim().toLowerCase();
+                            
+                            // 安全获取属性：如果没有名字或文件名，默认为空字符串，防止报错
+                            const name = (item.entity_name || '').toLowerCase();
+                            const filename = (item.filename || '').toLowerCase();
+                            
+                            // 只要名称或文件名包含关键词即可
+                            return name.includes(kw) || filename.includes(kw);
+                        }
+
+                        return true;
+                    });
+                },
             },
             mounted() { 
                 this.fetchSettings(); 
@@ -3043,7 +3193,105 @@
                         type: failCount === 0 ? 'success' : 'warning', 
                         message: `批量视频完成！成功: ${successCount}, 失败: ${failCount}` 
                     });
-                }
+                },
+                // 应用选中的版本
+                async applyVersion(item) {
+                    if (!this.currentHistoryCallback) return;
+
+                    try {
+                        // 调用回调函数，将选中的 URL 传回去进行保存
+                        await this.currentHistoryCallback(item.url, this.currentHistoryEntity);
+                        
+                        // 更新当前比对 URL，实现 UI 即时反馈
+                        this.currentHistoryComparingUrl = item.url;
+                        
+                        this.$message.success(`已切换至版本 v${item.version}`);
+                        // 可选：this.historyDialogVisible = false; // 选完自动关闭，或者保留让用户继续看
+                    } catch (e) {
+                        console.error(e);
+                        this.$message.error("切换版本失败");
+                    }
+                },
+
+                // 打开全局历史
+                async openGlobalHistory() {
+                    if (!this.currentProjectId) return this.$message.warning("请先选择项目");
+                    
+                    this.globalHistoryVisible = true;
+                    this.loadingHistory = true;
+                    this.fullHistoryList = [];
+                    
+                    try {
+                        const res = await this.request('GET', `/api/projects/${this.currentProjectId}/history`);
+                        this.fullHistoryList = res;
+                    } catch (e) {
+                        console.error(e);
+                        this.$message.error("获取历史记录失败");
+                    } finally {
+                        this.loadingHistory = false;
+                    }
+                },
+                
+                // 恢复/使用历史资源
+                async restoreHistoryItem(item) {
+                    const confirmText = `确定要将此版本 (v${item.version}) 应用到【${item.entity_name}】吗？`;
+                    
+                    await this.$confirm(confirmText, '确认恢复', { type: 'warning' });
+                    
+                    try {
+                        let endpoint = '';
+                        let payload = {};
+                        
+                        // 根据类型构造恢复请求
+                        if (item.entity_type === 'character') {
+                            endpoint = `/api/projects/${this.currentProjectId}/characters/${item.entity_id}`;
+                            payload = { image_url: item.url };
+                            
+                            // 更新本地列表视图
+                            const char = this.characterList.find(c => c.id === item.entity_id);
+                            if (char) char.image_url = item.url;
+                            
+                        } else if (item.entity_type === 'shot') {
+                            endpoint = `/api/projects/${this.currentProjectId}/shots/${item.entity_id}`;
+                            payload = { scene_image: item.url }; // 假设恢复的是场景图
+                            
+                            const shot = this.shotList.find(s => s.id === item.entity_id);
+                            if (shot) shot.scene_image = item.url;
+                            
+                        } else if (item.entity_type === 'fusion') {
+                            endpoint = `/api/projects/${this.currentProjectId}/fusions/${item.entity_id}`;
+                            // 融图比较复杂，需要判断是图片还是视频，是首帧还是尾帧
+                            // 这里做一个简单的智能判断：
+                            if (item.media_type === 'video') {
+                                payload = { video_url: item.url };
+                            } else {
+                                // 如果是图片，默认为结果图(首帧)，除非你有更复杂的逻辑区分
+                                payload = { result_image: item.url };
+                            }
+                            
+                            const fusion = this.fusionList.find(f => f.id === item.entity_id);
+                            if (fusion) {
+                                if(item.media_type === 'video') fusion.video_url = item.url;
+                                else fusion.result_image = item.url;
+                            }
+                        } else {
+                            this.$message.warning("暂不支持自动恢复该类型资源，请手动下载后上传");
+                            return;
+                        }
+                        
+                        // 发送请求
+                        if (endpoint) {
+                            await this.request('PUT', endpoint, payload);
+                            this.$message.success("恢复成功！");
+                        }
+                        
+                    } catch (e) {
+                        if (e !== 'cancel') {
+                            console.error(e);
+                            this.$message.error("恢复失败");
+                        }
+                    }
+                },
             }
         });
                 </script>

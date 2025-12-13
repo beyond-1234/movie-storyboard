@@ -577,6 +577,40 @@ def generate_fusion_video():
         return jsonify({'success': True, 'url': result['url']})
     return jsonify({'success': False}), 500
 
+@app.route('/api/projects/<project_id>/history', methods=['GET'])
+def get_project_history(project_id):
+    # 1. 收集项目下所有的实体 ID
+    entity_map = {}
+    
+    # A. 获取角色
+    chars = db.get_characters(project_id)
+    for c in chars:
+        entity_map[c['id']] = {'name': f"角色: {c['name']}", 'type': 'character'}
+        
+    # B. 获取分镜 (场景图通常绑定在分镜ID上)
+    shots = db.get_shots(project_id)
+    for s in shots:
+        name = f"场{s.get('scene','?')}-镜{s.get('shot_number','?')}"
+        entity_map[s['id']] = {'name': name, 'type': 'shot'}
+        
+    # C. 获取融图任务
+    fusions = db.get_fusions(project_id)
+    for f in fusions:
+        # 融图任务ID通常用于存结果图、视频
+        name = f"融图: 场{f.get('scene','?')}-镜{f.get('shot_number','?')}"
+        entity_map[f['id']] = {'name': name, 'type': 'fusion'}
+        
+        # 融图任务下的元素 (Element) 也有独立的图片
+        if f.get('elements'):
+            for el in f['elements']:
+                if el.get('id'):
+                    entity_map[el['id']] = {'name': f"元素: {el.get('name')} ({name})", 'type': 'element'}
+
+    # 2. 扫描文件系统
+    history_list = media_mgr.scan_project_files(entity_map)
+    print(history_list)
+    return jsonify(history_list)
+
 if __name__ == '__main__':
     print(f"Server started on http://127.0.0.1:5000")
     app.run(debug=True, port=5000)

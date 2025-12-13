@@ -7,6 +7,7 @@ import base64
 import requests
 from pathlib import Path
 from urllib.parse import urlparse
+import time
 
 # 配置日志
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -180,3 +181,68 @@ class MediaManager:
         except Exception as e:
             logger.error(f"Base64 conversion failed: {e}")
             return None
+
+    def scan_project_files(self, entity_map):
+        """
+        扫描整个项目相关的历史文件
+        :param entity_map: 字典 { entity_id: { 'name': 'xxx', 'type': 'character/scene/fusion' } }
+        """
+        history_items = []
+        
+        # 需要扫描的目录类型
+        target_types = ['image', 'video', 'audio']
+        
+        for media_type in target_types:
+            directory = self._get_directory(media_type)
+            if not os.path.exists(directory):
+                continue
+                
+            # 获取所有文件
+            files = os.listdir(directory)
+            
+            # 匹配文件名：ID_v版本.后缀 (例如: uuid123_v1.png)
+            # 或者 ID.后缀 (无版本号的也算v0或最新)
+            version_pattern = re.compile(r"^(.+?)_v(\d+)\.(.+)$")
+            
+            for f in files:
+                # 跳过隐藏文件
+                if f.startswith('.'): continue
+                
+                file_path = os.path.join(directory, f)
+                
+                # 尝试匹配带版本的
+                match = version_pattern.match(f)
+                entity_id = None
+                version = 1
+                
+                if match:
+                    entity_id = match.group(1)
+                    version = int(match.group(2))
+                else:
+                    # 尝试匹配不带版本的 (作为当前版本)
+                    base_name = os.path.splitext(f)[0]
+                    # 简单的清理逻辑，如果 ID 包含非法字符可能需要更复杂的匹配，这里假设 ID 比较纯净
+                    if base_name in entity_map:
+                        entity_id = base_name
+                        version = 9999 # 标记为当前/最新
+                
+                # 如果这个文件的 ID 属于当前项目
+                if entity_id and entity_id in entity_map:
+                    entity_info = entity_map[entity_id]
+                    file_stat = os.stat(file_path)
+                    
+                    history_items.append({
+                        'filename': f,
+                        'url': self._get_web_path(media_type, f),
+                        'entity_id': entity_id,
+                        'entity_name': entity_info.get('name', '未知'),
+                        'entity_type': entity_info.get('type', 'unknown'),
+                        'media_type': media_type,
+                        'version': version,
+                        'timestamp': file_stat.st_mtime, # 修改时间
+                        'date_str': time.strftime('%Y-%m-%d %H:%M', time.localtime(file_stat.st_mtime))
+                    })
+        
+        # 按时间倒序排列（最新的在前面）
+        history_items.sort(key=lambda x: x['timestamp'], reverse=True)
+        return history_items
