@@ -5,6 +5,9 @@ import uuid
 import json
 from typing import List, Optional, Dict, Any
 
+import logging
+from logging.handlers import RotatingFileHandler
+
 import eventlet
 eventlet.monkey_patch()
 
@@ -17,6 +20,51 @@ from media_manager import MediaManager
 
 from flask_socketio import SocketIO # 新增
 from task_queue import queue, init_socketio # 引入 init_socketio
+
+# ==========================================
+# 日志配置 (输出到文件 + 自动切割)
+# ==========================================
+def setup_logging():
+    # 1. 确保日志目录存在
+    log_dir = "logs"
+    if not os.path.exists(log_dir):
+        os.makedirs(log_dir)
+
+    # 2. 设置日志格式
+    formatter = logging.Formatter(
+        '%(asctime)s - %(name)s - %(levelname)s - [%(filename)s:%(lineno)d] - %(message)s'
+    )
+
+    # 3. 创建文件处理器 (RotatingFileHandler)
+    # maxBytes=10*1024*1024 (10MB): 当文件达到10MB时自动切割
+    # backupCount=10: 保留最近的10个日志文件 (app.log, app.log.1, ...)
+    file_handler = RotatingFileHandler(
+        os.path.join(log_dir, 'app.log'), 
+        maxBytes=10*1024*1024, 
+        backupCount=10, 
+        encoding='utf-8'
+    )
+    file_handler.setFormatter(formatter)
+    file_handler.setLevel(logging.INFO)
+
+    # 4. 创建控制台处理器 (保留在控制台输出，方便 docker logs 查看)
+    console_handler = logging.StreamHandler()
+    console_handler.setFormatter(formatter)
+    console_handler.setLevel(logging.INFO)
+
+    # 5. 配置根日志记录器
+    root_logger = logging.getLogger()
+    root_logger.setLevel(logging.INFO)
+    
+    # 清除旧的处理器（防止重复）
+    if root_logger.hasHandlers():
+        root_logger.handlers.clear()
+        
+    root_logger.addHandler(file_handler)
+    root_logger.addHandler(console_handler)
+
+# 在程序启动时立即执行配置
+setup_logging()
 
 # --- 配置 ---
 STATIC_FOLDER = "."
