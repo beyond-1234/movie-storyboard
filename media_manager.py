@@ -85,8 +85,24 @@ class MediaManager:
     def get_absolute_path(self, relative_path):
         """将Web路径转换为绝对文件系统路径"""
         if not relative_path: return None
-        # 去掉开头的 /
-        clean_path = relative_path.lstrip('/')
+        
+        # 1. 去掉路径开头可能存在的 / 或 \
+        clean_path = relative_path.lstrip('/\\')
+        
+        # 2. [核心修复] 检测并移除 "static/" 前缀
+        # 原因：self.static_folder 已经是绝对路径 (.../static) 了
+        # 如果传入的 web 路径里也有 "static/"，直接拼接就会导致 static/static 双重目录
+        
+        # 统一分隔符以便判断
+        check_path = clean_path.replace('\\', '/')
+        
+        if check_path.startswith('static/'):
+            # 如果是以 static/ 开头，去掉它（切片去掉前7个字符）
+            # 变成 "imgs/xxx.jpg"
+            clean_path = clean_path[7:].lstrip('/\\')
+            
+        # 3. 安全拼接
+        # 此时：.../dist/StoryboardAI/static + imgs/xxx.jpg
         return os.path.abspath(os.path.join(self.static_folder, clean_path))
 
     def save_uploaded_file(self, file_obj, media_type='image', entity_id=None):
