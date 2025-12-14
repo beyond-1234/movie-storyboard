@@ -724,6 +724,181 @@ def analyze_uploaded_image():
     else:
         return jsonify(result), 500
 
+from task_queue import queue
+from async_bridge import context_runner
+
+# 1. 异步生成融图路由
+@app.route('/api/async/generate/fusion_image', methods=['POST'])
+def async_fusion_image():
+    data = request.json
+    pid = data.get('project_id')
+    fid = data.get('fusion_id')
+    
+    # === 关键：在这里定义“这具体是个什么任务” ===
+    # 利用闭包特性，这里可以直接访问 pid, fid, data
+    def save_logic(result):
+        # 动态判断存哪个字段
+        is_end = 'end_frame_prompt' in data and data['end_frame_prompt']
+        field = 'end_frame_image' if is_end else 'result_image'
+        
+        # 调用 main.py 全局的 db 实例
+        db.update_fusion(pid, fid, {field: result['url']})
+        print(f"💾 [后台] 已更新融图 {fid} 的 {field}")
+
+    # 提交任务
+    queue.submit(
+        context_runner, # 跑通用的运行器
+        app, 
+        generate_fusion_image, # 复用原函数
+        data, 
+        save_logic, # 把上面定义的逻辑传进去！
+        desc=f"融图生成 ({fid})"
+    )
+    return jsonify({"success": True, "status": "queued"})
+
+
+# ----------------------------------------------------
+# 场景 2: 场景图生成 (逻辑很简单)
+# ----------------------------------------------------
+@app.route('/api/async/generate/scene_image', methods=['POST'])
+def async_scene_image():
+    data = request.json
+    pid = data.get('project_id')
+    sid = data.get('scene_id')
+
+    # 定义保存逻辑：场景图存 scene_image 字段
+    save_logic = lambda res: db.update_shot(pid, sid, {'scene_image': res['url']})
+
+    queue.submit(
+        context_runner,
+        app, generate_scene_image, data, save_logic,
+        desc=f"场景图生成 ({sid})"
+    )
+    return jsonify({"success": True, "status": "queued"})
+
+
+# ----------------------------------------------------
+# 场景 3: 视频生成 (存 video_url)
+# ----------------------------------------------------
+@app.route('/api/async/generate/fusion_video', methods=['POST'])
+def async_fusion_video():
+    data = request.json
+    pid = data.get('project_id')
+    fid = data.get('fusion_id')
+
+    # 定义保存逻辑：视频存 video_url 字段
+    save_logic = lambda res: db.update_fusion(pid, fid, {'video_url': res['url']})
+
+    queue.submit(
+        context_runner,
+        app, generate_fusion_video, data, save_logic,
+        desc=f"视频生成 ({fid})"
+    )
+    return jsonify({"success": True, "status": "queued"})
+
+# ----------------------------------------------------
+# 场景 4: 角色设计图生成 (存 image_url)
+# ----------------------------------------------------
+@app.route('/api/async/generate/character_views', methods=['POST'])
+def async_character_views():
+    data = request.json
+    pid = data.get('project_id')
+    cid = data.get('character_id')
+
+    # 1. 定义保存逻辑：
+    #    原有的 generate_character_views 只负责返回 URL，不负责存库。
+    #    这里我们在后台生成成功后，自动执行 update_character。
+    def save_logic(result):
+        if result.get('url'):
+            db.update_character(pid, cid, {'image_url': result['url']})
+            print(f"💾 [后台] 已更新角色 {cid} 的 image_url")
+
+    # 2. 提交任务
+    #    直接复用 main.py 原有的 generate_character_views 函数
+    queue.submit(
+        context_runner,
+        app, 
+        generate_character_views, # 复用原函数
+        data, 
+        save_logic,
+        desc=f"角色设计图 ({cid})"
+    )
+    
+    return jsonify({"success": True, "status": "queued"})
+
+# ----------------------------------------------------
+# 场景 5: 场景提示词生成 (存 scene_prompt)
+# ----------------------------------------------------
+@app.route('/api/async/generate/scene_prompt', methods=['POST'])
+def async_scene_prompt():
+    data = request.json
+    pid = data.get('project_id')
+    # 注意：前端传参有时叫 scene_id，有时叫 shot_id，这里根据 data_manager 逻辑统一处理
+    # 假设前端传的是 scene_id (即 shot 的 id)
+    sid = data.get('scene_id') or data.get('shot_id') 
+
+    # 1. 定义保存逻辑
+    def save_logic(result):
+        if result.get('prompt'):
+            db.update_shot(pid, sid, {'scene_prompt': result['prompt']})
+            print(f"📝 [后台] 已更新场景 {sid} 的提示词")
+
+    # 2. 提交任务
+    queue.submit(
+        context_runner,
+        app, 
+        generate_scene_prompt, # 复用原 main.py 中的同步函数
+        data, 
+        save_logic,
+        desc=f"场景提示词 ({sid})"
+    )
+    return jsonify({"success": True, "status": "queued"})
+
+
+# ----------------------------------------------------
+# 场景 6: 融图提示词生成 (存 fusion_prompt 和 end_frame_prompt)
+# ----------------------------------------------------
+@app.route('/api/async/generate/fusion_prompt', methods=['POST'])
+def async_fusion_prompt():
+    data = request.json
+    pid = data.get('project_id')
+    fid = data.get('fusion_id') or data.get('id') # 兼容 id 字段
+
+    # 1. 定义保存逻辑
+    def save_logic(result):
+        updates = {}
+        # 接口返回 'prompt' 对应首帧提示词
+        if result.get('prompt'):
+            updates['fusion_prompt'] = result['prompt']
+        # 接口返回 'end_frame_prompt' 对应尾帧
+        if result.get('end_frame_prompt'):
+            updates['end_frame_prompt'] = result['end_frame_prompt']
+            
+        if updates:
+            db.update_fusion(pid, fid, updates)
+            print(f"📝 [后台] 已更新融图 {fid} 的提示词")
+
+    # 2. 提交任务
+    queue.submit(
+        context_runner,
+        app, 
+        generate_fusion_prompt, # 复用原函数
+        data, 
+        save_logic,
+        desc=f"融图提示词 ({fid})"
+    )
+    return jsonify({"success": True, "status": "queued"})
+
+# 4. 任务列表路由
+@app.route('/api/tasks', methods=['GET'])
+def get_tasks():
+    return jsonify(queue.get_list())
+
+@app.route('/api/tasks/<tid>', methods=['DELETE'])
+def delete_task(tid):
+    if tid in queue.tasks: del queue.tasks[tid]
+    return jsonify({"success": True})
+
 if __name__ == '__main__':
     print(f"Server started on http://127.0.0.1:5000")
     app.run(debug=True, port=5000)

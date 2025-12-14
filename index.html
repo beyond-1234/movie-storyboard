@@ -220,6 +220,38 @@
             text-align: center;
             border-top: 1px solid #eee;
         }
+        /* ================== 新增：任务中心样式 ================== */
+        .task-floater {
+            position: fixed;
+            bottom: 30px;
+            right: 30px;
+            z-index: 2000;
+            cursor: pointer;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+            border-radius: 50%;
+            transition: all 0.3s;
+        }
+        .task-floater:hover { transform: scale(1.1); }
+
+        .task-list { padding: 20px; overflow-y: auto; height: calc(100vh - 80px); background-color: #f5f7fa; }
+        
+        .task-item {
+            background: #fff; 
+            border: 1px solid #EBEEF5; 
+            border-radius: 6px;
+            padding: 15px; 
+            margin-bottom: 12px; 
+            box-shadow: 0 2px 6px rgba(0,0,0,0.04);
+            transition: all 0.3s;
+        }
+        .task-item:hover { box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
+
+        .task-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+        .task-desc { font-weight: bold; font-size: 14px; color: #303133; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 240px; }
+        
+        .task-meta { display: flex; justify-content: space-between; font-size: 12px; color: #909399; margin-bottom: 8px; }
+        
+        .task-error { color: #F56C6C; font-size: 12px; margin-top: 8px; word-break: break-all; background: #fef0f0; padding: 5px; border-radius: 4px; }
     </style>
 </head>
 <body>
@@ -1137,6 +1169,40 @@
                 <el-button type="primary" icon="el-icon-video-play" @click="startFusionBatchGeneration">开始生成</el-button>
             </div>
         </el-dialog>
+
+        <div class="task-floater" @click="taskDrawerVisible = true">
+            <el-badge :value="processingTaskCount" :hidden="processingTaskCount === 0" class="item">
+                <el-button type="primary" icon="el-icon-loading" circle size="medium" v-if="processingTaskCount > 0"></el-button>
+                <el-button type="info" icon="el-icon-s-order" circle size="medium" v-else></el-button>
+            </el-badge>
+        </div>
+
+        <el-drawer title="后台任务队列" :visible.sync="taskDrawerVisible" direction="rtl" size="400px">
+            <div class="task-list">
+                <el-empty v-if="taskList.length === 0" description="暂无任务"></el-empty>
+                
+                <div v-for="task in taskList" :key="task.id" class="task-item">
+                    <div class="task-header">
+                        <span class="task-desc" :title="task.desc">{{ task.desc }}</span>
+                        <el-tag size="mini" :type="getTaskTagType(task.status)">{{ getTaskStatusText(task.status) }}</el-tag>
+                    </div>
+                    
+                    <div class="task-meta">
+                        <span><i class="el-icon-time"></i> {{ task.created_at }}</span>
+                        <i class="el-icon-close" @click="clearTask(task.id)" style="cursor:pointer; color:#999" v-if="task.status!=='processing'"></i>
+                    </div>
+                    
+                    <el-progress :percentage="task.status === 'success' ? 100 : (task.status === 'processing' ? 50 : 0)" 
+                                 :status="getTaskProgressStatus(task.status)" 
+                                 :show-text="false"
+                                 v-if="task.status !== 'pending'"></el-progress>
+                                 
+                    <div v-if="task.error" class="task-error">
+                        <i class="el-icon-warning-outline"></i> {{ task.error }}
+                    </div>
+                </div>
+            </div>
+        </el-drawer>
     </div>
 
     <script src="https://unpkg.com/vue@2.6.14/dist/vue.min.js"></script>
@@ -1229,6 +1295,10 @@
                 visualAnalysisFile: null, // 实际的文件对象
                 visualAnalysisResult: '', // 分析结果文本
                 analyzingVisual: false,   // Loading状态
+                // 任务中心相关数据
+                taskDrawerVisible: false,
+                taskList: [],
+                taskPoller: null,
             },
             computed: {
                 getModelsByProviderId() {
@@ -1283,6 +1353,11 @@
                         return true;
                     });
                 },
+                // 正在进行的任务数量
+                processingTaskCount() {
+                    if (!this.taskList) return 0;
+                    return this.taskList.filter(t => t.status === 'processing' || t.status === 'pending').length;
+                },
             },
             mounted() {
                 try {
@@ -1317,6 +1392,8 @@
                         }
                     }
                 });
+                // 启动任务轮询
+                this.startTaskPoller();
             },
             // 监听 genOptions 变化并保存
             watch: {
@@ -1646,9 +1723,8 @@
                 },
 
                 async generateCharacterView(character) {
-                    this.startGlobalLoading('生成角色设计图...', '请稍候');
                     try {
-                        const res = await this.request('POST', '/api/generate/character_views', {
+                        const res = await this.request('POST', '/api/async/generate/character_views', {
                             character_description: character.description,
                             character_id: character.id,
                             project_id: this.currentProjectId,
@@ -1656,19 +1732,14 @@
                             model_name: this.genOptions.imageModelName
                         });
 
-                        if (res.success) {
-                            const charIndex = this.characterList.findIndex(c => c.id === character.id);
-                            if (charIndex !== -1) {
-                                this.$set(this.characterList[charIndex], 'image_url', res.url);
-                                await this.request('PUT', `/api/projects/${this.currentProjectId}/characters/${character.id}`, {
-                                    image_url: res.url
-                                });
-                            }
+                        if (res.success && res.status === 'queued') {
+                            this.$message.success('角色生成任务已提交');
+                            this.taskDrawerVisible = true;
+                            this.fetchTasks();
                         }
                     } catch (e) {
                         console.error(e);
-                    } finally {
-                        this.stopGlobalLoading();
+                        this.$message.error('提交失败');
                     }
                 },
 
@@ -1714,114 +1785,61 @@
                         this.$message.warning('请先填写场景说明');
                         return;
                     }
-                    
-                    if (!this.genOptions.textProviderId || !this.genOptions.textModelName) {
+                    if (!this.genOptions.textProviderId) {
                         this.$message.warning('请先选择文本生成模型');
                         return;
                     }
-                    
-                    this.startGlobalLoading('生成场景提示词...', '请稍候');
+
+                    // 改为异步调用
                     try {
-                        const res = await this.request('POST', '/api/generate/scene_prompt', {
+                        const res = await this.request('POST', '/api/async/generate/scene_prompt', {
                             scene_description: shot.scene_description,
                             project_id: this.currentProjectId,
+                            scene_id: shot.id, // 确保传 ID
                             provider_id: this.genOptions.textProviderId,
                             model_name: this.genOptions.textModelName
                         });
                         
-                        if (res.success) {
-                            // 更新分镜数据中的场景提示词
-                            await this.request('PUT', `/api/projects/${this.currentProjectId}/shots/${shot.id}`, {
-                                scene_prompt: res.prompt
-                            });
-                            const idx = this.shotList.findIndex(s=>s.id===shot.id);
-                            if(idx !== -1) {
-                                this.$set(this.shotList, idx, { ...this.shotList[idx], scene_prompt: res.prompt });
-                            }
-                            this.$message.success('场景提示词生成成功');
-                        } else {
-                            this.$message.error(res.error || '生成失败');
+                        if (res.success && res.status === 'queued') {
+                            this.$message.success('提示词生成任务已提交');
+                            this.taskDrawerVisible = true;
+                            this.fetchTasks();
                         }
                     } catch(e) {
-                        console.error('生成场景提示词失败', e);
-                        this.$message.error('生成场景提示词失败');
-                    } finally {
-                        this.stopGlobalLoading();
+                        console.error(e);
+                        this.$message.error('提交失败');
                     }
                 },
                 
                 // 批量生成场景提示词
                 async batchGenerateScenePrompts() {
-                    if (!this.genOptions.textProviderId || !this.genOptions.textModelName) {
-                        this.$message.warning('请先选择文本生成模型');
-                        return;
-                    }
-
-                    if (!this.shotList || this.shotList.length === 0) {
-                        this.$message.warning('场景列表为空，请先添加场景');
-                        return;
-                    }
-
-                    const tasks = this.shotList.filter(s => !s.scene_prompt || s.scene_prompt.trim() === '');
-                    if (tasks.length === 0) {
-                        this.$message.info('所有场景都已有提示词');
-                        return;
-                    }
-                    
-                    const total = tasks.length;
-                    let successCount = 0;
-                    let failCount = 0;
-                    
-                    this.startGlobalLoading(`批量生成场景提示词... (0/${total})`, `共 ${total} 个任务，请勿关闭页面`);
-                    
-                    for (let i = 0; i < total; i++) {
-                        const shot = tasks[i];
-                        this.loadingTitle = `正在处理第 ${i + 1}/${total} 个场景...`;
+                    if (!this.genOptions.textProviderId) return this.$message.warning('请先选择文本生成模型');
                         
+                    // 筛选：有描述 但 没提示词 的场景
+                    const tasks = this.shotList.filter(s => s.scene_description && (!s.scene_prompt || s.scene_prompt.trim() === ''));
+                    
+                    if (tasks.length === 0) return this.$message.info('没有需要生成的任务');
+                    
+                    let submittedCount = 0;
+                    // 批量提交
+                    for (const shot of tasks) {
                         try {
-                            if (this.currentAbortController.signal.aborted) break;
-                            
-                            if (!shot.scene_description) {
-                                console.warn(`场景 ${shot.shot_number} 没有描述，跳过`);
-                                continue;
-                            }
-                            
-                            const res = await this.request('POST', '/api/generate/scene_prompt', {
+                            const res = await this.request('POST', '/api/async/generate/scene_prompt', {
                                 scene_description: shot.scene_description,
                                 project_id: this.currentProjectId,
+                                scene_id: shot.id,
                                 provider_id: this.genOptions.textProviderId,
                                 model_name: this.genOptions.textModelName
-                            }, { signal: this.currentAbortController.signal });
-                            
-                            if (res.success) {
-                                await this.request('PUT', `/api/projects/${this.currentProjectId}/shots/${shot.id}`, {
-                                    scene_prompt: res.prompt
-                                });
-                                
-                                const idx = this.shotList.findIndex(s => s.id === shot.id);
-                                if (idx !== -1) {
-                                    this.$set(this.shotList, idx, { ...this.shotList[idx], scene_prompt: res.prompt });
-                                }
-                                
-                                successCount++;
-                            } else {
-                                failCount++;
-                            }
-                            
-                            // 短暂延迟，避免API限流
-                            await new Promise(resolve => setTimeout(resolve, 500));
-                            
-                        } catch (e) {
-                            console.error(`场景提示词生成失败 shot ${shot.shot_number}:`, e);
-                            failCount++;
-                        }
+                            });
+                            if (res.success) submittedCount++;
+                        } catch (e) { console.error(e); }
                     }
                     
-                    this.stopGlobalLoading();
-                    this.$message({ 
-                        type: failCount === 0 ? 'success' : 'warning', 
-                        message: `批量任务完成！成功: ${successCount}, 失败: ${failCount}` 
-                    });
+                    if (submittedCount > 0) {
+                        this.$message.success(`已提交 ${submittedCount} 个提示词任务`);
+                        this.taskDrawerVisible = true;
+                        this.fetchTasks();
+                    }
                 },
                 
                 // 场景相关方法（操作分镜数据）
@@ -1915,39 +1933,22 @@
                         return;
                     }
                     try {
-                        // 使用全局加载弹框
-                        this.startGlobalLoading('正在生成场景图片...', '请稍候');
-                        const result = await this.request('POST', '/api/generate/scene_image', {
+                        const res = await this.request('POST', '/api/async/generate/scene_image', {
                             scene_id: shot.id,
+                            project_id: this.currentProjectId,
                             scene_prompt: shot.scene_prompt,
                             provider_id: this.genOptions.imageProviderId,
                             model_name: this.genOptions.imageModelName
-                        }, { signal: this.currentAbortController.signal });
-                        if(result.success) {
-                            // 如果需要更新表单，则更新表单中的图片
-                            if (updateForm && this.sceneForm && this.sceneForm.id === shot.id) {
-                                this.sceneForm.scene_image = result.url;
-                            }
+                        });
 
-                            // 更新分镜数据中的场景图片
-                            await this.request('PUT', `/api/projects/${this.currentProjectId}/shots/${shot.id}`, {
-                                scene_image: result.url
-                            });
-                            const idx = this.shotList.findIndex(s=>s.id===shot.id);
-                            if(idx !== -1) {
-                                this.$set(this.shotList, idx, { ...this.shotList[idx], scene_image: result.url });
-                            }
-                            this.$message.success('场景图片生成成功');
-                        } else {
-                            this.$message.error(result.error || '生成失败');
+                        if (res.success && res.status === 'queued') {
+                            this.$message.success('场景图任务已提交后台');
+                            this.taskDrawerVisible = true;
+                            this.fetchTasks();
                         }
                     } catch(e) {
-                        if (e.message !== '已取消') {
-                            console.error('生成场景图片失败', e);
-                            this.$message.error('生成场景图片失败');
-                        }
-                    } finally {
-                        this.stopGlobalLoading();
+                        console.error(e);
+                        this.$message.error('提交失败');
                     }
                 },
                 handleSceneImageSuccess(res) {
@@ -2204,76 +2205,45 @@
 
                 // 批量生成场景图片
                 async batchGenerateSceneImages() {
-                    if (!this.genOptions.imageProviderId || !this.genOptions.imageModelName) {
+                    // 逻辑复用原有筛选
+                    if (!this.genOptions.imageProviderId) {
                         this.$message.warning('请先选择图片生成模型');
                         return;
                     }
 
-                    if (!this.shotList || this.shotList.length === 0) {
-                        this.$message.warning('场景列表为空，请先添加场景');
-                        return;
-                    }
-
-                    const tasks = this.shotList.filter(s => !s.scene_image || s.scene_image.trim() === '');
+                    // 筛选没有图片的场景
+                    const tasks = this.shotList.filter(s => !s.scene_image && s.scene_prompt);
+                    
                     if (tasks.length === 0) {
-                        this.$message.info('所有场景都已有图片');
+                        this.$message.info('没有需要生成的场景（或缺少提示词）');
                         return;
                     }
 
-                    const total = tasks.length;
-                    let successCount = 0;
-                    let failCount = 0;
+                    let submittedCount = 0;
 
-                    this.startGlobalLoading(`批量生成场景图片... (0/${total})`, `共 ${total} 个任务，请勿关闭页面`);
-
-                    for (let i = 0; i < total; i++) {
-                        const shot = tasks[i];
-                        this.loadingTitle = `正在生成第 ${i + 1}/${total} 个场景图片...`;
-
+                    for (const shot of tasks) {
                         try {
-                            if (this.currentAbortController.signal.aborted) break;
-
-                            if (!shot.scene_prompt) {
-                                console.warn(`场景 ${shot.shot_number} 没有提示词，跳过`);
-                                continue;
-                            }
-
-                            const res = await this.request('POST', '/api/generate/scene_image', {
+                            const res = await this.request('POST', '/api/async/generate/scene_image', {
                                 scene_id: shot.id,
+                                project_id: this.currentProjectId,
                                 scene_prompt: shot.scene_prompt,
                                 provider_id: this.genOptions.imageProviderId,
                                 model_name: this.genOptions.imageModelName
-                            }, { signal: this.currentAbortController.signal });
+                            });
 
-                            if (res.success) {
-                                await this.request('PUT', `/api/projects/${this.currentProjectId}/shots/${shot.id}`, {
-                                    scene_image: res.url
-                                });
-
-                                const idx = this.shotList.findIndex(s => s.id === shot.id);
-                                if (idx !== -1) {
-                                    this.$set(this.shotList, idx, { ...this.shotList[idx], scene_image: res.url });
-                                }
-
-                                successCount++;
-                            } else {
-                                failCount++;
+                            if (res.success && res.status === 'queued') {
+                                submittedCount++;
                             }
-
-                            // 短暂延迟，避免API限流
-                            await new Promise(resolve => setTimeout(resolve, 500));
-
                         } catch (e) {
-                            console.error(`场景图片生成失败 shot ${shot.shot_number}:`, e);
-                            failCount++;
+                            console.error(e);
                         }
                     }
 
-                    this.stopGlobalLoading();
-                    this.$message({
-                        type: failCount === 0 ? 'success' : 'warning',
-                        message: `批量任务完成！成功: ${successCount}, 失败: ${failCount}`
-                    });
+                    if (submittedCount > 0) {
+                        this.$message.success(`已提交 ${submittedCount} 个场景图任务`);
+                        this.taskDrawerVisible = true;
+                        this.fetchTasks();
+                    }
                 },
 // --- 融图功能方法 ---
                 async fetchFusions() {
@@ -2413,50 +2383,39 @@
 
                 // --- 修改后的核心生成接口调用 ---
                 async generateFusionImage(row) {
-                    // 如果是在列表点击，row有值；如果在弹窗点击，row可能是事件对象，使用 this.fusionForm
+                    // 兼容逻辑：如果是从弹窗调用，row 是 Event，目标是 this.fusionForm
+                    // 如果是从列表调用，row 是数据对象
                     const target = (row && row.id) ? row : this.fusionForm;
                     
                     if (!target.base_image) return this.$message.warning('请先设置底图');
                     if (!target.fusion_prompt) return this.$message.warning('请填写提示词');
                     
-                    // 确保任务已保存，否则后端无法通过ID获取到elements
+                    // 如果是新建任务还没保存，提示先保存
                     if (!target.id) {
-                        this.$message.info("任务尚未保存，正在自动保存...");
-                        await this.saveFusionData(target); // 强制保存以获取ID
-                        // 更新 row 引用，以便后续操作
-                        row = target;
+                        return this.$message.warning('请先保存任务再生成');
                     }
                     
-                    this.startGlobalLoading('正在生成...', 'AI 正在基于底图和元素进行重绘融合...');
+                    // 异步调用
                     try {
-                        // *** UPDATED PAYLOAD with ID and project ID ***
-                        const res = await this.request('POST', '/api/generate/fusion_image', {
-                            fusion_id: target.id, // 传递任务ID，后端用它来获取elements和base_image
-                            project_id: this.currentProjectId, 
+                        const res = await this.request('POST', '/api/async/generate/fusion_image', {
+                            fusion_id: target.id,
+                            project_id: this.currentProjectId,
                             fusion_prompt: target.fusion_prompt,
                             provider_id: this.genOptions.fusionProviderId,
-                            model_name: this.genOptions.fusionModelName
+                            model_name: this.genOptions.fusionModelName,
+                            // 传递额外参数判断是否是尾帧 (如果复用此函数)
+                            // 这里假设你调用时会根据上下文区分，或者通过 target 区分
+                            // 目前后端逻辑主要看 data 中是否有 end_frame_prompt，这里简单传通用参数
                         });
                         
-                        if (res.success) {
-                            target.result_image = res.url;
-                            // 自动保存结果
-                            if (target.id) {
-                                await this.request('PUT', `/api/projects/${this.currentProjectId}/fusions/${target.id}`, { result_image: res.url });
-                                // 如果是在列表中操作，更新列表数据
-                                const idx = this.fusionList.findIndex(f => f.id === target.id);
-                                if(idx !== -1) {
-                                    // 确保更新后的数据能反映到列表上
-                                    this.$set(this.fusionList, idx, { ...this.fusionList[idx], result_image: res.url });
-                                }
-                            }
-                            this.$message.success('生成成功！');
+                        if (res.success && res.status === 'queued') {
+                            this.$message.success('融图任务已提交后台');
+                            this.taskDrawerVisible = true; // 自动展开任务面板
+                            this.fetchTasks();
                         }
                     } catch (e) {
                         console.error(e);
-                        this.$message.error('生成失败');
-                    } finally {
-                        this.stopGlobalLoading();
+                        this.$message.error('提交失败');
                     }
                 },
                 // 从场景列表复制数据
@@ -2758,89 +2717,54 @@
                 async generateFusionPrompt(fusion) {
                     // 1. 基础校验
                     if (!fusion.scene_description && !fusion.visual_description) {
-                        this.$message.warning('缺少场景或分镜描述，请先关联分镜或手动填写');
+                        this.$message.warning('缺少场景或分镜描述');
                         return;
                     }
-                    
-                    if (!this.genOptions.textProviderId || !this.genOptions.textModelName) {
-                        this.$message.warning('请先在顶部选择文本生成模型');
+                    if (!this.genOptions.textProviderId) {
+                        this.$message.warning('请先选择文本模型');
                         return;
                     }
 
-                    // 2. [新增核心逻辑] 汇总图1、图2等素材内容
+                    // 2. [保留逻辑] 构建素材映射字符串
                     let imgIndex = 1;
                     let mappingParts = [];
-
-                    // 处理元素 (前景)
                     if (fusion.elements && fusion.elements.length > 0) {
                         fusion.elements.forEach(el => {
                             mappingParts.push(`图${imgIndex} (Image ${imgIndex}): ${el.name} [前景元素]`);
                             imgIndex++;
                         });
                     }
-
-                    // 处理底图 (背景/环境)
                     if (fusion.base_image) {
-                        // 如果有底图，它通常是最后一张
                         mappingParts.push(`图${imgIndex} (Image ${imgIndex}): 场景底图/背景 [Background]`);
                     } else {
-                        // 如果没有底图，给个提示
                         mappingParts.push(`(未设置底图，请基于纯文本生成背景)`);
                     }
-
                     const elementMappingStr = mappingParts.join('\n');
-                    console.log("构建的素材映射:", elementMappingStr); // 调试用
 
-                    // 3. 开始请求
-                    this.startGlobalLoading('生成融图提示词...', '正在根据素材列表编排画面...');
+                    // 3. 异步提交
                     try {
-                        // 确保任务有 ID
-                        if (!fusion.id) {
-                            const savedFusion = await this.saveFusionData(fusion);
-                            Object.assign(fusion, savedFusion);
-                        }
+                        // 如果是新建未保存，先保存
+                        if (!fusion.id) await this.saveFusionData(fusion);
 
-                        // 发送请求，带上 element_mapping
-                        const res = await this.request('POST', '/api/generate/fusion_prompt', {
+                        const res = await this.request('POST', '/api/async/generate/fusion_prompt', {
+                            id: fusion.id, // 传 ID
+                            fusion_id: fusion.id, // 兼容性冗余
                             scene_description: fusion.scene_description || '',
                             shot_description: fusion.visual_description || '',
-                            // 传递构建好的映射字符串
-                            element_mapping: elementMappingStr,
+                            element_mapping: elementMappingStr, // 传构建好的字符串
                             project_id: this.currentProjectId,
                             provider_id: this.genOptions.textProviderId,
                             model_name: this.genOptions.textModelName
-                        }, { signal: this.currentAbortController.signal });
+                        });
 
-                        if (res.success) {
-                            const updates = {
-                                fusion_prompt: res.prompt,
-                                end_frame_prompt: res.end_frame_prompt || '' // 获取后端返回的尾帧提示词
-                            };
-                            
-                            // 更新后端
-                            await this.request('PUT', `/api/projects/${this.currentProjectId}/fusions/${fusion.id}`, updates);
-
-                            // 更新前端
-                            fusion.fusion_prompt = updates.fusion_prompt;
-                            fusion.end_frame_prompt = updates.end_frame_prompt;
-                            
-                            const idx = this.fusionList.findIndex(f => f.id === fusion.id);
-                            if(idx !== -1) {
-                                this.$set(this.fusionList, idx, { ...this.fusionList[idx], ...updates });
-                            }
-                            
-                            this.$message.success('已生成包含图片引用的提示词');
-                        } else {
-                            throw new Error(res.error || '生成失败');
+                        if (res.success && res.status === 'queued') {
+                            this.$message.success('提示词生成任务已提交');
+                            this.taskDrawerVisible = true;
+                            this.fetchTasks();
                         }
-                        
                     } catch(e) {
-                        if (e.message !== '已取消') {
-                            console.error('生成融图提示词失败', e);
-                            this.$message.error('生成融图提示词失败');
-                        }
-                    } finally {
-                        this.stopGlobalLoading();
+                        console.error(e);
+                        this.$message.error('提交失败');
                     }
                 },
                 async generateFusionEndFrameImage(row) {
@@ -2950,170 +2874,112 @@
                     }
                 },
                 async batchGenerateFusionPrompts(tasks) {
-                    
-                    if (!this.genOptions.textProviderId || !this.genOptions.textModelName) {
-                        this.$message.warning('请先在顶部选择文本生成模型');
-                        return;
-                    }
-                    
-                    if (tasks.length === 0) {
-                        this.$message.info('选中的任务都已有提示词，无需生成');
-                        return;
-                    }
-
-                    const total = tasks.length;
-                    let successCount = 0;
-                    let failCount = 0;
-
-                    this.startGlobalLoading(`批量生成融图提示词... (0/${total})`, `共 ${total} 个任务，请勿关闭页面`);
-
-                    for (let i = 0; i < total; i++) {
-                        const fusion = tasks[i];
-                        this.loadingTitle = `正在处理第 ${i + 1}/${total} 个融图提示词...`;
+                    if (!this.genOptions.textProviderId) return this.$message.warning('请先选择文本模型');
                         
-                        try {
-                            if (this.currentAbortController.signal.aborted) break;
-                            
-                            // 1. 确保任务有 ID，否则先保存
-                            if (!fusion.id) {
-                                const savedFusion = await this.saveFusionData(fusion);
-                                Object.assign(fusion, savedFusion); 
-                            }
-                            
-                            // 检查是否有描述信息
-                            if (!fusion.scene_description && !fusion.visual_description) {
-                                console.warn(`融图任务 ${fusion.shot_number} 缺少描述，跳过`);
-                                failCount++;
-                                continue;
-                            }
+                    // 筛选：没有提示词的任务
+                    const validTasks = tasks.filter(f => !f.fusion_prompt || f.fusion_prompt.trim() === '');
+                    if (validTasks.length === 0) return this.$message.info('选中的任务都已有提示词');
 
-                            // 2. [新增核心逻辑] 汇总图1、图2等素材内容
+                    let submittedCount = 0;
+
+                    for (const fusion of validTasks) {
+                        try {
+                            // 1. 确保有 ID
+                            if (!fusion.id) await this.saveFusionData(fusion);
+                            
+                            // 2. [保留逻辑] 构建映射字符串
+                            if (!fusion.scene_description && !fusion.visual_description) continue; // 跳过无描述的
+                            
                             let imgIndex = 1;
                             let mappingParts = [];
-
-                            // 处理元素 (前景)
-                            if (fusion.elements && fusion.elements.length > 0) {
+                            if (fusion.elements) {
                                 fusion.elements.forEach(el => {
-                                    mappingParts.push(`图${imgIndex} (Image ${imgIndex}): ${el.name} [前景元素]`);
+                                    mappingParts.push(`图${imgIndex}: ${el.name}`);
                                     imgIndex++;
                                 });
                             }
+                            if (fusion.base_image) mappingParts.push(`图${imgIndex}: 底图`);
+                            else mappingParts.push(`(无底图)`);
+                            const str = mappingParts.join('\n');
 
-                            // 处理底图 (背景/环境)
-                            if (fusion.base_image) {
-                                // 如果有底图，它通常是最后一张
-                                mappingParts.push(`图${imgIndex} (Image ${imgIndex}): 场景底图/背景 [Background]`);
-                            } else {
-                                // 如果没有底图，给个提示
-                                mappingParts.push(`(未设置底图，请基于纯文本生成背景)`);
-                            }
-
-                            const elementMappingStr = mappingParts.join('\n');
-                            console.log("构建的素材映射:", elementMappingStr); // 调试用
-
-                            // 2. 接口请求
-                            const res = await this.request('POST', '/api/generate/fusion_prompt', {
+                            // 3. 发送请求
+                            const res = await this.request('POST', '/api/async/generate/fusion_prompt', {
+                                id: fusion.id,
+                                fusion_id: fusion.id,
                                 scene_description: fusion.scene_description || '',
                                 shot_description: fusion.visual_description || '',
-                                // 传递构建好的映射字符串
-                                element_mapping: elementMappingStr,
+                                element_mapping: str,
                                 project_id: this.currentProjectId,
                                 provider_id: this.genOptions.textProviderId,
                                 model_name: this.genOptions.textModelName
-                            }, { signal: this.currentAbortController.signal });
+                            });
 
-                            if (res.success) {
-                                const updates = {
-                                    fusion_prompt: res.prompt,
-                                    end_frame_prompt: res.end_frame_prompt || '' // 获取后端返回的尾帧提示词
-                                };
-                                
-                                // 更新后端
-                                await this.request('PUT', `/api/projects/${this.currentProjectId}/fusions/${fusion.id}`, updates);
-
-                                // 更新前端
-                                fusion.fusion_prompt = updates.fusion_prompt;
-                                fusion.end_frame_prompt = updates.end_frame_prompt;
-                                
-                                const idx = this.fusionList.findIndex(f => f.id === fusion.id);
-                                if(idx !== -1) {
-                                    this.$set(this.fusionList, idx, { ...this.fusionList[idx], ...updates });
-                                }
-                                
-                                successCount++;
-                            } else {
-                                throw new Error(res.error || '生成失败');
-                            }
+                            if (res.success) submittedCount++;
                             
-                            // 短暂延迟，避免API限流
-                            await new Promise(resolve => setTimeout(resolve, 500));
-                            
-                        } catch (e) {
-                            console.error(`融图提示词生成失败 task ${fusion.shot_number}:`, e);
-                            failCount++;
-                        }
+                        } catch (e) { console.error(e); }
                     }
-                    
-                    this.stopGlobalLoading();
-                    this.$message({ 
-                        type: failCount === 0 ? 'success' : 'warning', 
-                        message: `批量任务完成！成功: ${successCount}, 失败: ${failCount}` 
-                    });
+
+                    if (submittedCount > 0) {
+                        this.$message.success(`已提交 ${submittedCount} 个提示词任务`);
+                        this.taskDrawerVisible = true;
+                        this.fetchTasks();
+                    }
                 },
                 // 批量生成融合图
                 async batchGenerateFusionImages(tasks, type = 'start') {
+                    // 1. 确定字段名称
                     const promptField = type === 'end' ? 'end_frame_prompt' : 'fusion_prompt';
-                        const imageField = type === 'end' ? 'end_frame_image' : 'result_image';
-                        const actionName = type === 'end' ? '尾帧' : '首帧';
+                    const actionName = type === 'end' ? '尾帧' : '首帧';
 
-                        // 检查提示词
-                        const tasksWithoutPrompt = tasks.filter(f => !f[promptField] || f[promptField].trim() === '');
-                        if (tasksWithoutPrompt.length > 0) {
-                            this.$message.warning(`部分任务缺少${actionName}提示词，无法生成`);
-                            return;
-                        }
+                    // 2. 预检查
+                    const validTasks = tasks.filter(f => f[promptField] && f[promptField].trim() !== '');
+                    if (validTasks.length === 0) {
+                        this.$message.warning(`没有符合条件的任务（缺少${actionName}提示词）`);
+                        return;
+                    }
 
-                        this.startGlobalLoading(`批量生成${actionName}...`, `共 ${tasks.length} 个任务`);
-                        let successCount = 0;
-                        let failCount = 0;
+                    if (!this.genOptions.fusionProviderId) {
+                        this.$message.warning('请先选择图生图模型');
+                        return;
+                    }
 
-                        for (let i = 0; i < tasks.length; i++) {
-                            const fusion = tasks[i];
-                            this.loadingTitle = `正在生成第 ${i + 1}/${tasks.length} 个${actionName}...`;
+                    // 3. 提交任务
+                    // 注意：不再需要 GlobalLoading 遮罩，因为提交很快
+                    let submittedCount = 0;
+                    
+                    // 我们使用 Promise.all 并发提交请求，或者简单的循环 await 也可以
+                    // 因为后端现在返回非常快，循环 await 不会卡顿
+                    for (const fusion of validTasks) {
+                        // 如果是新建任务未保存，先保存以获取 ID (虽然批量操作通常是针对已保存的)
+                        if (!fusion.id) await this.saveFusionData(fusion);
 
-                            try {
-                                if (this.currentAbortController.signal.aborted) break;
+                        try {
+                            const res = await this.request('POST', '/api/async/generate/fusion_image', {
+                                fusion_id: fusion.id,
+                                project_id: this.currentProjectId,
+                                fusion_prompt: fusion[promptField],
+                                provider_id: this.genOptions.fusionProviderId,
+                                model_name: this.genOptions.fusionModelName,
+                                // 这里需要后端 async_fusion_image 支持 end_frame_prompt 参数判断
+                                // 或者我们在参数里显式带上 type
+                                end_frame_prompt: type === 'end' ? fusion[promptField] : undefined
+                            });
 
-                                const res = await this.request('POST', '/api/generate/fusion_image', {
-                                    fusion_id: fusion.id,
-                                    project_id: this.currentProjectId,
-                                    fusion_prompt: fusion[promptField], // 动态取提示词
-                                    provider_id: this.genOptions.fusionProviderId,
-                                    model_name: this.genOptions.fusionModelName
-                                });
-
-                                if (res.success) {
-                                    fusion[imageField] = res.url; // 动态更新前端字段
-                                    
-                                    // 动态构建更新对象
-                                    const updatePayload = {};
-                                    updatePayload[imageField] = res.url;
-                                    
-                                    await this.request('PUT', `/api/projects/${this.currentProjectId}/fusions/${fusion.id}`, updatePayload);
-                                    successCount++;
-                                } else {
-                                    throw new Error(res.error);
-                                }
-                            } catch (e) {
-                                console.error(e);
-                                failCount++;
+                            if (res.success && res.status === 'queued') {
+                                submittedCount++;
                             }
+                        } catch (e) {
+                            console.error(e);
                         }
-                        this.stopGlobalLoading();
-                        this.$message({ 
-                            type: failCount === 0 ? 'success' : 'warning', 
-                            message: `批量${actionName}完成！成功: ${successCount}, 失败: ${failCount}` 
-                        });
+                    }
+
+                    if (submittedCount > 0) {
+                        this.$message.success(`已提交 ${submittedCount} 个${actionName}生成任务`);
+                        this.taskDrawerVisible = true; // 打开面板看进度
+                        this.fetchTasks(); // 刷新列表
+                    } else {
+                        this.$message.warning('任务提交失败');
+                    }
                 },
 
                 // 提交元素
@@ -3263,106 +3129,67 @@
                     if (!row.result_image) {
                         return this.$message.warning('请先生成融合图作为首帧');
                     }
-                    
-                    if (!this.genOptions.videoProviderId || !this.genOptions.videoModelName) {
+                    if (!this.genOptions.videoProviderId) {
                         return this.$message.warning('请先选择视频生成模型');
                     }
 
-                    this.startGlobalLoading('正在生成融图视频...', 'AI 正在基于融合图生成动态视频...');
-                    
                     try {
-                        // 确保任务有ID
-                        if (!row.id) {
-                            const saved = await this.saveFusionData(row);
-                            Object.assign(row, saved);
-                        }
-
-                        const res = await this.request('POST', '/api/generate/fusion_video', {
+                        const res = await this.request('POST', '/api/async/generate/fusion_video', {
                             fusion_id: row.id,
                             project_id: this.currentProjectId,
                             provider_id: this.genOptions.videoProviderId,
                             model_name: this.genOptions.videoModelName
                         });
 
-                        if (res.success) {
-                            // 更新前端数据
-                            this.$set(row, 'video_url', res.url);
-                            this.$message.success('视频生成成功！');
-                        } else {
-                            this.$message.error(res.error || '生成失败');
+                        if (res.success && res.status === 'queued') {
+                            this.$message.success('视频生成任务已提交，耗时较长请耐心等待');
+                            this.taskDrawerVisible = true;
+                            this.fetchTasks();
                         }
                     } catch (e) {
                         console.error(e);
-                        this.$message.error('生成视频请求失败');
-                    } finally {
-                        this.stopGlobalLoading();
+                        this.$message.error('提交失败');
                     }
                 },
                 async batchGenerateFusionVideos(tasks) {
-                    // 1. 预检查：所有任务必须已有 Result Image (作为首帧)
-                    const readyTasks = tasks.filter(f => f.result_image);
-                    const skippedCount = tasks.length - readyTasks.length;
-                    
-                    if (readyTasks.length === 0) {
-                        this.$message.warning(`所选任务均未生成融合图(首帧)，无法生成视频。请先生成融合图。`);
+                    // 1. 预检查
+                    const validTasks = tasks.filter(f => f.result_image);
+                    if (validTasks.length === 0) {
+                        this.$message.warning('选中的任务都没有首帧图片，无法生成视频');
                         return;
                     }
-                    
-                    if (skippedCount > 0) {
-                        this.$message.info(`已跳过 ${skippedCount} 个未生成融合图的任务`);
+
+                    if (!this.genOptions.videoProviderId) {
+                        this.$message.warning('请先选择视频生成模型');
+                        return;
                     }
 
-                    const total = readyTasks.length;
-                    let successCount = 0;
-                    let failCount = 0;
+                    let submittedCount = 0;
 
-                    this.startGlobalLoading(`批量生成融图视频... (0/${total})`, `共 ${total} 个任务，视频生成较慢，请勿关闭页面`);
-
-                    for (let i = 0; i < total; i++) {
-                        const row = readyTasks[i];
-                        this.loadingTitle = `正在处理第 ${i + 1}/${total} 个视频...`;
+                    for (const row of validTasks) {
+                        if (!row.id) await this.saveFusionData(row);
 
                         try {
-                            if (this.currentAbortController.signal.aborted) break;
-
-                            // 确保任务有ID
-                            if (!row.id) {
-                                const saved = await this.saveFusionData(row);
-                                Object.assign(row, saved);
-                            }
-
-                            // 调用单个生成接口
-                            const res = await this.request('POST', '/api/generate/fusion_video', {
+                            const res = await this.request('POST', '/api/async/generate/fusion_video', {
                                 fusion_id: row.id,
                                 project_id: this.currentProjectId,
                                 provider_id: this.genOptions.videoProviderId,
                                 model_name: this.genOptions.videoModelName
                             });
 
-                            if (res.success) {
-                                this.$set(row, 'video_url', res.url);
-                                successCount++;
-                            } else {
-                                console.error(`视频生成失败 ID ${row.id}:`, res.error);
-                                failCount++;
+                            if (res.success && res.status === 'queued') {
+                                submittedCount++;
                             }
-
-                            // 短暂延迟避免限流
-                            if (i < total - 1) {
-                                await new Promise(resolve => setTimeout(resolve, 1000));
-                            }
-
                         } catch (e) {
-                            console.error(`批量视频异常 ID ${row.id}:`, e);
-                            failCount++;
+                            console.error(e);
                         }
                     }
 
-                    this.stopGlobalLoading();
-                    this.$message({ 
-                        type: failCount === 0 ? 'success' : 'warning', 
-                        message: `批量视频完成！成功: ${successCount}, 失败: ${failCount}` 
-                    });
+                    if (submittedCount > 0) {
+                        this.$message.success(`已提交 ${submittedCount} 个视频生成任务`);
+                        this.taskDrawerVisible = true;
+                        this.fetchTasks();
+                    }
                 },
                 // 应用选中的版本
                 async applyVersion(item) {
@@ -3531,6 +3358,71 @@
                     }).catch(() => {
                         this.$message.error('复制失败');
                     });
+                },
+
+                // ================== 新增：任务中心逻辑 ==================
+                startTaskPoller() {
+                    this.fetchTasks(); // 立即执行一次
+                    // 每 3 秒轮询一次
+                    this.taskPoller = setInterval(() => {
+                        this.fetchTasks();
+                    }, 3000);
+                },
+                async fetchTasks() {
+                    try {
+                        const res = await this.request('GET', '/api/tasks');
+                        
+                        // 1. 检测是否有任务“刚刚完成”
+                        const justFinished = res.some(newTask => {
+                            // 找到旧列表里的同一个任务
+                            const oldTask = this.taskList.find(t => t.id === newTask.id);
+                            // 如果旧状态不是 success，但新状态是 success，说明刚做完
+                            return oldTask && oldTask.status !== 'success' && newTask.status === 'success';
+                        });
+                        
+                        this.taskList = res;
+                        
+                        // 2. 如果有任务刚做完，立刻重新拉取当前页面的数据
+                        if (justFinished) {
+                            this.$notify({
+                                title: '生成完成',
+                                message: '部分后台任务已完成，数据已自动刷新',
+                                type: 'success'
+                            });
+
+                            // === 关键：这里替代了以前的“后续处理代码” ===
+                            // 因为后台已经把 url 写入数据库了，我们只需要重拉一遍数据，
+                            // 界面上的图片就会自动显示出来。
+                            if (this.activeTab === 'image-fusion') {
+                                this.fetchFusions(); 
+                            } else if (this.activeTab === 'scenes') {
+                                this.fetchShots(this.currentProjectId);
+                            } else if (this.activeTab === 'characters') {
+                                this.fetchCharacters();
+                            }
+                        }
+                    } catch(e) { console.warn(e); }
+                },
+
+                async clearTask(id) {
+                    await this.request('DELETE', `/api/tasks/${id}`);
+                    this.fetchTasks(); // 手动删除后立即刷新
+                },
+
+                getTaskTagType(status) {
+                    const map = { success: 'success', failed: 'danger', processing: 'primary', pending: 'info' };
+                    return map[status] || 'info';
+                },
+
+                getTaskStatusText(status) {
+                    const map = { pending: '排队中', processing: '生成中', success: '完成', failed: '失败' };
+                    return map[status] || status;
+                },
+
+                getTaskProgressStatus(status) {
+                    if(status==='success') return 'success';
+                    if(status==='failed') return 'exception';
+                    return '';
                 },
             }
         });
