@@ -1,5 +1,39 @@
 import os
 import sys
+
+# ========================================================
+# 强制定位到 EXE 真实目录
+# ========================================================
+def init_environment():
+    # 1. 获取 EXE 所在的绝对路径
+    if getattr(sys, 'frozen', False):
+        # 如果是打包后的 EXE，路径就是可执行文件所在的目录
+        BASE_DIR = os.path.dirname(sys.executable)
+    else:
+        # 如果是开发环境，路径就是代码所在目录
+        BASE_DIR = os.path.abspath(".")
+
+    # 2. [关键] 切换当前工作目录
+    # 这一步做完后，你代码里所有 open("data/xxx") 都会在 EXE 旁边找文件
+    os.chdir(BASE_DIR)
+    
+    # 3. 确保目录存在 (防止用户误删导致报错)
+    static_dir = os.path.join(BASE_DIR, 'static')
+    data_dir = os.path.join(BASE_DIR, 'data')
+    
+    if not os.path.exists(static_dir):
+        os.makedirs(static_dir)
+        print(f"Created missing static dir: {static_dir}")
+        
+    if not os.path.exists(data_dir):
+        os.makedirs(data_dir)
+        print(f"Created missing data dir: {data_dir}")
+
+    return BASE_DIR
+
+# 执行初始化，并获取根目录路径
+BASE_DIR = init_environment()
+
 import time
 import re
 import uuid
@@ -9,13 +43,25 @@ from typing import List, Optional, Dict, Any
 import logging
 from logging.handlers import RotatingFileHandler
 
-import eventlet
-eventlet.monkey_patch()
+# === 检测是否为打包后的 EXE 环境 ===
+IS_FROZEN = getattr(sys, 'frozen', False)
+
+# 只有在非 EXE 环境下（比如你自己在 PyCharm 运行网页版时），才加载 eventlet
+# 在 EXE 桌面版环境下，我们要用 threading 模式，避免死锁
+if IS_FROZEN:
+    # === [核心修复] 显式导入 threading 驱动 ===
+    # 只要写了这一行，PyInstaller 就会把它打包进去
+    # 即使这里不使用它，只要 import 了就行
+    import engineio.async_drivers.threading
+else:
+    # 开发环境使用 eventlet
+    import eventlet
+    eventlet.monkey_patch()
 
 from flask import Flask, request, jsonify, send_file, after_this_request
 
 import ai_service 
-from jianying_exporter import export_draft
+# from jianying_exporter import export_draft
 from data_manager import DataManager
 from media_manager import MediaManager
 
@@ -74,13 +120,14 @@ def setup_logging():
 
 setup_logging()
 # --- 配置 ---
-STATIC_FOLDER = "."
-app = Flask(__name__, static_url_path='', static_folder=STATIC_FOLDER)
+STATIC_FOLDER = os.path.join(BASE_DIR, 'static')
+app = Flask(__name__, static_url_path='/static', static_folder=STATIC_FOLDER)
 app.config['SECRET_KEY'] = 'secret!'
+socket_mode = 'threading' if IS_FROZEN else 'eventlet'
 socketio = SocketIO(
     app, 
     cors_allowed_origins="*", 
-    async_mode='eventlet',
+    async_mode=socket_mode,
     logger=True,          # 开启 SocketIO 业务日志
     engineio_logger=True  # 开启底层握手日志
 )
@@ -460,6 +507,9 @@ def generate_image():
 @app.route('/api/projects/<project_id>/export/jianying', methods=['POST'])
 def export_jianying(project_id):
     project_info = db.get_project(project_id)
+    
+    # [修改] 在这里导入，只有真正点击导出按钮时才加载 COM 库，避免启动冲突
+    from jianying_exporter import export_draft
     
     # === 修改点 1: 获取 Fusion 数据而不是 Shots ===
     # fusions = db.get_fusions(project_id) 

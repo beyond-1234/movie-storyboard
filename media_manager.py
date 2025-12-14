@@ -16,12 +16,16 @@ logger = logging.getLogger("MediaManager")
 class MediaManager:
     def __init__(self, static_folder="."):
         self.static_folder = static_folder
+        
+        # [修改] 去掉 'static/' 前缀
+        # 因为传入的 self.static_folder 已经是 .../static 了
+        # 直接指向子文件夹即可
         self.dirs = {
-            'image': "static/imgs",
-            'video': "static/videos",
-            'audio': "static/audio",
-            'export': "exports",
-            'temp': "static/temp"
+            'image': "imgs",       # 原: "static/imgs"
+            'video': "videos",     # 原: "static/videos"
+            'audio': "audio",      # 原: "static/audio"
+            'export': "exports",   # 保持不变 (根据截图它在 static 目录下)
+            'temp': "temp"         # 原: "static/temp"
         }
         self._ensure_dirs()
 
@@ -32,13 +36,16 @@ class MediaManager:
             Path(path).mkdir(parents=True, exist_ok=True)
 
     def _get_directory(self, media_type):
-        return os.path.join(self.static_folder, self.dirs.get(media_type, 'static/temp'))
-
+        return os.path.join(self.static_folder, self.dirs.get(media_type, 'temp'))
+    
     def _get_web_path(self, media_type, filename):
         """返回前端可访问的相对路径"""
-        dir_path = self.dirs.get(media_type, 'static/temp')
-        # 统一使用正斜杠，适配Web
-        return f"/{dir_path}/{filename}".replace("\\", "/")
+        # 获取子目录名 (例如 "imgs")
+        sub_dir = self.dirs.get(media_type, 'temp')
+        
+        # [修改] 强制加上 /static/ 前缀
+        # 最终输出: /static/imgs/filename.png
+        return f"/static/{sub_dir}/{filename}".replace("\\", "/")
 
     def _generate_versioned_filename(self, directory, entity_id, extension):
         """
