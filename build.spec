@@ -55,8 +55,12 @@ pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 exe = EXE(
     pyz,
     a.scripts,
+    # 在单文件模式下，binaries, zipfiles, datas 都要放在 EXE() 里
+    a.binaries,
+    a.zipfiles,
+    a.datas,
     [],
-    exclude_binaries=True, # 开启文件夹模式
+    #exclude_binaries=True, # 开启文件夹模式
     name='StoryboardAI',   # 程序名称
     debug=False,
     bootloader_ignore_signals=False,
@@ -70,13 +74,13 @@ exe = EXE(
     entitlements_file=None,
 )
 
-coll = COLLECT(
-    exe,
-    a.binaries,
-    a.zipfiles,
-    a.datas,
-    strip=False,
-    upx=True,
-    upx_exclude=[],
-    name='StoryboardAI', # 最终文件夹名称
-)
+# coll = COLLECT(
+#     exe,
+#     a.binaries,
+#     a.zipfiles,
+#     a.datas,
+#     strip=False,
+#     upx=True,
+#     upx_exclude=[],
+#     name='StoryboardAI', # 最终文件夹名称
+# )

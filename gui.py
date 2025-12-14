@@ -83,12 +83,6 @@ def start_flask():
             f.write(f"\n[Flask Error] {str(e)}\n")
             f.write(traceback.format_exc())
             
-def set_zoom(window):
-    # 等待窗口加载完毕
-    time.sleep(0.5) 
-    # 执行 JS 强制缩放 body (0.8 = 80%)
-    window.evaluate_js("document.body.style.zoom = '0.8'")
-    
 if __name__ == '__main__':
     # 1. 启动后台线程
     t = threading.Thread(target=start_flask)
@@ -102,7 +96,7 @@ if __name__ == '__main__':
     # 3. 启动 GUI
     # 建议加上 http_server=True (PyWebview 5.0+ 特性，如果你的版本支持)
     # 这里保持稳妥写法
-    window = webview.create_window(
+    webview.create_window(
         title='电影分镜 AI 助手',
         url='http://127.0.0.1:5000',
         width=1280,
@@ -110,4 +104,4 @@ if __name__ == '__main__':
         resizable=True
     )
     
-    webview.start(func=set_zoom, args=window, debug=False)
+    webview.start(debug=False)
