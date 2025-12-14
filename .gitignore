@@ -41,6 +41,7 @@ out/
 # 缓存文件
 .cache/
 *.cache
+__pycache__/
 
 # 测试覆盖率报告
 coverage/
@@ -74,3 +75,6 @@ pids
 # 其他
 *.orig
 .merge_file_*
+./data/
+./static/
+./export/
