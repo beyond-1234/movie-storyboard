@@ -613,7 +613,7 @@ def generate_fusion_prompt():
     
     project_info = db.get_project(data.get('project_id')) if data.get('project_id') else {}
     
-    sys = "你是一个专业的电影分镜设计师。请根据场景描述生成详细的融合图片提示词。"
+    sys = "你是一个专业的电影分镜设计师。请根据场景描述生成详细的融合图片提示词。最终结果只需要提示词内容，不要包含其他内容或特殊符号。"
     user_prompt = f"【元素】：{data.get('element_mapping')} 【场景】：{data.get('scene_description')} 【动作】：{data.get('shot_description')}\n需包含：位置、朝向、景别、光影。"
     if project_info: user_prompt += f"\n色彩：{project_info.get('visual_color_system','')}"
     
