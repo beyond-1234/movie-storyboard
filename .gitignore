@@ -75,6 +75,6 @@ pids
 # 其他
 *.orig
 .merge_file_*
-./data/
-./static/
-./export/
+data/
+static/
+exports/
