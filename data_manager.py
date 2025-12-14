@@ -8,9 +8,9 @@ from typing import List, Optional, Dict, Any
 from pathlib import Path
 
 # --- 配置常量 ---
-DATA_DIR = "projects"
-SETTINGS_FILE = "settings.json"
-SERIES_FILE = "series.json"
+DATA_DIR = "data/projects"
+SETTINGS_FILE = "data/settings.json"
+SERIES_FILE = "data/series.json"
 
 # --- 数据模型 (Data Models) ---
 @dataclass

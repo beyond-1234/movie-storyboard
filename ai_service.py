@@ -13,10 +13,10 @@ from typing import Dict, Any, Optional, List
 from zai import ZhipuAiClient
 
 # 配置日志
-logging.basicConfig(
-    level=logging.INFO, 
-    format='%(asctime)s - %(name)s - %(levelname)s - [%(filename)s:%(lineno)d] - %(message)s'
-)
+# logging.basicConfig(
+#     level=logging.INFO, 
+#     format='%(asctime)s - %(name)s - %(levelname)s - [%(filename)s:%(lineno)d] - %(message)s'
+# )
 logger = logging.getLogger("AIService")
 
 # 尝试导入 dashscope (仅用于阿里云)

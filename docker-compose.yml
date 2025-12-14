@@ -1,0 +1,26 @@
+version: '3.8'
+
+services:
+  storyboard-ai:
+    build: .
+    container_name: storyboard-ai
+    restart: always
+    ports:
+      - "5000:5000"
+    volumes:
+      # 1. 映射日志目录
+      # 宿主机 ./logs -> 容器 /app/logs
+      - ./logs:/app/logs
+
+      # 2. 映射静态资源目录 (生成的图片/视频)
+      # 宿主机 ./static -> 容器 /app/static
+      - ./static:/app/static
+
+      # 3. 映射数据目录 (剧集、项目数据)
+      # 宿主机 ./data -> 容器 /app/data
+      # 注意：你需要修改 DataManager 代码，让它把 json 文件存在 /app/data 下
+      - ./data:/app/data
+
+    environment:
+      - TZ=Asia/Shanghai  # 设置时区，保证日志时间正确
+      - PYTHONUNBUFFERED=1 # 保证日志实时输出

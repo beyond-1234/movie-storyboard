@@ -1,25 +1,22 @@
-# 1. 选择基础镜像
-# 使用 slim 版本可以减小镜像体积，python:3.9-slim 是个不错的选择
+# Dockerfile
 FROM python:3.9-slim
 
-# 2. 设置工作目录
-# 容器内的所有后续命令都会在这个目录下执行
+# 设置工作目录
 WORKDIR /app
 
-# 3. 复制依赖文件并安装
-# 先只复制 requirements.txt，利用 Docker 缓存机制。
-# 只要 requirements.txt 不变，再次构建时这一步会直接使用缓存，速度极快。
+# 安装依赖 (建议先复制 requirements.txt 利用缓存)
 COPY requirements.txt .
-
-# 安装依赖，这里推荐使用清华源或阿里源加速
+# 安装系统依赖 (opencv等可能需要)
+RUN apt-get update && apt-get install -y libgl1-mesa-glx && rm -rf /var/lib/apt/lists/*
 RUN pip install --no-cache-dir -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple
 
-# 4. 复制项目代码
-# 将当前目录下的所有文件（除了 .dockerignore 排除的）复制到容器的 /app 目录
+# 复制项目代码
 COPY . .
 
-# 5. 暴露端口
-# 告诉 Docker 这个容器将使用 5000 端口（Flask 默认端口）
+# 创建必要的挂载点目录 (即使不挂载，保证目录存在)
+RUN mkdir -p /app/logs /app/static /app/data
+
+# 暴露端口
 EXPOSE 5000
 
 # 6. 设置环境变量
