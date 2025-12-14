@@ -30,4 +30,4 @@ ENV PYTHONUNBUFFERED=1
 # -w 4: 开启 4 个 worker 进程
 # -b 0.0.0.0:5000: 绑定到所有 IP 的 5000 端口
 # app:app : 第一个 app 指的是文件名 (app.py)，第二个 app 指的是 Flask 实例名
-CMD ["gunicorn", "-w", "4", "-b", "0.0.0.0:5000", "app:app"]
+CMD ["gunicorn", "-w", "4", "-b", "0.0.0.0:5000", "main:app"]
