@@ -1,4 +1,5 @@
 import os
+import sys
 import time
 import re
 import uuid
@@ -24,20 +25,21 @@ from task_queue import queue, init_socketio # 引入 init_socketio
 # ==========================================
 # 日志配置 (输出到文件 + 自动切割)
 # ==========================================
+# 定义全局 logger 变量
+app_logger = None
+
 def setup_logging():
-    # 1. 确保日志目录存在
+    global app_logger
     log_dir = "logs"
     if not os.path.exists(log_dir):
         os.makedirs(log_dir)
 
-    # 2. 设置日志格式
+    # 1. 设置格式
     formatter = logging.Formatter(
-        '%(asctime)s - %(name)s - %(levelname)s - [%(filename)s:%(lineno)d] - %(message)s'
+        '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
     )
 
-    # 3. 创建文件处理器 (RotatingFileHandler)
-    # maxBytes=10*1024*1024 (10MB): 当文件达到10MB时自动切割
-    # backupCount=10: 保留最近的10个日志文件 (app.log, app.log.1, ...)
+    # 2. 文件处理器
     file_handler = RotatingFileHandler(
         os.path.join(log_dir, 'app.log'), 
         maxBytes=10*1024*1024, 
@@ -47,32 +49,41 @@ def setup_logging():
     file_handler.setFormatter(formatter)
     file_handler.setLevel(logging.INFO)
 
-    # 4. 创建控制台处理器 (保留在控制台输出，方便 docker logs 查看)
-    console_handler = logging.StreamHandler()
+    # 3. 控制台处理器
+    console_handler = logging.StreamHandler(sys.stdout)
     console_handler.setFormatter(formatter)
     console_handler.setLevel(logging.INFO)
 
-    # 5. 配置根日志记录器
-    root_logger = logging.getLogger()
-    root_logger.setLevel(logging.INFO)
+    # 4. 配置 Root Logger (捕获所有日志)
+    root = logging.getLogger()
+    root.handlers = [] # 清空旧的
+    root.addHandler(file_handler)
+    root.addHandler(console_handler)
+    root.setLevel(logging.INFO)
     
-    # 清除旧的处理器（防止重复）
-    if root_logger.hasHandlers():
-        root_logger.handlers.clear()
-        
-    root_logger.addHandler(file_handler)
-    root_logger.addHandler(console_handler)
+    # 5. 专门配置 SocketIO logger
+    # 确保 socketio 内部日志也能进文件
+    logging.getLogger('socketio').setLevel(logging.INFO)
+    logging.getLogger('engineio').setLevel(logging.INFO)
 
-# 在程序启动时立即执行配置
+    # 6. 屏蔽 werkzeug 的默认日志 (因为我们要手动打印了，避免重复)
+    logging.getLogger('werkzeug').setLevel(logging.ERROR)
+
+    app_logger = root
+    print(f"✅ 日志系统已接管。Werkzeug 默认日志已屏蔽，改用手动拦截。")
+
 setup_logging()
-
 # --- 配置 ---
 STATIC_FOLDER = "."
 app = Flask(__name__, static_url_path='', static_folder=STATIC_FOLDER)
 app.config['SECRET_KEY'] = 'secret!'
-# 初始化 SocketIO (允许跨域)
-socketio = SocketIO(app, cors_allowed_origins="*", async_mode='eventlet')
-# 将 socketio 实例传给 queue，让它能发消息
+socketio = SocketIO(
+    app, 
+    cors_allowed_origins="*", 
+    async_mode='eventlet',
+    logger=True,          # 开启 SocketIO 业务日志
+    engineio_logger=True  # 开启底层握手日志
+)
 init_socketio(socketio)
 
 # 初始化管理器
@@ -80,6 +91,31 @@ db = DataManager()
 media_mgr = MediaManager(STATIC_FOLDER)
 
 # --- 路由 ---
+# ==========================================
+# 手动拦截并记录 HTTP 日志
+# ==========================================
+@app.after_request
+def log_http_request(response):
+    """
+    不管底层是用 Werkzeug 还是 Eventlet，
+    只要经过 Flask 处理的请求，都会被这里捕获并写入文件。
+    """
+    # 排除静态资源日志，避免日志太水 (可选)
+    if request.path.startswith('/static') or request.path.startswith('/favicon'):
+        return response
+
+    # 获取请求信息
+    ip = request.remote_addr
+    method = request.method
+    path = request.path
+    status = response.status_code
+    
+    # 手动写入日志
+    # 格式示例: 127.0.0.1 - POST /api/generate/fusion_image - 200
+    app_logger.info(f"[HTTP] {ip} - {method} {path} - {status}")
+    
+    return response
+
 @socketio.on('connect')
 def handle_connect():
     print('Client connected')
