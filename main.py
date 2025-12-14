@@ -285,42 +285,63 @@ def analyze_script():
             cleaned = re.sub(r'^```json\s*|\s*```$', '', result['content'].strip(), flags=re.MULTILINE | re.DOTALL)
             shots_data = json.loads(cleaned)
             
-            # --- 修复开始 ---
-            # 辅助函数：将名字映射为对象，如果是新角色则保存到数据库
-            def map_character_names(names, char_data, pid):
-                mapped = []
+            # === 获取最新的角色列表作为基准 ===
+            # 注意：必须获取最新的，防止覆盖
+            current_char_list = db.get_characters(project_id) if project_id else []
+
+            # === [修复] 增强版角色映射函数 ===
+            def map_character_names(names, char_data_list, pid):
+                mapped_objs = []
+                # 容错处理：AI 有时可能返回字符串而不是列表
+                if isinstance(names, str): 
+                    names = [names]
+                if not isinstance(names, list):
+                    return []
+
                 for name in names:
-                    # 1. 先尝试在现有列表中查找
-                    found = next((c for c in char_data if c.get('name') == name), None)
+                    if not name: continue
+                    
+                    # 1. 核心修复：去除首尾空格，统一标准
+                    clean_name = str(name).strip()
+                    if not clean_name: continue
+
+                    # 2. 在现有列表(char_data_list)中查找
+                    # 使用 next() 查找第一个匹配项，这里也对库里的名字做 strip() 比较
+                    found = next((c for c in char_data_list if c.get('name', '').strip() == clean_name), None)
                     
                     if found:
-                        mapped.append(found)
+                        # A. 如果找到了，直接复用
+                        mapped_objs.append(found)
                     else:
-                        # 2. 如果没找到，说明是 AI 识别出的新角色
-                        # 构造新角色数据
+                        # B. 如果没找到，创建新角色
                         new_char_data = {
-                            'name': name,
+                            'name': clean_name,
                             'description': 'AI 剧本分析自动识别的新角色'
                         }
-                        # 3. 【关键修复】立即调用 db 保存到数据库
+                        
+                        # 保存到数据库
                         saved_char = db.create_character(pid, new_char_data)
                         
-                        # 4. 将保存后的角色添加到当前的 char_data 列表中
-                        # 这样如果后续的分镜再次出现这个名字，就能在第1步被找到了，避免重复创建
-                        char_data.append(saved_char)
-                        mapped.append(saved_char)
-                return mapped
+                        # C. 关键：立即添加到内存中的 char_data_list
+                        # 这样在处理当前分镜列表的下一个分镜时，如果又出现了这个名字，就能在上面第2步找到了
+                        char_data_list.append(saved_char)
+                        mapped_objs.append(saved_char)
+                        
+                return mapped_objs
+            # === 修复结束 ===
 
             for shot in shots_data:
                 if 'characters' in shot:
-                    # 传入 project_id 以便保存数据
-                    shot['characters'] = map_character_names(shot['characters'], character_list, project_id)
-            # --- 修复结束 ---
+                    # 传入 current_char_list，它会在循环中不断积累新创建的角色
+                    shot['characters'] = map_character_names(shot['characters'], current_char_list, project_id)
 
             return jsonify({'shots': shots_data})
         except Exception as e:
-            print(f"JSON Parse Error: {e}") # 建议加上打印以便调试
-            return jsonify({'error': 'Invalid JSON from AI'}), 500
+            print(f"JSON Parse Error: {e}")
+            import traceback
+            traceback.print_exc()
+            return jsonify({'error': 'Invalid JSON from AI', 'details': str(e)}), 500
+            
     return jsonify(result), 500
 
 @app.route('/api/generate/image', methods=['POST'])
@@ -476,6 +497,21 @@ def upload_character_image():
     
     if err: return jsonify({'success': False, 'error': err}), 400
     return jsonify({'success': True, 'url': url})
+
+@app.route('/api/projects/<project_id>/characters/batch_delete', methods=['POST'])
+def batch_delete_characters(project_id):
+    """
+    批量删除角色接口
+    """
+    ids = request.json.get('ids', [])
+    if not ids:
+        return jsonify({"success": True}) # 空列表直接返回成功
+
+    # 循环调用单个删除 (DataManager通常是内存操作+写文件，循环调用问题不大)
+    for cid in ids:
+        db.delete_character(project_id, cid)
+        
+    return jsonify({"success": True})
 
 @app.route('/api/upload/scene_image', methods=['POST'])
 def upload_scene_image():

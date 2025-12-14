@@ -401,6 +401,7 @@
 
                                     <el-button type="primary" size="small" icon="el-icon-plus" @click="openCreateCharacter">创建角色</el-button>
                                     <el-button type="success" size="small" icon="el-icon-magic-stick" @click="generateCharactersFromPrompt">从人物设定生成</el-button>
+                                    <el-button type="danger" size="small" icon="el-icon-delete-solid" @click="deleteAllCharacters" :disabled="characterList.length === 0">清空全部</el-button>
                                 </div>
                             </div>
                         
@@ -1769,6 +1770,33 @@
                         if (e !== 'cancel') console.error(e);
                     }
                 },
+                async deleteAllCharacters() {
+                    if (this.characterList.length === 0) return;
+
+                    try {
+                        await this.$confirm('确定要清空所有角色吗？此操作不可恢复！\n(已生成的图片文件不会被物理删除，但列表将清空)', '高危操作警告', {
+                            confirmButtonText: '确定清空',
+                            cancelButtonText: '取消',
+                            type: 'warning'
+                        });
+
+                        // 获取所有角色的 ID
+                        const ids = this.characterList.map(c => c.id);
+                        
+                        // 调用后端批量删除接口
+                        await this.request('POST', `/api/projects/${this.currentProjectId}/characters/batch_delete`, { ids });
+                        
+                        // 刷新列表
+                        this.fetchCharacters();
+                        this.$message.success('角色列表已清空');
+                        
+                    } catch (e) {
+                        if (e !== 'cancel') {
+                            console.error(e);
+                            this.$message.error('删除失败');
+                        }
+                    }
+                },
                 // 场景批量删除方法
                 async deleteSelectedScenes() { 
                     this.$confirm('删除？').then(async () => { 
@@ -2063,7 +2091,9 @@
                         return;
                     }
                     
-                    this.startGlobalLoading('生成角色列表...', '请稍候');
+                    // 使用全局 loading，因为文本生成通常较快，不需要进后台队列
+                    this.startGlobalLoading('AI 正在分析人物设定...', '正在生成角色列表');
+                    
                     try {
                         const res = await this.request('POST', '/api/generate/character_list', {
                             visual_consistency_prompt: this.currentProject.visual_consistency_prompt,
@@ -2072,17 +2102,52 @@
                         });
                         
                         if (res.success && res.characters) {
+                            // === [核心修复] 去重逻辑 ===
+                            
+                            // 1. 获取现有角色名集合 (去除空格)
+                            // 使用 Set 实现 O(1) 复杂度查找
+                            const existingNames = new Set(this.characterList.map(c => c.name.trim()));
+                            
+                            let addedCount = 0;
+                            let skippedCount = 0;
+
                             for (const char of res.characters) {
+                                if (!char.name) continue;
+
+                                // 2. 检查名字是否重复
+                                const cleanName = char.name.trim();
+                                
+                                if (existingNames.has(cleanName)) {
+                                    skippedCount++;
+                                    continue; // 如果存在，直接跳过，不调后端接口
+                                }
+
+                                // 3. 调用创建接口
                                 const charData = await this.request('POST', `/api/projects/${this.currentProjectId}/characters`, char);
+                                
+                                // 4. 更新前端列表和查重集合
                                 this.characterList.push(charData);
+                                existingNames.add(cleanName); // 立即加入集合，防止 AI 返回的列表中本身就有重复
+                                addedCount++;
                             }
-                            this.$message.success(`成功生成 ${res.characters.length} 个角色`);
+                            
+                            // 5. 反馈结果
+                            if (addedCount > 0) {
+                                let msg = `成功新增 ${addedCount} 个角色`;
+                                if (skippedCount > 0) msg += ` (自动过滤 ${skippedCount} 个重复角色)`;
+                                this.$message.success(msg);
+                            } else if (skippedCount > 0) {
+                                this.$message.warning(`未新增角色，所有角色 (${skippedCount}个) 均已存在`);
+                            } else {
+                                this.$message.warning('AI 未能识别出有效角色');
+                            }
+
                         } else {
                             this.$message.error('生成角色列表失败');
                         }
                     } catch (e) {
                         console.error(e);
-                        this.$message.error('生成角色列表失败');
+                        this.$message.error('生成角色列表请求失败');
                     } finally {
                         this.stopGlobalLoading();
                     }
