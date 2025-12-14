@@ -23,6 +23,7 @@
         /* 右侧主内容 */
         .main-content { flex: 1; padding: 30px; overflow-y: auto; display: flex; flex-direction: column; }
         .content-header { margin-bottom: 30px; display: flex; justify-content: space-between; align-items: center; }
+        .content-header-btn { margin-bottom: 30px; display: flex; justify-content: end; align-items: center; }
         .empty-state { text-align: center; color: #909399; margin-top: 100px; }
         
         /* 集数卡片网格 */
@@ -71,15 +72,16 @@
             </div>
 
             <div class="main-content" v-loading="loadingEpisodes">
+                <div class="content-header-btn">
+                    <div></div>
+                    <el-button type="primary" icon="el-icon-view" style="font-size: 16px;" @click="openVisualAnalysis">风格分析</el-button>
+                    <el-button type="primary" icon="el-icon-plus" @click="openCreateEpisode">新建分集</el-button>
+                </div>
                 <template v-if="currentSeries">
                     <div class="content-header">
                         <div>
                             <h2 style="margin: 0; font-size: 24px;">{{ currentSeries.name }}</h2>
                             <p style="margin: 5px 0 0; color: #666;">{{ currentSeries.description }}</p>
-                        </div>
-                        <div>
-                            <el-button type="primary" icon="el-icon-view" style="font-size: 16px;" @click="openVisualAnalysis">风格分析</el-button>
-                            <el-button type="primary" icon="el-icon-plus" @click="openCreateEpisode">新建分集</el-button>
                         </div>
                     </div>
 
