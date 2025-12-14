@@ -4,6 +4,10 @@ import re
 import uuid
 import json
 from typing import List, Optional, Dict, Any
+
+import eventlet
+eventlet.monkey_patch()
+
 from flask import Flask, request, jsonify, send_file, after_this_request
 
 import ai_service 
@@ -11,15 +15,29 @@ from jianying_exporter import export_draft
 from data_manager import DataManager
 from media_manager import MediaManager
 
+from flask_socketio import SocketIO # 新增
+from task_queue import queue, init_socketio # 引入 init_socketio
+
 # --- 配置 ---
 STATIC_FOLDER = "."
 app = Flask(__name__, static_url_path='', static_folder=STATIC_FOLDER)
+app.config['SECRET_KEY'] = 'secret!'
+# 初始化 SocketIO (允许跨域)
+socketio = SocketIO(app, cors_allowed_origins="*", async_mode='eventlet')
+# 将 socketio 实例传给 queue，让它能发消息
+init_socketio(socketio)
 
 # 初始化管理器
 db = DataManager() 
 media_mgr = MediaManager(STATIC_FOLDER)
 
 # --- 路由 ---
+@socketio.on('connect')
+def handle_connect():
+    print('Client connected')
+    # 客户端一连上来，马上发一次当前列表
+    socketio.emit('task_update', queue.get_list())
+    
 @app.route('/')
 def index(): return send_file('series.html')
 
@@ -896,9 +914,12 @@ def get_tasks():
 
 @app.route('/api/tasks/<tid>', methods=['DELETE'])
 def delete_task(tid):
-    if tid in queue.tasks: del queue.tasks[tid]
+    if tid in queue.tasks: 
+        del queue.tasks[tid]
+        queue._emit_update() # [新增] 删除后立即通知所有客户端更新
     return jsonify({"success": True})
 
 if __name__ == '__main__':
     print(f"Server started on http://127.0.0.1:5000")
-    app.run(debug=True, port=5000)
+    # 必须用 socketio.run 启动，而不是 app.run
+    socketio.run(app, debug=True, port=5000)

@@ -1209,6 +1209,7 @@
     <script src="https://unpkg.com/element-ui/lib/index.js"></script>
     <script src="https://unpkg.com/axios/dist/axios.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.0/Sortable.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
 
     <script>
         new Vue({
@@ -1299,6 +1300,7 @@
                 taskDrawerVisible: false,
                 taskList: [],
                 taskPoller: null,
+                socket: null, // 新增 socket 对象
             },
             computed: {
                 getModelsByProviderId() {
@@ -1393,7 +1395,9 @@
                     }
                 });
                 // 启动任务轮询
-                this.startTaskPoller();
+                //this.startTaskPoller();
+                // 启动 WebSocket 连接，替代原来的 startTaskPoller()
+                this.initWebSocket();
             },
             // 监听 genOptions 变化并保存
             watch: {
@@ -3423,6 +3427,68 @@
                     if(status==='success') return 'success';
                     if(status==='failed') return 'exception';
                     return '';
+                },
+                // ================== WebSocket 核心逻辑 ==================
+                initWebSocket() {
+                    // 强制指定 transport，避免长轮询带来的跨域/延迟问题
+                    this.socket = io({ 
+                        transports: ['websocket'], 
+                        path: '/socket.io'
+                    });
+
+                    this.socket.on('connect', () => {
+                        console.log("✅ WebSocket 连接成功! ID:", this.socket.id);
+                    });
+                    
+                    this.socket.on('connect_error', (err) => {
+                        console.error("❌ WebSocket 连接失败:", err);
+                    });
+
+                    this.socket.on('task_update', (data) => {
+                        console.log("📩 收到任务更新:", data); // 打开浏览器控制台看这一行有没有
+                        this.handleTaskUpdate(data);
+                    });
+                },
+                // 处理推送过来的数据
+                handleTaskUpdate(newList) {
+                    // 1. 检测是否有任务刚刚变绿 (完成)
+                    // 逻辑与之前相同：对比旧列表和新列表的状态
+                    const justFinished = newList.some(newTask => {
+                        const oldTask = this.taskList.find(t => t.id === newTask.id);
+                        return oldTask && oldTask.status !== 'success' && newTask.status === 'success';
+                    });
+
+                    // 2. 更新列表
+                    this.taskList = newList;
+
+                    // 3. 自动刷新业务数据
+                    if (justFinished) {
+                        this.$notify({
+                            title: '完成',
+                            message: '后台任务已完成，数据已自动刷新',
+                            type: 'success',
+                            position: 'bottom-right'
+                        });
+
+                        // 刷新当前 Tab 数据
+                        if (this.activeTab === 'image-fusion') this.fetchFusions();
+                        else if (this.activeTab === 'scenes') this.fetchShots(this.currentProjectId);
+                        else if (this.activeTab === 'characters') this.fetchCharacters();
+                    }
+                },
+
+                // [删除] 原来的 startTaskPoller 和 fetchTasks 方法
+                // 如果你还需要手动刷新(比如删除任务后)，可以保留 fetchTasks 但只调用 API 获取一次
+                async refreshTasksManually() {
+                    const res = await this.request('GET', '/api/tasks');
+                    this.taskList = res;
+                },
+                
+                async clearTask(id) {
+                    await this.request('DELETE', `/api/tasks/${id}`);
+                    // 删除后，后端通常需要手动广播一次，或者前端自己调一下刷新
+                    // 建议在后端 delete_task 里也调用 _emit_update()，这样前端不用手动刷
+                    this.refreshTasksManually(); 
                 },
             }
         });
