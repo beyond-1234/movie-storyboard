@@ -68,10 +68,12 @@
             <p class="text-gray-500 text-sm mb-4 leading-relaxed max-w-4xl">{{ currentSeries.description || '这个剧集还没有简介...' }}</p>
             
             <div class="flex gap-2 flex-wrap">
-               <el-tag v-if="currentSeries.script_core_conflict" type="warning" effect="plain" size="small">
+               <el-tag v-if="currentSeries.script_core_conflict" type="warning" effect="plain" size="small"
+                  style="white-space: pre-wrap; height: auto; text-align: left; padding: 4px 8px;">
                  冲突: {{ currentSeries.script_core_conflict }}
                </el-tag>
-               <el-tag v-if="currentSeries.script_emotional_keywords" type="success" effect="plain" size="small">
+               <el-tag v-if="currentSeries.script_emotional_keywords" type="success" effect="plain" size="small"
+                  style="white-space: pre-wrap; height: auto; text-align: left; padding: 4px 8px;">
                  基调: {{ currentSeries.script_emotional_keywords }}
                </el-tag>
             </div>

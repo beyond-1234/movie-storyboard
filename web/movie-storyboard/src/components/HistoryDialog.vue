@@ -222,7 +222,7 @@ const downloadFile = (row) => {
   document.body.removeChild(link)
 }
 
-// 恢复历史版本
+// 核心恢复逻辑：调用 API -> 成功后 emit 类型
 const handleRestore = async (item) => {
   try {
     await ElMessageBox.confirm(
@@ -231,42 +231,24 @@ const handleRestore = async (item) => {
       { type: 'warning', confirmButtonText: '确定恢复' }
     )
 
-    // 根据 entity_type 调用不同的更新接口
     if (item.entity_type === 'character') {
-      // 1. 更新后端
       await updateCharacter(store.currentProjectId, item.entity_id, { image_url: item.url })
-      
-      // 2. 更新本地 Store (实现界面即时刷新)
-      const char = store.characterList.find(c => c.id === item.entity_id)
-      if (char) char.image_url = item.url
+      emit('restore-success', 'character') // 通知刷新角色
       
     } else if (item.entity_type === 'shot') {
-      // 场景通常恢复的是 scene_image
       await updateShot(store.currentProjectId, item.entity_id, { scene_image: item.url })
-      
-      // 更新 Store 中的 Shot List
-      // 注意：ShotList 可能在 store 中没有全量缓存，建议触发 store.fetchShots()
-      store.fetchShots() // 重新拉取列表以确保数据一致
+      emit('restore-success', 'shot') // 通知刷新场景
       
     } else if (item.entity_type === 'fusion') {
-      // 融图比较复杂，可能是视频或图片
       const payload = {}
-      if (item.media_type === 'video') {
-        payload.video_url = item.url
-      } else {
-        // 默认认为是结果图 (result_image/首帧)
-        // 如果系统区分首帧/尾帧，后端历史记录可能需要额外字段标记，或者这里简单处理为 result_image
-        payload.result_image = item.url 
-      }
+      if (item.media_type === 'video') payload.video_url = item.url
+      else payload.result_image = item.url
       
       await updateFusion(store.currentProjectId, item.entity_id, payload)
-      
-      // 刷新融图列表
-      // 同样建议触发外部刷新，因为融图列表通常在组件内维护
-      emit('restore-success', 'fusion') 
+      emit('restore-success', 'fusion') // 通知刷新融图
     }
 
-    ElMessage.success('恢复成功')
+    ElMessage.success('恢复成功，列表已刷新')
     
   } catch (e) {
     if (e !== 'cancel') {

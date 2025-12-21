@@ -43,9 +43,10 @@
       <el-card v-if="store.currentProject" class="shrink-0 project-info-card" :body-style="{ padding: '15px' }">
         <div class="flex justify-between items-start mb-3">
           <div class="flex flex-col gap-1">
+            <span class="text-xl font-bold text-gray-800">{{ store.currentProject.film_name }}</span>
             <div class="flex items-center gap-3">
-              <span class="text-xl font-bold text-gray-800">{{ store.currentProject.film_name }}</span>
-              <el-tag v-if="store.currentProject.script_core_conflict" type="success" size="small" effect="plain">
+              <el-tag v-if="store.currentProject.script_core_conflict" type="success" size="small"
+                style="white-space: pre-wrap; height: auto; text-align: left; padding: 4px 8px;">
                 核心冲突: {{ store.currentProject.script_core_conflict }}
               </el-tag>
             </div>
@@ -422,6 +423,19 @@ const copyText = (text) => {
 
 const handleHistory = () => {
   historyVisible.value = true
+}
+
+// 新增：处理历史恢复后的刷新逻辑
+const handleHistoryRestore = (type) => {
+  console.log('History restore triggered for:', type)
+  
+  if (type === 'character') {
+    store.fetchCharacters() // 刷新角色列表
+  } else if (type === 'shot') {
+    store.fetchShots() // 刷新场景列表
+  } else if (type === 'fusion') {
+    store.fetchFusions() // 刷新融图列表
+  }
 }
 
 </script>
