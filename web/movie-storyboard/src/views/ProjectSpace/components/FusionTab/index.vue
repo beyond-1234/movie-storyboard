@@ -1,6 +1,6 @@
 <template>
   <div class="fusion-tab h-full flex flex-col">
-    <!-- 顶部配置栏 (多行布局以适应多个模型选择) -->
+    <!-- 顶部配置栏 -->
     <div class="bg-white p-3 rounded shadow-sm mb-4">
       <div class="flex flex-wrap gap-4 items-center border-b pb-3 mb-3">
         <ModelSelector type="text" label="文本模型" v-model:provider="store.genOptions.textProviderId" v-model:model="store.genOptions.textModelName" />
@@ -51,7 +51,7 @@
         </template>
       </el-table-column>
       
-      <!-- 描述信息 (可展开或简略显示) -->
+      <!-- 描述信息 -->
       <el-table-column label="描述信息" min-width="200" show-overflow-tooltip>
         <template #default="{ row }">
           <div class="text-xs">
@@ -150,14 +150,18 @@ import ModelSelector from '@/components/ModelSelector.vue'
 import FusionEditDialog from './FusionEditDialog.vue'
 import ElementDialog from './ElementDialog.vue'
 import BatchDialog from './BatchDialog.vue'
-// === 修复的核心部分 ===
+
+// === 关键修复：正确的导入路径 ===
 import { 
   getFusions, deleteFusion, createFusion, updateFusion
 } from '@/api/project' 
 import { 
-  generateFusionPrompt, generateFusionImage, generateFusionVideo 
+  generateFusionPrompt as apiGenPrompt, // 使用别名以区分本地方法
+  generateFusionImage as apiGenImage, 
+  generateFusionVideo as apiGenVideo 
 } from '@/api/generation'
-// ====================
+// =============================
+
 import { ElMessage, ElMessageBox, ElNotification } from 'element-plus'
 
 const store = useProjectStore()
@@ -181,12 +185,13 @@ onMounted(() => {
 
 const refreshList = async () => {
   if (!store.currentProjectId) return
-  store.loading.fusions = true
+  // 确保 store.loading.fusions 存在（即便 store 未更新也能运行）
+  if (store.loading) store.loading.fusions = true
   try {
     const res = await getFusions(store.currentProjectId)
     store.fusionList = res || []
   } finally {
-    store.loading.fusions = false
+    if (store.loading) store.loading.fusions = false
   }
 }
 
@@ -206,7 +211,6 @@ const openEditDialog = (row) => {
 }
 
 const insertFusion = (index) => {
-  // 传递 index 给 Dialog，或者在 Dialog 中处理插入逻辑
   currentEditingRow.value = { insertIndex: index + 1 }
   editDialogVisible.value = true
 }
@@ -219,7 +223,6 @@ const handleDelete = async (row) => {
 
 const handleBatchDelete = async () => {
   await ElMessageBox.confirm(`确定删除选中的 ${selectedRows.value.length} 个任务?`)
-  // 循环删除或调用批量接口
   for (const row of selectedRows.value) {
     await deleteFusion(store.currentProjectId, row.id)
   }
@@ -236,7 +239,6 @@ const handleCopyFromScenes = async () => {
     
     const newFusions = []
     for (const shot of store.shotList) {
-       // 将角色转换为元素结构
        const elements = (shot.characters || []).map(c => ({
          id: `el_${Date.now()}_${Math.random()}`,
          name: c.name,
@@ -274,14 +276,12 @@ const openElementDialog = (row) => {
 }
 
 const handleElementSuccess = (updatedFusion) => {
-  // 更新本地列表中的该行数据
   const idx = store.fusionList.findIndex(f => f.id === updatedFusion.id)
   if (idx !== -1) store.fusionList[idx] = updatedFusion
 }
 
 const removeElement = async (row, element) => {
   const newElements = row.elements.filter(e => e.id !== element.id)
-  // 乐观更新
   row.elements = newElements
   await updateFusion(store.currentProjectId, row.id, { elements: newElements })
 }
@@ -293,7 +293,6 @@ const openBatchDialog = (type) => {
 }
 
 const handleBatchConfirm = async ({ scope, target }) => {
-  // 获取目标任务列表
   let tasks = []
   if (scope === 'all') tasks = store.fusionList
   else if (scope === 'selected') tasks = selectedRows.value
@@ -308,7 +307,6 @@ const handleBatchConfirm = async ({ scope, target }) => {
 
   let count = 0
   for (const task of tasks) {
-    // 自动保存未保存的任务（如果有）
     if (target === 'prompt') await generatePrompt(task, true)
     else if (target === 'image') await generateImage(task, true)
     else if (target === 'end_image') await generateEndImage(task, true)
@@ -321,16 +319,15 @@ const handleBatchConfirm = async ({ scope, target }) => {
   }
 }
 
-// 单个生成操作
+// 单个生成操作 (调用 aliased API)
 const generatePrompt = async (row, silent = false) => {
   if (!store.genOptions.textProviderId) return !silent && ElMessage.warning('请选择文本模型')
   
-  // 构建素材映射
-  let mapping = row.elements.map((e, i) => `图${i+1}: ${e.name}`).join('\n')
+  let mapping = (row.elements || []).map((e, i) => `图${i+1}: ${e.name}`).join('\n')
   if (row.base_image) mapping += '\n底图: Background'
 
   try {
-    await generateFusionPrompt({
+    await apiGenPrompt({
       id: row.id,
       project_id: store.currentProjectId,
       scene_description: row.scene_description,
@@ -348,7 +345,7 @@ const generateImage = async (row, silent = false) => {
   if (!row.base_image) return !silent && ElMessage.warning('需要底图')
   
   try {
-    await generateFusionImage({
+    await apiGenImage({
       fusion_id: row.id,
       project_id: store.currentProjectId,
       fusion_prompt: row.fusion_prompt,
@@ -363,12 +360,11 @@ const generateEndImage = async (row, silent = false) => {
   if (!store.genOptions.fusionProviderId) return !silent && ElMessage.warning('请选择图生图模型')
   
   try {
-    // 复用接口，传入 end_frame_prompt 参数区分
-    await generateFusionImage({
+    await apiGenImage({
       fusion_id: row.id,
       project_id: store.currentProjectId,
-      fusion_prompt: row.end_frame_prompt, // 使用尾帧提示词
-      end_frame_prompt: row.end_frame_prompt, // 标记
+      fusion_prompt: row.end_frame_prompt,
+      end_frame_prompt: row.end_frame_prompt,
       provider_id: store.genOptions.fusionProviderId,
       model_name: store.genOptions.fusionModelName
     })
@@ -381,7 +377,7 @@ const generateVideo = async (row, silent = false) => {
   if (!row.result_image) return !silent && ElMessage.warning('需要首帧图片')
 
   try {
-    await generateFusionVideo({
+    await apiGenVideo({
       fusion_id: row.id,
       project_id: store.currentProjectId,
       provider_id: store.genOptions.videoProviderId,

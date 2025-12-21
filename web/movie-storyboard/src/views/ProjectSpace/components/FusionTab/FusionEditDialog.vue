@@ -79,14 +79,14 @@ const visible = computed({
   set: (val) => emit('update:modelValue', val)
 })
 
+const resetForm = () => {
+  form.value = { scene: '', shot_number: '', shot_id: '', base_image: '', fusion_prompt: '', result_image: '', elements: [] }
+}
+
 watch(() => props.initialData, (val) => {
   if (val) form.value = JSON.parse(JSON.stringify(val))
   else resetForm()
 }, { immediate: true })
-
-const resetForm = () => {
-  form.value = { scene: '', shot_number: '', shot_id: '', base_image: '', fusion_prompt: '', result_image: '', elements: [] }
-}
 
 const handleShotChange = (shotId) => {
   const shot = store.shotList.find(s => s.id === shotId)

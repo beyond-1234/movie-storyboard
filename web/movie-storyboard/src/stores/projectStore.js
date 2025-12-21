@@ -3,7 +3,7 @@ import {
   getProjectDetail, 
   getCharacters, 
   getShots, 
-  getFusions
+  getFusions 
 } from '@/api/project' 
 
 export const useProjectStore = defineStore('project', {
@@ -47,7 +47,7 @@ export const useProjectStore = defineStore('project', {
         ])
         this.currentProject = projectData
         this.characterList = charData || []
-        this.fusionList = fusionData || [] // 赋值
+        this.fusionList = fusionData || []
         
         // 恢复配置
         const savedOptions = localStorage.getItem('media_gen_options')
@@ -67,9 +67,7 @@ export const useProjectStore = defineStore('project', {
       try {
         const res = await getCharacters(this.currentProjectId)
         this.characterList = res || []
-      } catch (e) {
-        console.error(e)
-      }
+      } catch (e) { console.error(e) }
     },
 
     // 单独刷新分镜列表
@@ -83,7 +81,7 @@ export const useProjectStore = defineStore('project', {
       }
     },
 
-    // 新增：单独刷新融图列表
+    // 单独刷新融图列表
     async fetchFusions() {
       if (!this.currentProjectId) return
       this.loading.fusions = true
