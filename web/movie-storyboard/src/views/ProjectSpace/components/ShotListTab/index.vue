@@ -110,6 +110,9 @@
 
         <!-- 悬浮操作栏 -->
         <div class="absolute right-2 top-2 opacity-0 group-hover:opacity-100 transition-opacity flex gap-2 bg-white/90 p-1 rounded shadow-sm border border-gray-100 backdrop-blur-sm z-10">
+           <el-tooltip content="复制" placement="top">
+             <el-button type="info" circle size="small" :icon="CopyDocument" @click.stop="handleCopy(item, index)" />
+           </el-tooltip>
            <el-tooltip content="编辑" placement="top">
              <el-button type="primary" circle size="small" :icon="Edit" @click.stop="openEditDialog(item)" />
            </el-tooltip>
@@ -212,7 +215,7 @@
 import { ref, onMounted } from 'vue'
 import { useProjectStore } from '@/stores/projectStore'
 import { getShots, batchCreateShots, createShot, updateShot, deleteShot } from '@/api/project'
-import { Refresh, Download, Upload, VideoCamera, Microphone, Timer, Plus, Edit, Delete } from '@element-plus/icons-vue'
+import { Refresh, Download, Upload, VideoCamera, Microphone, Timer, Plus, Edit, Delete, CopyDocument } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { read, utils } from 'xlsx'
 
@@ -331,6 +334,39 @@ const insertShot = (index) => {
     if (!isNaN(num)) form.value.shot_number = String(num + 1)
   }
   dialogVisible.value = true
+}
+
+// 复制分镜功能
+const handleCopy = async (item, index) => {
+  // 深拷贝原始数据
+  const payload = JSON.parse(JSON.stringify(item))
+  // 移除 ID 以便作为新数据创建
+  delete payload.id
+  
+  // 设置插入位置为当前分镜之后
+  payload.insert_index = index + 1
+  
+  // 确保 movie_id 存在
+  payload.movie_id = store.currentProjectId
+
+  // 处理角色数据格式：如果是对象数组，转换为 ID 数组供后端创建使用
+  if (payload.characters && payload.characters.length > 0 && typeof payload.characters[0] === 'object') {
+    payload.characters = payload.characters.map(c => c.id)
+  }
+
+  try {
+    const res = await createShot(store.currentProjectId, payload)
+    
+    // 补充角色对象用于前端列表显示 (从 store.characterList 中匹配)
+    res.characters = getCharacterObjects(res.characters || payload.characters)
+    
+    // 在列表中插入新分镜
+    store.shotList.splice(index + 1, 0, res)
+    ElMessage.success('复制成功')
+  } catch (e) {
+    console.error(e)
+    ElMessage.error('复制失败')
+  }
 }
 
 const submitForm = async () => {
