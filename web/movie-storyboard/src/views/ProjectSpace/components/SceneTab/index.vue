@@ -19,7 +19,7 @@
       </div>
 
       <div class="flex gap-2">
-        <el-dropdown split-button size="small" @click="batchGeneratePrompt" @command="handleBatchCommand">
+        <el-dropdown split-button type="success" size="small" @click="batchGeneratePrompt" @command="handleBatchCommand">
           批量生成
           <template #dropdown>
             <el-dropdown-menu>
@@ -31,7 +31,7 @@
 
         <el-button type="danger" plain size="small" icon="Delete" :disabled="selectedRows.length === 0" @click="handleBatchDelete">批量删除</el-button>
         <el-button type="danger" plain size="small" icon="DeleteFilled" @click="handleClearAll">清空全部</el-button>
-        <el-button type="primary" plain size="small" icon="Plus" @click="openCreateDialog">添加场景</el-button>
+        <el-button type="primary" size="small" icon="Plus" @click="openCreateDialog">添加场景</el-button>
       </div>
     </div>
 
@@ -62,38 +62,29 @@
         </template>
       </el-table-column>
 
-      <el-table-column label="场景图片" width="140" align="center">
+      <!-- 替换为 UnifiedImageCard -->
+      <el-table-column label="场景图片" width="200" align="center">
         <template #default="{ row }">
-          <div class="relative w-24 h-16 bg-gray-100 border rounded flex items-center justify-center group overflow-hidden mx-auto">
-            <el-image 
-              v-if="row.scene_image" 
-              :src="row.scene_image" 
-              class="w-full h-full" 
-              fit="cover" 
-              :preview-src-list="[row.scene_image]" 
-              hide-on-click-modal
-            />
-            <div v-else class="text-xs text-gray-400 flex flex-col items-center">
-              <el-icon><Picture /></el-icon>
-            </div>
-            
-            <!-- 悬浮操作 -->
-            <div class="absolute inset-0 bg-black/60 hidden group-hover:flex items-center justify-center gap-2">
-               <el-tooltip content="生成图片" placement="top">
-                 <el-button type="success" circle size="small" icon="MagicStick" @click="genImage(row)" />
-               </el-tooltip>
-               <el-tooltip content="上传替换" placement="top">
-                 <el-button type="primary" circle size="small" icon="Upload" @click="triggerUpload(row)" />
-               </el-tooltip>
-            </div>
-          </div>
+          <UnifiedImageCard
+            :src="row.scene_image"
+            width="200px"
+            height="80px"
+            fit="cover"
+            placeholder="场景图"
+            :show-empty-actions="false"
+            :enable-delete="!!row.scene_image"
+            custom-class="mx-auto"
+            @generate="genImage(row)"
+            @upload="(file) => handleSceneUpload(row, file)"
+            @delete="handleDeleteImage(row)"
+            @click-empty="triggerUpload(row)"
+          />
         </template>
       </el-table-column>
 
       <el-table-column label="出席人物" width="150">
         <template #default="{ row }">
           <div class="flex flex-wrap gap-1">
-            <!-- 兼容逻辑：characters 可能是对象数组，也可能是 ID 数组 -->
             <el-tag 
               v-for="char in getCharacterObjects(row.characters)" 
               :key="char.id" 
@@ -169,27 +160,29 @@
         </el-form-item>
 
         <el-form-item label="场景图">
+          <!-- 弹窗内的图片组件 -->
           <div class="flex items-center gap-4">
-            <div v-if="form.scene_image" class="w-32 h-20 border rounded overflow-hidden relative group">
-              <el-image :src="form.scene_image" class="w-full h-full" fit="cover" />
-              <div class="absolute inset-0 bg-black/50 hidden group-hover:flex items-center justify-center cursor-pointer text-white" @click="form.scene_image = ''">
-                 <el-icon><Delete /></el-icon>
-              </div>
-            </div>
-            <div class="flex flex-col gap-2">
-              <el-button size="small" icon="Upload" @click="triggerUploadForForm">上传图片</el-button>
-              <el-button size="small" type="success" plain icon="MagicStick" @click="genImageForForm">生成图片</el-button>
-            </div>
+            <UnifiedImageCard
+              :src="form.scene_image"
+              width="160px"
+              height="100px"
+              fit="cover"
+              placeholder="场景图"
+              :enable-delete="!!form.scene_image"
+              @generate="genImageForForm"
+              @upload="handleFormImageUpload"
+              @delete="form.scene_image = ''"
+            />
           </div>
         </el-form-item>
       </el-form>
       <template #footer>
         <el-button @click="dialogVisible = false">取消</el-button>
-        <el-button type="primary" plain @click="submitForm">保存</el-button>
+        <el-button type="primary" @click="submitForm">保存</el-button>
       </template>
     </el-dialog>
 
-    <!-- 隐藏的上传 input -->
+    <!-- 隐藏的上传 input (仅用于列表空状态点击时的 fallback，如果 UnifiedImageCard click-empty 没接管的话) -->
     <input type="file" ref="fileInput" class="hidden" accept="image/*" @change="handleFileSelected" />
   </div>
 </template>
@@ -199,6 +192,7 @@ import { ref, onMounted, computed } from 'vue'
 import { useProjectStore } from '@/stores/projectStore'
 import { useLoadingStore } from '@/stores/loadingStore'
 import ModelSelector from '@/components/ModelSelector.vue'
+import UnifiedImageCard from '@/components/UnifiedImageCard.vue' // 引入通用组件
 import { 
   getShots, createShot, updateShot, deleteShot, batchDeleteShots 
 } from '@/api/project'
@@ -206,6 +200,7 @@ import {
   generateScenePrompt, generateSceneImage, uploadSceneImage 
 } from '@/api/generation'
 import { ElMessage, ElMessageBox, ElNotification } from 'element-plus'
+import { Plus, Delete, DeleteFilled, Edit, MagicStick } from '@element-plus/icons-vue'
 
 const store = useProjectStore()
 const loadingStore = useLoadingStore()
@@ -214,7 +209,7 @@ const loadingStore = useLoadingStore()
 const selectedRows = ref([])
 const dialogVisible = ref(false)
 const editingId = ref(null)
-const insertIndex = ref(-1) // 插入位置索引
+const insertIndex = ref(-1)
 
 const form = ref({
   scene: '',
@@ -222,11 +217,10 @@ const form = ref({
   scene_description: '',
   scene_prompt: '',
   scene_image: '',
-  characters: [] // 这里存储 ID 数组
+  characters: []
 })
 
 const fileInput = ref(null)
-const uploadContext = ref(null) // 'list' | 'form'
 const uploadTargetRow = ref(null)
 
 // --- Initialization ---
@@ -249,12 +243,9 @@ const refreshList = async () => {
 
 // --- Helpers ---
 
-// 统一处理角色对象获取（兼容 API 返回的是 ID 还是对象）
 const getCharacterObjects = (chars) => {
   if (!chars || chars.length === 0) return []
-  // 如果是对象数组，直接返回
   if (typeof chars[0] === 'object') return chars
-  // 如果是 ID 数组，去 store 里找
   return store.characterList.filter(c => chars.includes(c.id))
 }
 
@@ -274,7 +265,6 @@ const openCreateDialog = () => {
 const openEditDialog = (row) => {
   editingId.value = row.id
   insertIndex.value = -1
-  // Deep copy & format characters to IDs
   const copy = JSON.parse(JSON.stringify(row))
   if (copy.characters && copy.characters.length > 0 && typeof copy.characters[0] === 'object') {
     copy.characters = copy.characters.map(c => c.id)
@@ -287,11 +277,9 @@ const insertScene = (index) => {
   editingId.value = null
   insertIndex.value = index + 1
   resetForm()
-  // 智能填充：尝试自动+1镜号
   const prev = store.shotList[index]
   if (prev) {
     form.value.scene = prev.scene
-    // 尝试解析数字并+1
     const num = parseInt(prev.shot_number)
     if (!isNaN(num)) form.value.shot_number = String(num + 1)
   }
@@ -334,41 +322,24 @@ const submitForm = async () => {
   if (!form.value.scene || !form.value.shot_number) {
     return ElMessage.warning('场次和镜号必填')
   }
-
-  // 构造提交数据
-  // 注意：后端可能期望 characters 是对象数组或 ID 数组，这里根据 API 定义
-  // 如果后端 project.js 里的 createShot 能处理 ID 数组最好。
-  // 这里我们提交前，把 ID 数组转回对象数组，或者让后端处理。
-  // 通常 CRUD 接口传 ID 比较规范。假设后端接受 ID 数组。
   
   const payload = { ...form.value }
-  // 确保字符是 ID 数组
   
   try {
     if (editingId.value) {
-      // Update
       const res = await updateShot(store.currentProjectId, editingId.value, payload)
-      // 手动更新本地列表
       const idx = store.shotList.findIndex(s => s.id === editingId.value)
       if (idx !== -1) {
-        // 更新时，为了显示人名，我们需要把 characters ID 换成对象
         res.characters = getCharacterObjects(res.characters || payload.characters)
         store.shotList[idx] = res
       }
     } else {
-      // Create
-      if (insertIndex.value > -1) {
-        payload.insert_index = insertIndex.value
-      }
+      if (insertIndex.value > -1) payload.insert_index = insertIndex.value
       const res = await createShot(store.currentProjectId, payload)
-      // 填充角色对象用于显示
       res.characters = getCharacterObjects(res.characters || payload.characters)
       
-      if (insertIndex.value > -1) {
-        store.shotList.splice(insertIndex.value, 0, res)
-      } else {
-        store.shotList.push(res)
-      }
+      if (insertIndex.value > -1) store.shotList.splice(insertIndex.value, 0, res)
+      else store.shotList.push(res)
     }
     dialogVisible.value = false
     ElMessage.success('保存成功')
@@ -377,7 +348,7 @@ const submitForm = async () => {
   }
 }
 
-// --- Actions: Generation (List context) ---
+// --- Actions: Generation ---
 
 const genPrompt = async (row) => {
   if (!store.genOptions.textProviderId) return ElMessage.warning('请先选择文本模型')
@@ -411,20 +382,12 @@ const genImage = async (row) => {
   } catch (e) { console.error(e) }
 }
 
-// --- Actions: Generation (Form context) ---
-
 const genPromptForForm = async () => {
   if (!store.genOptions.textProviderId) return ElMessage.warning('请先选择文本模型')
   if (!form.value.scene_description) return ElMessage.warning('请填写场景说明')
   
-  // 如果是新建场景，还没 ID，不能用异步任务回调更新。
-  // 这种情况下，要么先保存，要么使用同步接口（如果有）。
-  // 这里假设必须先保存。
-  if (!editingId.value) {
-    return ElMessage.warning('请先保存场景，再使用 AI 生成')
-  }
+  if (!editingId.value) return ElMessage.warning('请先保存场景，再使用 AI 生成')
 
-  // 调用生成接口
   await generateScenePrompt({
     scene_id: editingId.value,
     project_id: store.currentProjectId,
@@ -432,9 +395,6 @@ const genPromptForForm = async () => {
     provider_id: store.genOptions.textProviderId,
     model_name: store.genOptions.textModelName
   })
-  
-  // 只是提交了任务，弹窗里无法立即看到。
-  // 可以在这里提示用户“任务已提交，完成后请刷新”。
   ElNotification.info({ title: '提示', message: '生成任务后台运行中，结果稍后会自动更新' })
 }
 
@@ -461,8 +421,6 @@ const handleBatchCommand = (cmd) => {
 
 const batchGeneratePrompt = async () => {
   if (!store.genOptions.textProviderId) return ElMessage.warning('请选择文本模型')
-  
-  // 筛选没提示词的
   const targets = store.shotList.filter(s => s.scene_description && !s.scene_prompt)
   if (targets.length === 0) return ElMessage.info('没有需要生成的场景')
 
@@ -482,7 +440,6 @@ const batchGeneratePrompt = async () => {
 
 const batchGenerateImage = async () => {
   if (!store.genOptions.imageProviderId) return ElMessage.warning('请选择图片模型')
-  
   const targets = store.shotList.filter(s => s.scene_prompt && !s.scene_image)
   if (targets.length === 0) return ElMessage.info('没有需要生成的场景')
 
@@ -502,49 +459,76 @@ const batchGenerateImage = async () => {
 
 // --- Actions: Upload ---
 
-const triggerUpload = (row) => {
-  uploadContext.value = 'list'
-  uploadTargetRow.value = row
-  fileInput.value.click()
+// 列表中的图片上传
+const handleSceneUpload = async (row, file) => {
+  loadingStore.start('上传中', '正在上传场景图片...')
+  const fd = new FormData()
+  fd.append('file', file)
+  fd.append('scene_id', row.id)
+
+  try {
+    const res = await uploadSceneImage(fd)
+    if (res.success) {
+      // 1. 更新数据库
+      await updateShot(store.currentProjectId, row.id, { scene_image: res.url })
+      // 2. 更新本地状态
+      row.scene_image = res.url
+      ElMessage.success('上传并保存成功')
+    }
+  } catch (err) {
+    console.error(err)
+  } finally {
+    loadingStore.stop()
+  }
 }
 
-const triggerUploadForForm = () => {
+// 弹窗表单中的图片上传
+const handleFormImageUpload = async (file) => {
   if (!editingId.value) return ElMessage.warning('请先保存场景')
-  uploadContext.value = 'form'
+  
+  loadingStore.start('上传中', '正在上传场景图片...')
+  const fd = new FormData()
+  fd.append('file', file)
+  fd.append('scene_id', editingId.value)
+
+  try {
+    const res = await uploadSceneImage(fd)
+    if (res.success) {
+      // 1. 更新数据库
+      await updateShot(store.currentProjectId, editingId.value, { scene_image: res.url })
+      // 2. 更新表单
+      form.value.scene_image = res.url
+      // 3. 更新列表
+      const idx = store.shotList.findIndex(s => s.id === editingId.value)
+      if (idx !== -1) store.shotList[idx].scene_image = res.url
+      ElMessage.success('上传并保存成功')
+    }
+  } catch (err) {
+    console.error(err)
+  } finally {
+    loadingStore.stop()
+  }
+}
+
+const handleDeleteImage = async (row) => {
+  await ElMessageBox.confirm('确定删除该场景图片?')
+  await updateShot(store.currentProjectId, row.id, { scene_image: '' })
+  row.scene_image = ''
+  ElMessage.success('图片已删除')
+}
+
+// 用于 UnifiedImageCard click-empty 的 fallback
+const triggerUpload = (row) => {
+  uploadTargetRow.value = row
   fileInput.value.click()
 }
 
 const handleFileSelected = async (e) => {
   const file = e.target.files[0]
   if (!file) return
-  
-  const targetId = uploadContext.value === 'form' ? editingId.value : uploadTargetRow.value?.id
-  if (!targetId) return
-
-  loadingStore.start('上传中', '正在上传场景图片...')
-  
-  const fd = new FormData()
-  fd.append('file', file)
-  fd.append('scene_id', targetId)
-
-  try {
-    const res = await uploadSceneImage(fd)
-    if (res.success) {
-      if (uploadContext.value === 'form') {
-        form.value.scene_image = res.url
-      }
-      // 更新列表数据
-      const idx = store.shotList.findIndex(s => s.id === targetId)
-      if (idx !== -1) {
-        store.shotList[idx].scene_image = res.url
-      }
-      ElMessage.success('上传成功')
-    }
-  } catch (err) {
-    console.error(err)
-  } finally {
-    loadingStore.stop()
-    e.target.value = ''
+  if (uploadTargetRow.value) {
+    await handleSceneUpload(uploadTargetRow.value, file)
   }
+  e.target.value = ''
 }
 </script>
