@@ -26,7 +26,7 @@
     <!-- 分镜列表区域 -->
     <div class="flex-1 overflow-y-auto p-4 space-y-3 custom-scrollbar">
       <div 
-        v-for="(item, index) in store.shotList" 
+        v-for="(item, index) in displayList" 
         :key="item.id" 
         class="shot-card group relative"
       >
@@ -39,7 +39,8 @@
           <div class="divider-vertical"></div>
           <div class="shot-badge">
             <span class="label">镜</span>
-            <span class="value">{{ item.shot_number }}</span>
+            <!-- 使用前端自动计算的镜号 -->
+            <span class="value">{{ item._auto_shot_number }}</span>
           </div>
         </div>
 
@@ -140,8 +141,9 @@
           <el-form-item label="场次" required class="flex-1">
             <el-input v-model="form.scene" placeholder="例如: 1" />
           </el-form-item>
-          <el-form-item label="镜号" required class="flex-1">
-            <el-input v-model="form.shot_number" placeholder="例如: 1" />
+          <!-- 镜号改为自动生成，不再提供输入框 -->
+          <el-form-item label="镜号" class="flex-1">
+            <el-input disabled placeholder="自动生成" />
           </el-form-item>
         </div>
 
@@ -212,7 +214,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, computed } from 'vue'
 import { useProjectStore } from '@/stores/projectStore'
 import { getShots, batchCreateShots, createShot, updateShot, deleteShot } from '@/api/project'
 import { Refresh, Download, Upload, VideoCamera, Microphone, Timer, Plus, Edit, Delete, CopyDocument } from '@element-plus/icons-vue'
@@ -228,7 +230,7 @@ const editingId = ref(null)
 const insertIndex = ref(-1)
 const form = ref({
   scene: '',
-  shot_number: '',
+  // shot_number: '', // Removed from initial form state management
   visual_description: '',
   dialogue: '',
   audio_description: '',
@@ -237,6 +239,25 @@ const form = ref({
   camera_angle: '',
   duration: 0,
   characters: []
+})
+
+// 计算属性：动态生成展示用的列表，包含自动计算的镜号
+const displayList = computed(() => {
+  const sceneCounts = {}
+  return store.shotList.map((item, index) => {
+    // 获取场次作为key
+    const sceneKey = item.scene || 'default'
+    if (!sceneCounts[sceneKey]) sceneCounts[sceneKey] = 0
+    sceneCounts[sceneKey]++
+    
+    return {
+      ...item,
+      // 自动计算的镜号：当前场次的第几个镜头
+      _auto_shot_number: sceneCounts[sceneKey],
+      // 保持原始索引以便操作
+      _original_index: index 
+    }
+  })
 })
 
 onMounted(() => {
@@ -277,7 +298,7 @@ const getCharacterObjects = (ids) => {
 const resetForm = () => {
   form.value = {
     scene: '',
-    shot_number: '',
+    // shot_number removed
     visual_description: '',
     dialogue: '',
     audio_description: '',
@@ -293,12 +314,10 @@ const openCreateDialog = () => {
   editingId.value = null
   insertIndex.value = -1
   resetForm()
-  // 自动填充上一条的场次和镜号+1
+  // 自动填充上一条的场次
   if (store.shotList.length > 0) {
     const last = store.shotList[store.shotList.length - 1]
     form.value.scene = last.scene
-    const num = parseInt(last.shot_number)
-    if (!isNaN(num)) form.value.shot_number = String(num + 1)
   }
   dialogVisible.value = true
 }
@@ -308,7 +327,7 @@ const openEditDialog = (item) => {
   insertIndex.value = -1
   // 深拷贝并处理角色字段
   const copy = JSON.parse(JSON.stringify(item))
-  // 将 visual_description 映射回表单 (如果 API 字段名不一致)
+  // 将 visual_description 映射回表单
   if (!copy.visual_description && copy.scene_description) {
     copy.visual_description = copy.scene_description
   }
@@ -330,8 +349,6 @@ const insertShot = (index) => {
   const prev = store.shotList[index]
   if (prev) {
     form.value.scene = prev.scene
-    const num = parseInt(prev.shot_number)
-    if (!isNaN(num)) form.value.shot_number = String(num + 1)
   }
   dialogVisible.value = true
 }
@@ -342,6 +359,9 @@ const handleCopy = async (item, index) => {
   const payload = JSON.parse(JSON.stringify(item))
   // 移除 ID 以便作为新数据创建
   delete payload.id
+  // 移除临时字段
+  delete payload._auto_shot_number
+  delete payload._original_index
   
   // 设置插入位置为当前分镜之后
   payload.insert_index = index + 1
@@ -370,13 +390,14 @@ const handleCopy = async (item, index) => {
 }
 
 const submitForm = async () => {
-  if (!form.value.scene || !form.value.shot_number) {
-    return ElMessage.warning('场次和镜号必填')
+  if (!form.value.scene) {
+    return ElMessage.warning('场次必填')
   }
 
   // 构造 payload，映射回后端字段
   const payload = {
     ...form.value,
+    shot_number: '0', // 传默认值给后端，因为前端负责展示，后端字段可能已废弃或不重要
     scene_description: form.value.visual_description, // 兼容后端可能使用的字段
     movie_id: store.currentProjectId
   }
@@ -473,7 +494,7 @@ const handleImportFile = async (e) => {
         }
         return {
           scene: getValue(['场次', 'scene', 'Scene', '场']),
-          shot_number: getValue(['镜号', 'shot_number', 'Shot', '号']),
+          // shot_number: getValue(['镜号', 'shot_number', 'Shot', '号']), // 不再从 Excel 读取镜号
           visual_description: getValue(['画面内容', '画面描述', 'visual_description', 'Visual', '画面']),
           dialogue: getValue(['台词', 'dialogue', 'Dialogue']),
           audio_description: getValue(['声音', '音效', 'audio_description', 'Audio']),
@@ -483,7 +504,7 @@ const handleImportFile = async (e) => {
           duration: getValue(['时长', 'duration', 'Duration']),
           movie_id: store.currentProjectId
         }
-      }).filter(item => item.scene || item.shot_number)
+      }).filter(item => item.scene) // 只需要场次
 
       if (validShots.length === 0) return ElMessage.warning('无有效数据')
 
