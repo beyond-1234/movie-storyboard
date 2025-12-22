@@ -20,8 +20,8 @@
       </div>
       
       <div class="flex gap-3">
-        <el-button type="primary" plain icon="Plus" @click="openCreateDialog">创建角色</el-button>
-        <el-button type="success" plain icon="MagicStick" :loading="generatingList" @click="handleAutoGenerateList">
+        <el-button type="primary" icon="Plus" @click="openCreateDialog">创建角色</el-button>
+        <el-button type="success" icon="MagicStick" :loading="generatingList" @click="handleAutoGenerateList">
           从设定生成
         </el-button>
         <el-popconfirm 
@@ -37,18 +37,18 @@
     </div>
 
     <!-- 角色列表内容区 -->
-    <div class="flex-1 overflow-y-auto pr-2">
+    <div class="flex-1 overflow-y-auto pr-2 custom-scrollbar">
       <el-empty v-if="store.characterList.length === 0" description="暂无角色，请点击右上角创建或从设定生成" />
       
       <div v-else class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-5">
         <div 
           v-for="char in store.characterList" 
           :key="char.id" 
-          class="bg-white rounded-lg border hover:shadow-md transition-shadow flex flex-col overflow-hidden group"
+          class="bg-white rounded-lg border hover:shadow-md transition-shadow flex flex-col overflow-hidden group h-[420px]"
         >
           <!-- 卡片头部 -->
-          <div class="p-3 border-b flex justify-between items-center bg-gray-50">
-            <span class="font-bold text-gray-700 truncate mr-2" :title="char.name">{{ char.name }}</span>
+          <div class="p-3 border-b flex justify-between items-center bg-gray-50 shrink-0">
+            <span class="font-bold text-gray-700 truncate mr-2 flex-1" :title="char.name">{{ char.name }}</span>
             <el-button 
               type="danger" 
               link 
@@ -58,64 +58,45 @@
             />
           </div>
 
-          <!-- 图片区域 -->
-          <div class="relative h-64 bg-gray-100 flex items-center justify-center overflow-hidden">
-            <el-image 
-              v-if="char.image_url" 
-              :src="char.image_url" 
-              fit="contain" 
-              class="w-full h-full bg-gray-200" 
-              :preview-src-list="[char.image_url]"
-              hide-on-click-modal
-            >
-              <template #error>
-                <div class="flex flex-col items-center justify-center h-full text-gray-400">
-                  <el-icon size="24"><Picture /></el-icon>
-                  <span class="text-xs mt-2">图片加载失败</span>
-                </div>
-              </template>
-            </el-image>
-            
-            <!-- 无图时的占位 -->
-            <div v-else class="flex flex-col items-center justify-center text-gray-400 h-full w-full">
-              <el-icon size="40" class="mb-2"><User /></el-icon>
-              <span class="text-xs">暂无设计图</span>
-              <div class="mt-4 flex gap-2">
-                 <el-button size="small" type="primary" plain icon="Upload" @click="triggerUpload(char)">上传</el-button>
-                 <el-button size="small" type="success" plain icon="MagicStick" @click="handleGenerateImage(char)">生成</el-button>
-              </div>
-            </div>
-
-            <!-- 有图时的悬浮操作层 -->
-            <div v-if="char.image_url" class="absolute inset-0 bg-black/60 flex items-center justify-center gap-4 opacity-0 group-hover:opacity-100 transition-opacity duration-200">
-               <div class="flex flex-col gap-2">
-                 <el-button type="primary" round size="small" icon="Upload" @click="triggerUpload(char)">替换图片</el-button>
-                 <el-button type="success" round size="small" icon="MagicStick" @click="handleGenerateImage(char)">重新生成</el-button>
-               </div>
-            </div>
+          <!-- 图片区域 (替换为 UnifiedImageCard) -->
+          <div class="h-64 bg-gray-100 shrink-0">
+            <UnifiedImageCard
+              :src="char.image_url"
+              width="100%"
+              height="100%"
+              fit="contain"
+              custom-class="!border-0 !rounded-none"
+              placeholder="暂无角色设计图"
+              :show-empty-actions="true"
+              @generate="handleGenerateImage(char)"
+              @upload="(file) => handleCharacterUpload(char, file)"
+              @delete="handleDeleteImage(char)"
+            />
           </div>
 
           <!-- 描述/编辑区域 -->
-          <div class="p-4 flex-1 flex flex-col text-sm">
-            <div v-if="editingId === char.id" class="flex flex-col gap-2 h-full">
+          <div class="p-4 flex-1 flex flex-col text-sm min-h-0 bg-white relative">
+            <div v-if="editingId === char.id" class="flex flex-col gap-2 h-full absolute inset-0 p-4 bg-white z-10">
               <el-input 
                 v-model="tempDescription" 
                 type="textarea" 
-                :rows="3" 
+                class="flex-1"
                 resize="none" 
                 placeholder="输入角色描述..."
               />
-              <div class="flex justify-end gap-2 mt-auto">
+              <div class="flex justify-end gap-2 shrink-0">
                 <el-button size="small" @click="cancelEdit">取消</el-button>
-                <el-button size="small" plain type="primary" @click="saveDescription(char)">保存</el-button>
+                <el-button size="small" type="primary" @click="saveDescription(char)">保存</el-button>
               </div>
             </div>
             
-            <div v-else class="flex flex-col h-full relative">
-              <p class="text-gray-600 line-clamp-4 leading-relaxed mb-1">
+            <div v-else class="flex flex-col h-full relative group/desc">
+              <div class="text-gray-600 line-clamp-4 leading-relaxed whitespace-pre-wrap overflow-hidden" :title="char.description">
                 {{ char.description || '暂无描述' }}
-              </p>
-              <div class="mt-auto pt-2 flex justify-end border-t border-dashed border-gray-100">
+              </div>
+              
+              <!-- 悬浮编辑按钮 -->
+              <div class="absolute bottom-0 right-0 pt-4 bg-gradient-to-t from-white via-white to-transparent w-full flex justify-end opacity-0 group-hover/desc:opacity-100 transition-opacity">
                 <el-button type="primary" link size="small" icon="Edit" @click="startEdit(char)">编辑描述</el-button>
               </div>
             </div>
@@ -149,23 +130,15 @@
         <el-button type="primary" :loading="creating" @click="submitCreate">创建</el-button>
       </template>
     </el-dialog>
-
-    <!-- 隐藏的文件上传 input -->
-    <input 
-      type="file" 
-      ref="fileInput" 
-      class="hidden" 
-      accept="image/*" 
-      @change="handleFileChange" 
-    />
   </div>
 </template>
 
 <script setup>
-import { ref, computed } from 'vue'
+import { ref } from 'vue'
 import { useProjectStore } from '@/stores/projectStore'
 import { useLoadingStore } from '@/stores/loadingStore'
 import ModelSelector from '@/components/ModelSelector.vue'
+import UnifiedImageCard from '@/components/UnifiedImageCard.vue' // 引入通用组件
 import { 
   createCharacter, 
   deleteCharacter, 
@@ -178,6 +151,7 @@ import {
   generateCharacterViews 
 } from '@/api/generation'
 import { ElMessage, ElMessageBox, ElNotification } from 'element-plus'
+import { Plus, MagicStick, Delete, Edit } from '@element-plus/icons-vue'
 
 // --- Stores ---
 const store = useProjectStore()
@@ -192,10 +166,6 @@ const generatingList = ref(false)
 // 编辑描述相关状态
 const editingId = ref(null)
 const tempDescription = ref('')
-
-// 文件上传相关状态
-const fileInput = ref(null)
-const uploadTargetCharId = ref(null)
 
 // --- Methods: CRUD ---
 
@@ -273,7 +243,7 @@ const saveDescription = async (char) => {
   }
   
   try {
-    // 乐观更新：先改 UI，失败再回滚（这里简化为等待 API）
+    // 乐观更新：先改 UI，失败再回滚
     await updateCharacter(store.currentProjectId, char.id, {
       description: tempDescription.value
     })
@@ -287,58 +257,49 @@ const saveDescription = async (char) => {
   }
 }
 
-// --- Methods: Image Upload ---
+// --- Methods: Image Handling (Using UnifiedImageCard) ---
 
-const triggerUpload = (char) => {
-  uploadTargetCharId.value = char.id
-  fileInput.value.click()
-}
-
-const handleFileChange = async (e) => {
-  const file = e.target.files[0]
-  if (!file) return
-  
-  // 验证
-  if (!file.type.startsWith('image/')) {
-    ElMessage.error('请选择图片文件')
-    return
-  }
-  if (file.size > 5 * 1024 * 1024) { // 5MB
-    ElMessage.error('图片大小不能超过 5MB')
-    return
-  }
-
-  const charId = uploadTargetCharId.value
+// 上传图片处理
+const handleCharacterUpload = async (char, file) => {
   const formData = new FormData()
   formData.append('file', file)
-  formData.append('character_id', charId)
+  formData.append('character_id', char.id)
 
-  // 使用全局 Loading 遮罩
   loadingStore.start('图片上传中', '正在处理您的图片...')
   
   try {
     const res = await uploadCharacterImage(formData)
-    if (res.success) {
-      // 更新本地 Store 中的角色图片
-      const targetChar = store.characterList.find(c => c.id === charId)
-      if (targetChar) {
-        targetChar.image_url = res.url
-      }
-      ElMessage.success('上传成功')
+    if (res.success && res.url) {
+      // 1. 调用更新接口，持久化到数据库
+      await updateCharacter(store.currentProjectId, char.id, { image_url: res.url })
+      
+      // 2. 更新本地状态
+      char.image_url = res.url 
+      ElMessage.success('上传并保存成功')
+    } else {
+      ElMessage.error(res.error || '上传失败')
     }
   } catch (e) {
     console.error(e)
+    ElMessage.error('上传出错')
   } finally {
     loadingStore.stop()
-    // 清空 input 允许重复上传同一文件
-    e.target.value = ''
-    uploadTargetCharId.value = null
   }
 }
 
-// --- Methods: AI Generation ---
+// 删除图片处理
+const handleDeleteImage = async (char) => {
+  try {
+    await ElMessageBox.confirm('确定移除该角色的设计图吗？', '提示', { type: 'warning' })
+    await updateCharacter(store.currentProjectId, char.id, { image_url: '' })
+    char.image_url = ''
+    ElMessage.success('图片已移除')
+  } catch (e) {
+    if (e !== 'cancel') console.error(e)
+  }
+}
 
-// 生成单张角色设计图
+// AI 生成
 const handleGenerateImage = async (char) => {
   if (!store.genOptions.imageProviderId) {
     return ElMessage.warning('请先在顶部选择生图模型')
@@ -348,7 +309,7 @@ const handleGenerateImage = async (char) => {
     const res = await generateCharacterViews({
       character_id: char.id,
       project_id: store.currentProjectId,
-      character_description: char.description || char.name, // Fallback to name
+      character_description: char.description || char.name, 
       provider_id: store.genOptions.imageProviderId,
       model_name: store.genOptions.imageModelName
     })
@@ -359,8 +320,6 @@ const handleGenerateImage = async (char) => {
         message: `正在为 ${char.name} 生成设计图，请留意后台任务队列`,
         type: 'success',
       })
-      // 可以选择展开任务抽屉
-      // taskStore.drawerVisible = true
     }
   } catch (e) {
     console.error(e)
@@ -377,7 +336,6 @@ const handleAutoGenerateList = async () => {
   }
 
   generatingList.value = true
-  // 使用全局 Loading
   loadingStore.start('正在分析剧本设定', 'AI 正在识别角色并生成列表...')
 
   try {
@@ -388,14 +346,12 @@ const handleAutoGenerateList = async () => {
     })
 
     if (res.success && res.characters) {
-      // 简单去重逻辑
       const existingNames = new Set(store.characterList.map(c => c.name.trim()))
       let addedCount = 0
       
       for (const char of res.characters) {
         if (!char.name || existingNames.has(char.name.trim())) continue
         
-        // 创建角色
         const newChar = await createCharacter(store.currentProjectId, char)
         store.characterList.push(newChar)
         addedCount++
@@ -417,12 +373,23 @@ const handleAutoGenerateList = async () => {
 </script>
 
 <style scoped>
-/* 自定义滚动条，如果需要 */
-::-webkit-scrollbar {
+.custom-scrollbar::-webkit-scrollbar {
   width: 6px;
 }
-::-webkit-scrollbar-thumb {
-  background: #e5e7eb;
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background-color: #e5e7eb;
   border-radius: 3px;
+}
+.custom-scrollbar:hover::-webkit-scrollbar-thumb {
+  background-color: #d1d5db;
+}
+
+/* 使得 textarea 自适应高度且不丑 */
+:deep(.el-textarea__inner) {
+  height: 100% !important;
+  resize: none;
 }
 </style>

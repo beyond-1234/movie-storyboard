@@ -95,6 +95,20 @@ export const useProjectStore = defineStore('project', {
     updateGenOptions(newOptions) {
       this.genOptions = { ...this.genOptions, ...newOptions }
       localStorage.setItem('media_gen_options', JSON.stringify(this.genOptions))
+    },
+
+    refreshCurrentTab(activeTabName = null) {
+      if (!this.currentProjectId) return
+
+      // 如果传入了具体 Tab 名则刷新该 Tab，否则尝试全部刷新或智能刷新
+      // 这里为了简单稳健，我们刷新所有可能受影响的列表，或者你可以配合 Router/UI 状态来传参
+      
+      console.log('Auto refreshing data for project:', this.currentProjectId)
+      
+      // 并行刷新，互不阻塞
+      this.fetchCharacters()
+      this.fetchShots()
+      this.fetchFusions()
     }
   }
 })
