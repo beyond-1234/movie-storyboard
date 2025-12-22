@@ -1,7 +1,7 @@
 <template>
-  <div class="scene-tab h-full flex flex-col">
+  <div class="scene-tab h-full flex flex-col bg-gray-50">
     <!-- 顶部配置栏 -->
-    <div class="bg-white p-3 rounded shadow-sm mb-4 flex flex-wrap gap-4 items-center justify-between">
+    <div class="bg-white px-6 py-3 border-b border-gray-200 flex justify-between items-center shadow-sm z-10 shrink-0">
       <div class="flex flex-wrap gap-4 items-center">
         <ModelSelector 
           type="text" 
@@ -29,85 +29,121 @@
           </template>
         </el-dropdown>
 
-        <el-button type="danger" plain size="small" icon="Delete" :disabled="selectedRows.length === 0" @click="handleBatchDelete">批量删除</el-button>
-        <el-button type="danger" plain size="small" icon="DeleteFilled" @click="handleClearAll">清空全部</el-button>
-        <el-button type="primary" size="small" icon="Plus" @click="openCreateDialog">添加场景</el-button>
+        <el-button type="danger" plain size="small" :icon="Delete" :disabled="selectedRows.length === 0" @click="handleBatchDelete">批量删除</el-button>
+        <el-button type="danger" plain size="small" :icon="DeleteFilled" @click="handleClearAll">清空全部</el-button>
+        <el-button type="primary" size="small" :icon="Plus" @click="openCreateDialog">添加场景</el-button>
       </div>
     </div>
 
-    <!-- 场景列表 -->
-    <el-table 
-      :data="store.shotList" 
-      v-loading="store.loading.shots" 
-      border 
-      stripe 
-      row-key="id"
-      class="flex-1"
-      height="100%"
-      @selection-change="handleSelectionChange"
-    >
-      <el-table-column type="selection" width="45" />
-      <el-table-column prop="scene" label="场次" width="70" align="center" sortable />
-      <el-table-column prop="shot_number" label="镜号" width="70" align="center" sortable />
-      
-      <el-table-column label="场景说明" min-width="200" show-overflow-tooltip>
-        <template #default="{ row }">
-          <div class="whitespace-pre-wrap text-sm">{{ row.scene_description }}</div>
-        </template>
-      </el-table-column>
-      
-      <el-table-column label="场景提示词" min-width="200" show-overflow-tooltip>
-        <template #default="{ row }">
-          <div class="text-xs text-gray-500 font-mono">{{ row.scene_prompt || '暂无提示词' }}</div>
-        </template>
-      </el-table-column>
+    <!-- 自定义表头 -->
+    <div class="grid grid-cols-[60px_1fr_200px_180px] gap-4 px-6 py-2 bg-gray-100/80 text-xs font-medium text-gray-500 border-b border-gray-200 shrink-0 select-none">
+      <div class="text-center">场次</div>
+      <div class="pl-2">场景描述 & 提示词</div>
+      <div>场景图片</div>
+      <div class="text-right pr-2">出席人物</div>
+    </div>
 
-      <!-- 替换为 UnifiedImageCard -->
-      <el-table-column label="场景图片" width="200" align="center">
-        <template #default="{ row }">
+    <!-- 场景列表区域 -->
+    <div class="flex-1 overflow-y-auto p-4 space-y-3 custom-scrollbar">
+      <div 
+        v-for="(item, index) in store.shotList" 
+        :key="item.id" 
+        class="scene-card group relative"
+      >
+        <!-- 1. 索引区块 -->
+        <div class="index-section">
+          <div class="scene-badge">
+            <span class="label">场</span>
+            <span class="value">{{ item.scene }}</span>
+          </div>
+        </div>
+
+        <!-- 2. 内容详情区块 -->
+        <div class="content-section">
+          <!-- 场景说明 -->
+          <div class="content-row mb-3">
+            <el-icon class="icon desc"><Document /></el-icon>
+            <div class="text-content">
+              <span class="label">说明：</span>
+              <span class="text-gray-800 font-medium">{{ item.scene_description || '暂无场景说明' }}</span>
+            </div>
+          </div>
+          
+          <!-- 场景提示词 -->
+          <div class="content-row">
+            <el-icon class="icon prompt"><MagicStick /></el-icon>
+            <div class="text-content w-full">
+              <span class="label">提示词：</span>
+              <div class="text-xs text-gray-500 bg-gray-50 p-2 rounded border border-gray-100 mt-1 font-mono break-all leading-relaxed">
+                {{ item.scene_prompt || '暂无提示词，请先生成' }}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 3. 图片区块 -->
+        <div class="image-section">
           <UnifiedImageCard
-            :src="row.scene_image"
-            width="200px"
-            height="80px"
+            :src="item.scene_image"
+            width="160px"
+            height="100px"
             fit="cover"
             placeholder="场景图"
             :show-empty-actions="false"
-            :enable-delete="!!row.scene_image"
-            custom-class="mx-auto"
-            @generate="genImage(row)"
-            @upload="(file) => handleSceneUpload(row, file)"
-            @delete="handleDeleteImage(row)"
-            @click-empty="triggerUpload(row)"
+            :enable-delete="!!item.scene_image"
+            custom-class="mx-auto shadow-sm"
+            @generate="genImage(item)"
+            @upload="(file) => handleSceneUpload(item, file)"
+            @delete="handleDeleteImage(item)"
+            @click-empty="triggerUpload(item)"
           />
-        </template>
-      </el-table-column>
+        </div>
 
-      <el-table-column label="出席人物" width="150">
-        <template #default="{ row }">
-          <div class="flex flex-wrap gap-1">
+        <!-- 4. 人物区块 -->
+        <div class="meta-section">
+          <div class="characters">
             <el-tag 
-              v-for="char in getCharacterObjects(row.characters)" 
+              v-for="char in getCharacterObjects(item.characters)" 
               :key="char.id" 
               size="small" 
+              type="info" 
               effect="plain"
+              class="mb-1 mr-1"
             >
               {{ char.name }}
             </el-tag>
+            <span v-if="!item.characters?.length" class="text-xs text-gray-300 italic">无出席人物</span>
           </div>
-        </template>
-      </el-table-column>
+        </div>
 
-      <el-table-column label="操作" width="180" fixed="right">
-        <template #default="{ row, $index }">
-          <div class="flex flex-wrap gap-1 justify-center">
-            <el-tooltip content="编辑" placement="top"><el-button size="small" icon="Edit" circle @click="openEditDialog(row)" /></el-tooltip>
-            <el-tooltip content="生成提示词" placement="top"><el-button size="small" type="warning" plain icon="MagicStick" circle @click="genPrompt(row)" /></el-tooltip>
-            <el-tooltip content="删除" placement="top"><el-button size="small" type="danger" plain icon="Delete" circle @click="handleDelete(row)" /></el-tooltip>
-            <el-tooltip content="向下插入" placement="top"><el-button size="small" type="primary" plain icon="Plus" circle @click="insertScene($index)" /></el-tooltip>
-          </div>
-        </template>
-      </el-table-column>
-    </el-table>
+        <!-- 悬浮操作栏 -->
+        <div class="absolute right-2 top-2 opacity-0 group-hover:opacity-100 transition-opacity flex gap-2 bg-white/90 p-1 rounded shadow-sm border border-gray-100 backdrop-blur-sm z-10">
+           <el-tooltip content="编辑" placement="top">
+             <el-button type="primary" circle size="small" :icon="Edit" @click.stop="openEditDialog(item)" />
+           </el-tooltip>
+           
+           <!-- 智能生成按钮 -->
+           <el-tooltip :content="item.scene_prompt ? '生成图片' : '生成提示词'" placement="top">
+             <el-button 
+               :type="item.scene_prompt ? 'success' : 'warning'" 
+               circle 
+               size="small" 
+               :icon="item.scene_prompt ? Picture : MagicStick" 
+               @click.stop="handleOneClickGenerate(item)" 
+             />
+           </el-tooltip>
+
+           <el-tooltip content="向下插入" placement="top">
+             <el-button type="success" circle size="small" :icon="Plus" @click.stop="insertScene(index)" />
+           </el-tooltip>
+           <el-tooltip content="删除" placement="top">
+             <el-button type="danger" circle size="small" :icon="Delete" @click.stop="handleDelete(item)" />
+           </el-tooltip>
+        </div>
+      </div>
+
+      <el-empty v-if="store.shotList.length === 0" description="暂无场景数据，请添加" />
+    </div>
 
     <!-- 编辑/新建弹窗 -->
     <el-dialog 
@@ -117,14 +153,10 @@
       destroy-on-close
     >
       <el-form :model="form" label-width="90px" size="default">
-        <div class="flex gap-4">
-          <el-form-item label="场次" required class="flex-1">
-            <el-input v-model="form.scene" placeholder="1" />
-          </el-form-item>
-          <el-form-item label="镜号" required class="flex-1">
-            <el-input v-model="form.shot_number" placeholder="1" />
-          </el-form-item>
-        </div>
+        <!-- 场次 -->
+        <el-form-item label="场次" required>
+          <el-input v-model="form.scene" placeholder="例如: 1" />
+        </el-form-item>
 
         <el-form-item label="场景说明">
           <el-input v-model="form.scene_description" type="textarea" :rows="3" placeholder="描述发生了什么..." />
@@ -134,7 +166,7 @@
           <div class="flex flex-col gap-2 w-full">
             <el-input v-model="form.scene_prompt" type="textarea" :rows="5" placeholder="AI 生成的提示词（也可手动修改）" />
             <div class="text-right">
-              <el-button type="success" link icon="MagicStick" size="small" @click="genPromptForForm">
+              <el-button type="success" link :icon="MagicStick" size="small" @click="genPromptForForm">
                 立即生成提示词
               </el-button>
             </div>
@@ -160,7 +192,6 @@
         </el-form-item>
 
         <el-form-item label="场景图">
-          <!-- 弹窗内的图片组件 -->
           <div class="flex items-center gap-4">
             <UnifiedImageCard
               :src="form.scene_image"
@@ -182,17 +213,17 @@
       </template>
     </el-dialog>
 
-    <!-- 隐藏的上传 input (仅用于列表空状态点击时的 fallback，如果 UnifiedImageCard click-empty 没接管的话) -->
+    <!-- 隐藏的上传 input -->
     <input type="file" ref="fileInput" class="hidden" accept="image/*" @change="handleFileSelected" />
   </div>
 </template>
 
 <script setup>
-import { ref, onMounted, computed } from 'vue'
+import { ref, onMounted, computed, watch } from 'vue'
 import { useProjectStore } from '@/stores/projectStore'
 import { useLoadingStore } from '@/stores/loadingStore'
 import ModelSelector from '@/components/ModelSelector.vue'
-import UnifiedImageCard from '@/components/UnifiedImageCard.vue' // 引入通用组件
+import UnifiedImageCard from '@/components/UnifiedImageCard.vue' 
 import { 
   getShots, createShot, updateShot, deleteShot, batchDeleteShots 
 } from '@/api/project'
@@ -200,7 +231,7 @@ import {
   generateScenePrompt, generateSceneImage, uploadSceneImage 
 } from '@/api/generation'
 import { ElMessage, ElMessageBox, ElNotification } from 'element-plus'
-import { Plus, Delete, DeleteFilled, Edit, MagicStick } from '@element-plus/icons-vue'
+import { Plus, Delete, DeleteFilled, Edit, MagicStick, Document, Picture } from '@element-plus/icons-vue'
 
 const store = useProjectStore()
 const loadingStore = useLoadingStore()
@@ -213,7 +244,7 @@ const insertIndex = ref(-1)
 
 const form = ref({
   scene: '',
-  shot_number: '',
+  shot_number: '1', 
   scene_description: '',
   scene_prompt: '',
   scene_image: '',
@@ -255,10 +286,31 @@ const handleSelectionChange = (val) => {
   selectedRows.value = val
 }
 
+const resetForm = () => {
+  form.value = {
+    scene: '', 
+    shot_number: '1', 
+    scene_description: '', scene_prompt: '', scene_image: '',
+    characters: []
+  }
+}
+
 const openCreateDialog = () => {
   editingId.value = null
   insertIndex.value = -1
   resetForm()
+  // 智能填充场次
+  if (store.shotList.length > 0) {
+    const last = store.shotList[store.shotList.length - 1]
+    const lastSceneNum = parseInt(last.scene)
+    if (!isNaN(lastSceneNum)) {
+      form.value.scene = String(lastSceneNum + 1)
+    } else {
+      form.value.scene = last.scene 
+    }
+  } else {
+    form.value.scene = '1'
+  }
   dialogVisible.value = true
 }
 
@@ -269,6 +321,7 @@ const openEditDialog = (row) => {
   if (copy.characters && copy.characters.length > 0 && typeof copy.characters[0] === 'object') {
     copy.characters = copy.characters.map(c => c.id)
   }
+  if (!copy.shot_number) copy.shot_number = '1'
   form.value = copy
   dialogVisible.value = true
 }
@@ -277,11 +330,15 @@ const insertScene = (index) => {
   editingId.value = null
   insertIndex.value = index + 1
   resetForm()
+  // 插入：尝试让场次 + 1
   const prev = store.shotList[index]
   if (prev) {
-    form.value.scene = prev.scene
-    const num = parseInt(prev.shot_number)
-    if (!isNaN(num)) form.value.shot_number = String(num + 1)
+    const prevSceneNum = parseInt(prev.scene)
+    if (!isNaN(prevSceneNum)) {
+      form.value.scene = String(prevSceneNum + 1)
+    } else {
+      form.value.scene = prev.scene
+    }
   }
   dialogVisible.value = true
 }
@@ -310,20 +367,13 @@ const handleClearAll = async () => {
 
 // --- Actions: Form Submit ---
 
-const resetForm = () => {
-  form.value = {
-    scene: '', shot_number: '',
-    scene_description: '', scene_prompt: '', scene_image: '',
-    characters: []
-  }
-}
-
 const submitForm = async () => {
-  if (!form.value.scene || !form.value.shot_number) {
-    return ElMessage.warning('场次和镜号必填')
+  if (!form.value.scene) {
+    return ElMessage.warning('场次必填')
   }
   
   const payload = { ...form.value }
+  if (!payload.shot_number) payload.shot_number = '1'
   
   try {
     if (editingId.value) {
@@ -350,6 +400,41 @@ const submitForm = async () => {
 
 // --- Actions: Generation ---
 
+// 智能生成按钮逻辑：串联生成
+const handleOneClickGenerate = async (row) => {
+  // 1. 如果已有提示词，直接生成图片
+  if (row.scene_prompt) {
+    if (row.scene_image) {
+      try {
+        await ElMessageBox.confirm('已有图片，确定重新生成吗？', '提示', { type: 'warning' })
+      } catch { return }
+    }
+    await genImage(row)
+    return
+  }
+
+  // 2. 如果没有提示词，开始“生成词 -> 等待 -> 生成图”流程
+  await genPrompt(row)
+  
+  // 开启轮询
+  const checkInterval = setInterval(() => {
+    const currentItem = store.shotList.find(item => item.id === row.id)
+    
+    if (currentItem && currentItem.scene_prompt) {
+      clearInterval(checkInterval)
+      ElNotification.success({ title: '提示词已就绪', message: `场景 ${row.scene} 自动开始生成图片...` })
+      genImage(currentItem)
+    }
+  }, 2000)
+
+  // 60秒超时保护
+  setTimeout(() => {
+    clearInterval(checkInterval)
+  }, 60000)
+  
+  ElMessage.success('已启动全流程生成：正在生成提示词，完成后将自动生成图片。')
+}
+
 const genPrompt = async (row) => {
   if (!store.genOptions.textProviderId) return ElMessage.warning('请先选择文本模型')
   if (!row.scene_description) return ElMessage.warning('请先填写场景说明')
@@ -362,7 +447,6 @@ const genPrompt = async (row) => {
       provider_id: store.genOptions.textProviderId,
       model_name: store.genOptions.textModelName
     })
-    ElMessage.success('提示词生成任务已提交')
   } catch (e) { console.error(e) }
 }
 
@@ -378,7 +462,6 @@ const genImage = async (row) => {
       provider_id: store.genOptions.imageProviderId,
       model_name: store.genOptions.imageModelName
     })
-    ElMessage.success('图片生成任务已提交')
   } catch (e) { console.error(e) }
 }
 
@@ -459,7 +542,6 @@ const batchGenerateImage = async () => {
 
 // --- Actions: Upload ---
 
-// 列表中的图片上传
 const handleSceneUpload = async (row, file) => {
   loadingStore.start('上传中', '正在上传场景图片...')
   const fd = new FormData()
@@ -469,9 +551,7 @@ const handleSceneUpload = async (row, file) => {
   try {
     const res = await uploadSceneImage(fd)
     if (res.success) {
-      // 1. 更新数据库
       await updateShot(store.currentProjectId, row.id, { scene_image: res.url })
-      // 2. 更新本地状态
       row.scene_image = res.url
       ElMessage.success('上传并保存成功')
     }
@@ -482,7 +562,6 @@ const handleSceneUpload = async (row, file) => {
   }
 }
 
-// 弹窗表单中的图片上传
 const handleFormImageUpload = async (file) => {
   if (!editingId.value) return ElMessage.warning('请先保存场景')
   
@@ -494,11 +573,8 @@ const handleFormImageUpload = async (file) => {
   try {
     const res = await uploadSceneImage(fd)
     if (res.success) {
-      // 1. 更新数据库
       await updateShot(store.currentProjectId, editingId.value, { scene_image: res.url })
-      // 2. 更新表单
       form.value.scene_image = res.url
-      // 3. 更新列表
       const idx = store.shotList.findIndex(s => s.id === editingId.value)
       if (idx !== -1) store.shotList[idx].scene_image = res.url
       ElMessage.success('上传并保存成功')
@@ -517,7 +593,6 @@ const handleDeleteImage = async (row) => {
   ElMessage.success('图片已删除')
 }
 
-// 用于 UnifiedImageCard click-empty 的 fallback
 const triggerUpload = (row) => {
   uploadTargetRow.value = row
   fileInput.value.click()
@@ -532,3 +607,131 @@ const handleFileSelected = async (e) => {
   e.target.value = ''
 }
 </script>
+
+<style scoped>
+/* 卡片基础样式 */
+.scene-card {
+  background: white;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  display: grid;
+  grid-template-columns: 60px 1fr 200px 180px; /* 定义四列布局：移除镜号列 */
+  gap: 16px;
+  padding: 0;
+  transition: all 0.2s ease;
+  position: relative;
+  min-height: 120px;
+}
+
+.scene-card:hover {
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+  border-color: #d1d5db;
+  transform: translateY(-1px);
+}
+
+/* 1. 索引区 */
+.index-section {
+  background-color: #f9fafb;
+  border-right: 1px solid #f3f4f6;
+  border-top-left-radius: 8px;
+  border-bottom-left-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 12px 0;
+}
+
+.scene-badge {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.label {
+  font-size: 10px;
+  color: #9ca3af;
+  text-transform: uppercase;
+}
+
+.value {
+  font-size: 18px;
+  font-weight: 800;
+  color: #374151;
+  line-height: 1.2;
+}
+
+/* 2. 内容区 */
+.content-section {
+  padding: 16px 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+
+.content-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.icon {
+  margin-top: 3px;
+  font-size: 14px;
+  flex-shrink: 0;
+}
+.icon.desc { color: #6b7280; }
+.icon.prompt { color: #8b5cf6; }
+
+.text-content {
+  font-size: 13px;
+  line-height: 1.5;
+  color: #1f2937;
+}
+
+.text-content .label {
+  color: #9ca3af;
+  margin-right: 4px;
+}
+
+/* 3. 图片区 */
+.image-section {
+  padding: 12px 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* 4. 元数据区 */
+.meta-section {
+  padding: 16px 16px 16px 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  justify-content: center;
+  gap: 8px;
+}
+
+.characters {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  max-width: 100%;
+}
+
+.hidden { display: none; }
+
+.custom-scrollbar::-webkit-scrollbar {
+  width: 6px;
+}
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background-color: #e5e7eb;
+  border-radius: 3px;
+}
+.custom-scrollbar:hover::-webkit-scrollbar-thumb {
+  background-color: #d1d5db;
+}
+</style>
