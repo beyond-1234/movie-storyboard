@@ -103,7 +103,11 @@
             <ScriptTab v-if="isTabMounted('script')" />
           </el-tab-pane>
           
-          <el-tab-pane label="场景列表" name="scenes" class="h-full overflow-hidden flex flex-col">
+          <el-tab-pane label="分镜列表" name="shots" class="h-full overflow-hidden flex flex-col">
+            <ShotListTab v-if="isTabMounted('shots')" />
+          </el-tab-pane>
+
+          <el-tab-pane label="场景库" name="scenes" class="h-full overflow-hidden flex flex-col">
             <SceneTab v-if="isTabMounted('scenes')" />
           </el-tab-pane>
           
@@ -217,6 +221,7 @@ import { analyzeImage } from '@/api/generation'
 import { ElMessage, ElNotification } from 'element-plus'
 
 // 子模块组件
+import ShotListTab from './components/ShotListTab/index.vue'
 import CharacterTab from './components/CharacterTab/index.vue'
 import ScriptTab from './components/ScriptTab/index.vue'
 import SceneTab from './components/SceneTab/index.vue'
