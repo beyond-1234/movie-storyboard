@@ -3,11 +3,48 @@
     <!-- 顶部工具栏 -->
     <div class="bg-white px-6 py-3 border-b border-gray-200 flex justify-between items-center shadow-sm z-10 shrink-0">
       <div class="flex items-center gap-4">
+        <!-- 全选控制 -->
+        <el-checkbox 
+          v-model="isAllSelected" 
+          :indeterminate="isIndeterminate" 
+          @change="handleSelectAllChange"
+        >
+          全选
+        </el-checkbox>
+        
         <span class="text-base font-bold text-gray-700">分镜清单</span>
-        <el-tag type="info" effect="plain" round size="small">{{ store.shotList.length }} 镜头</el-tag>
+        
+        <div class="flex gap-2 items-center">
+          <el-tag type="info" effect="plain" round size="small">{{ store.shotList.length }} 镜头</el-tag>
+          <el-tag v-if="selectedIds.length > 0" type="primary" effect="light" round size="small">已选 {{ selectedIds.length }}</el-tag>
+        </div>
       </div>
       
-      <div class="flex gap-3">
+      <div class="flex gap-3 items-center">
+        <!-- 批量操作按钮 -->
+        <el-button 
+          type="danger" 
+          plain 
+          size="small" 
+          :icon="Delete" 
+          :disabled="selectedIds.length === 0" 
+          @click="handleBatchDelete"
+        >
+          批量删除
+        </el-button>
+        <el-button 
+          type="danger" 
+          plain 
+          size="small" 
+          :icon="DeleteFilled" 
+          :disabled="store.shotList.length === 0"
+          @click="handleClearAll"
+        >
+          清空全部
+        </el-button>
+
+        <div class="w-px h-4 bg-gray-200 mx-1"></div>
+
         <el-button type="primary" size="small" :icon="Plus" @click="openCreateDialog">新建分镜</el-button>
         <el-button type="primary" plain size="small" :icon="Upload" @click="triggerImport">导入 Excel</el-button>
         <el-button type="warning" plain size="small" :icon="Download" @click="exportData">导出 JSON</el-button>
@@ -17,7 +54,7 @@
 
     <!-- 自定义表头 -->
     <div class="grid grid-cols-[80px_1fr_200px_120px] gap-4 px-6 py-2 bg-gray-100/80 text-xs font-medium text-gray-500 border-b border-gray-200 shrink-0 select-none">
-      <div class="text-center">场次-镜号</div>
+      <div class="text-center pl-4">场次-镜号</div> <!-- 调整 padding 以对齐 -->
       <div class="pl-2">画面与声音内容</div>
       <div>技术参数</div>
       <div class="text-right pr-2">角色 & 时长</div>
@@ -28,10 +65,20 @@
       <div 
         v-for="(item, index) in displayList" 
         :key="item.id" 
-        class="shot-card group relative"
+        class="shot-card group relative transition-all duration-200"
+        :class="{ 'ring-2 ring-blue-400 bg-blue-50/30': selectedIds.includes(item.id) }"
+        @click="toggleSelection(item.id)"
       >
         <!-- 1. 索引区块 -->
-        <div class="index-section">
+        <div class="index-section" @click.stop>
+          <!-- 单选框 -->
+          <div class="mb-2" @click.stop>
+             <el-checkbox 
+               :model-value="selectedIds.includes(item.id)" 
+               @change="toggleSelection(item.id)" 
+             />
+          </div>
+          
           <div class="scene-badge">
             <span class="label">场</span>
             <span class="value">{{ item.scene }}</span>
@@ -110,7 +157,7 @@
         </div>
 
         <!-- 悬浮操作栏 -->
-        <div class="absolute right-2 top-2 opacity-0 group-hover:opacity-100 transition-opacity flex gap-2 bg-white/90 p-1 rounded shadow-sm border border-gray-100 backdrop-blur-sm z-10">
+        <div class="absolute right-2 top-2 opacity-0 group-hover:opacity-100 transition-opacity flex gap-2 bg-white/90 p-1 rounded shadow-sm border border-gray-100 backdrop-blur-sm z-10" @click.stop>
            <el-tooltip content="复制" placement="top">
              <el-button type="info" circle size="small" :icon="CopyDocument" @click.stop="handleCopy(item, index)" />
            </el-tooltip>
@@ -214,15 +261,18 @@
 </template>
 
 <script setup>
-import { ref, onMounted, computed } from 'vue'
+import { ref, onMounted, computed, watch } from 'vue'
 import { useProjectStore } from '@/stores/projectStore'
-import { getShots, batchCreateShots, createShot, updateShot, deleteShot } from '@/api/project'
-import { Refresh, Download, Upload, VideoCamera, Microphone, Timer, Plus, Edit, Delete, CopyDocument } from '@element-plus/icons-vue'
+import { getShots, batchCreateShots, createShot, updateShot, deleteShot, batchDeleteShots } from '@/api/project'
+import { Refresh, Download, Upload, VideoCamera, Microphone, Timer, Plus, Edit, Delete, CopyDocument, DeleteFilled } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { read, utils } from 'xlsx'
 
 const store = useProjectStore()
 const importInput = ref(null)
+
+// Selection State
+const selectedIds = ref([])
 
 // Dialog & Form State
 const dialogVisible = ref(false)
@@ -230,7 +280,7 @@ const editingId = ref(null)
 const insertIndex = ref(-1)
 const form = ref({
   scene: '',
-  // shot_number: '', // Removed from initial form state management
+  // shot_number: '', 
   visual_description: '',
   dialogue: '',
   audio_description: '',
@@ -245,20 +295,43 @@ const form = ref({
 const displayList = computed(() => {
   const sceneCounts = {}
   return store.shotList.map((item, index) => {
-    // 获取场次作为key
     const sceneKey = item.scene || 'default'
     if (!sceneCounts[sceneKey]) sceneCounts[sceneKey] = 0
     sceneCounts[sceneKey]++
     
     return {
       ...item,
-      // 自动计算的镜号：当前场次的第几个镜头
       _auto_shot_number: sceneCounts[sceneKey],
-      // 保持原始索引以便操作
       _original_index: index 
     }
   })
 })
+
+// Selection Helpers
+const isAllSelected = computed(() => {
+  return displayList.value.length > 0 && selectedIds.value.length === displayList.value.length
+})
+
+const isIndeterminate = computed(() => {
+  return selectedIds.value.length > 0 && selectedIds.value.length < displayList.value.length
+})
+
+const toggleSelection = (id) => {
+  const idx = selectedIds.value.indexOf(id)
+  if (idx > -1) {
+    selectedIds.value.splice(idx, 1)
+  } else {
+    selectedIds.value.push(id)
+  }
+}
+
+const handleSelectAllChange = (val) => {
+  if (val) {
+    selectedIds.value = displayList.value.map(item => item.id)
+  } else {
+    selectedIds.value = []
+  }
+}
 
 onMounted(() => {
   if (store.currentProjectId) {
@@ -268,6 +341,7 @@ onMounted(() => {
 
 const refreshList = async () => {
   store.loading.shots = true
+  selectedIds.value = [] // 刷新时清空选择
   try {
     const res = await getShots(store.currentProjectId)
     store.shotList = res || []
@@ -298,7 +372,6 @@ const getCharacterObjects = (ids) => {
 const resetForm = () => {
   form.value = {
     scene: '',
-    // shot_number removed
     visual_description: '',
     dialogue: '',
     audio_description: '',
@@ -325,13 +398,10 @@ const openCreateDialog = () => {
 const openEditDialog = (item) => {
   editingId.value = item.id
   insertIndex.value = -1
-  // 深拷贝并处理角色字段
   const copy = JSON.parse(JSON.stringify(item))
-  // 将 visual_description 映射回表单
   if (!copy.visual_description && copy.scene_description) {
     copy.visual_description = copy.scene_description
   }
-  // 提取角色 ID
   if (copy.characters && copy.characters.length > 0 && typeof copy.characters[0] === 'object') {
     copy.characters = copy.characters.map(c => c.id)
   } else if (!copy.characters) {
@@ -345,7 +415,6 @@ const insertShot = (index) => {
   editingId.value = null
   insertIndex.value = index + 1
   resetForm()
-  // 智能填充
   const prev = store.shotList[index]
   if (prev) {
     form.value.scene = prev.scene
@@ -353,34 +422,22 @@ const insertShot = (index) => {
   dialogVisible.value = true
 }
 
-// 复制分镜功能
 const handleCopy = async (item, index) => {
-  // 深拷贝原始数据
   const payload = JSON.parse(JSON.stringify(item))
-  // 移除 ID 以便作为新数据创建
   delete payload.id
-  // 移除临时字段
   delete payload._auto_shot_number
   delete payload._original_index
   
-  // 设置插入位置为当前分镜之后
   payload.insert_index = index + 1
-  
-  // 确保 movie_id 存在
   payload.movie_id = store.currentProjectId
 
-  // 处理角色数据格式：如果是对象数组，转换为 ID 数组供后端创建使用
   if (payload.characters && payload.characters.length > 0 && typeof payload.characters[0] === 'object') {
     payload.characters = payload.characters.map(c => c.id)
   }
 
   try {
     const res = await createShot(store.currentProjectId, payload)
-    
-    // 补充角色对象用于前端列表显示 (从 store.characterList 中匹配)
     res.characters = getCharacterObjects(res.characters || payload.characters)
-    
-    // 在列表中插入新分镜
     store.shotList.splice(index + 1, 0, res)
     ElMessage.success('复制成功')
   } catch (e) {
@@ -394,36 +451,29 @@ const submitForm = async () => {
     return ElMessage.warning('场次必填')
   }
 
-  // 构造 payload，映射回后端字段
   const payload = {
     ...form.value,
-    shot_number: '0', // 传默认值给后端，因为前端负责展示，后端字段可能已废弃或不重要
-    scene_description: form.value.visual_description, // 兼容后端可能使用的字段
+    shot_number: '0', 
+    scene_description: form.value.visual_description, 
     movie_id: store.currentProjectId
   }
 
   try {
     if (editingId.value) {
-      // 编辑
       const res = await updateShot(store.currentProjectId, editingId.value, payload)
-      // 更新本地列表
       const idx = store.shotList.findIndex(s => s.id === editingId.value)
       if (idx !== -1) {
-        // 补充角色对象用于显示
-        res.characters = getCharacterObjects(payload.characters)
-        // 确保 visual_description 存在
+        res.characters = getCharacterObjects(res.characters || payload.characters)
         res.visual_description = payload.visual_description
         store.shotList[idx] = res
       }
       ElMessage.success('更新成功')
     } else {
-      // 新增 / 插入
       if (insertIndex.value > -1) {
         payload.insert_index = insertIndex.value
       }
       const res = await createShot(store.currentProjectId, payload)
-      // 补充角色对象
-      res.characters = getCharacterObjects(payload.characters)
+      res.characters = getCharacterObjects(res.characters || payload.characters)
       res.visual_description = payload.visual_description
       
       if (insertIndex.value > -1) {
@@ -445,7 +495,51 @@ const handleDelete = async (item) => {
     await ElMessageBox.confirm('确定删除该分镜吗?', '提示', { type: 'warning' })
     await deleteShot(store.currentProjectId, item.id)
     store.shotList = store.shotList.filter(s => s.id !== item.id)
+    // 移除选中状态
+    if (selectedIds.value.includes(item.id)) {
+      selectedIds.value = selectedIds.value.filter(id => id !== item.id)
+    }
     ElMessage.success('删除成功')
+  } catch (e) {
+    if (e !== 'cancel') console.error(e)
+  }
+}
+
+// --- Batch Operations ---
+
+const handleBatchDelete = async () => {
+  if (selectedIds.value.length === 0) return
+  
+  try {
+    await ElMessageBox.confirm(`确定删除选中的 ${selectedIds.value.length} 个分镜吗？`, '批量删除', { type: 'warning' })
+    
+    // 调用批量删除 API
+    await batchDeleteShots(store.currentProjectId, selectedIds.value)
+    
+    // 更新本地列表
+    store.shotList = store.shotList.filter(s => !selectedIds.value.includes(s.id))
+    selectedIds.value = []
+    ElMessage.success('批量删除成功')
+  } catch (e) {
+    if (e !== 'cancel') {
+      console.error(e)
+      ElMessage.error('批量删除失败')
+    }
+  }
+}
+
+const handleClearAll = async () => {
+  if (store.shotList.length === 0) return
+  
+  try {
+    await ElMessageBox.confirm('确定清空所有分镜数据吗？此操作不可恢复！', '高危操作', { type: 'error' })
+    
+    const allIds = store.shotList.map(s => s.id)
+    await batchDeleteShots(store.currentProjectId, allIds)
+    
+    store.shotList = []
+    selectedIds.value = []
+    ElMessage.success('已清空全部数据')
   } catch (e) {
     if (e !== 'cancel') console.error(e)
   }
@@ -504,7 +598,7 @@ const handleImportFile = async (e) => {
           duration: getValue(['时长', 'duration', 'Duration']),
           movie_id: store.currentProjectId
         }
-      }).filter(item => item.scene) // 只需要场次
+      }).filter(item => item.scene) 
 
       if (validShots.length === 0) return ElMessage.warning('无有效数据')
 
@@ -538,7 +632,7 @@ const handleImportFile = async (e) => {
   display: grid;
   grid-template-columns: 80px 1fr 200px 120px; /* 定义四列布局 */
   gap: 16px;
-  padding: 0; /* padding 由子元素控制以实现分割线效果 */
+  padding: 0; 
   transition: all 0.2s ease;
   position: relative;
   min-height: 100px;
@@ -561,6 +655,7 @@ const handleImportFile = async (e) => {
   align-items: center;
   justify-content: center;
   padding: 12px 0;
+  cursor: pointer; /* 提示可点击选中 */
 }
 
 .scene-badge, .shot-badge {
@@ -607,8 +702,8 @@ const handleImportFile = async (e) => {
   margin-top: 3px;
   font-size: 14px;
 }
-.icon.visual { color: #8b5cf6; } /* 紫色眼睛 */
-.icon.audio { color: #f59e0b; }  /* 橙色麦克风 */
+.icon.visual { color: #8b5cf6; } 
+.icon.audio { color: #f59e0b; }  
 
 .text-content {
   font-size: 13px;
@@ -647,7 +742,7 @@ const handleImportFile = async (e) => {
 }
 
 .tech-item:last-child {
-  grid-column: span 2; /* 让最后一个元素占满一行 */
+  grid-column: span 2; 
 }
 
 .tech-label {
