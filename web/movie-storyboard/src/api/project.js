@@ -109,6 +109,12 @@ export const createShot = (projectId, data) => {
   return request.post(`/projects/${projectId}/shots`, data)
 }
 
+export const batchCreateShots = (projectId, shots) => {
+  // 假设后端支持 POST /projects/:id/shots/batch_create 
+  // 或者你可以在前端循环调用 createShot，但批量接口更高效
+  return request.post(`/projects/${projectId}/shots/batch_create`, { shots })
+}
+
 export const updateShot = (projectId, shotId, data) => {
   return request.put(`/projects/${projectId}/shots/${shotId}`, data)
 }
