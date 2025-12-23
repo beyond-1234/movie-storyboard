@@ -149,7 +149,7 @@
     <el-dialog 
       v-model="dialogVisible" 
       :title="editingId ? '编辑场景' : '添加场景'" 
-      width="600px" 
+      width="1600px" 
       destroy-on-close
     >
       <el-form :model="form" label-width="90px" size="default">

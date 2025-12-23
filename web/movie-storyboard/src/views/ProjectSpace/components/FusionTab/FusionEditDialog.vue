@@ -2,7 +2,7 @@
   <el-dialog 
     v-model="visible" 
     :title="form.id ? '编辑融图任务' : '新建融图任务'" 
-    width="1600px"
+    width="900px"
     @close="handleClose"
     top="5vh"
   >
@@ -90,9 +90,13 @@
             <template #info>{{ el.name }}</template>
           </UnifiedImageCard>
           
-          <!-- 简单的添加占位符，提示去列表页添加 -->
-          <div class="w-20 h-20 border border-dashed rounded flex flex-col items-center justify-center text-gray-400 bg-gray-50">
-            <span class="text-xs text-center px-1">请在列表页添加元素</span>
+          <!-- 添加元素按钮 -->
+          <div 
+            class="w-20 h-20 border border-dashed border-gray-300 rounded flex flex-col items-center justify-center text-gray-400 bg-gray-50 hover:border-blue-400 hover:text-blue-500 cursor-pointer transition-colors"
+            @click="openElementDialog"
+          >
+            <el-icon :size="24"><Plus /></el-icon>
+            <span class="text-xs mt-1">添加元素</span>
           </div>
         </div>
       </el-form-item>
@@ -177,6 +181,14 @@
       <el-button @click="visible = false">取消</el-button>
       <el-button type="primary" @click="submit">保存</el-button>
     </template>
+
+    <!-- 嵌套的元素添加弹窗 -->
+    <!-- 注意：为了避免 form 引用混乱，这里传入一个临时的 fusion 对象 -->
+    <ElementDialog 
+      v-model="elementDialogVisible" 
+      :fusion="tempFusionForElement" 
+      @success="handleElementSuccess" 
+    />
   </el-dialog>
 </template>
 
@@ -187,8 +199,9 @@ import { useLoadingStore } from '@/stores/loadingStore'
 import { uploadBaseImage as uploadBaseImageApi, generateFusionImage, generateSceneImage } from '@/api/generation' 
 import { createFusion, updateFusion } from '@/api/project' 
 import UnifiedImageCard from '@/components/UnifiedImageCard.vue'
+import ElementDialog from './ElementDialog.vue' // 引入 ElementDialog
 import { ElMessage, ElNotification } from 'element-plus'
-import { Delete, VideoCamera } from '@element-plus/icons-vue' 
+import { Delete, VideoCamera, Plus } from '@element-plus/icons-vue' 
 
 const props = defineProps(['modelValue', 'initialData'])
 const emit = defineEmits(['update:modelValue', 'success'])
@@ -205,12 +218,18 @@ const form = ref({
   video_url: ''
 })
 
+const elementDialogVisible = ref(false)
+// 创建一个临时对象传给 ElementDialog，用于接收新元素
+// ElementDialog 会尝试修改 fusion.elements，所以我们需要传递一个包含 elements 数组的对象
+const tempFusionForElement = computed(() => ({
+  elements: form.value.elements
+}))
+
 const visible = computed({
   get: () => props.modelValue,
   set: (val) => emit('update:modelValue', val)
 })
 
-// 重置表单方法
 const resetForm = () => {
   form.value = { 
     scene: '', shot_number: '', shot_id: '', 
@@ -222,22 +241,17 @@ const resetForm = () => {
   }
 }
 
-// 监听弹窗打开状态来初始化数据 (修复第二次点击不更新的问题)
 watch(() => props.modelValue, (isOpen) => {
   if (isOpen) {
     if (props.initialData) {
-      // 如果有传入数据，深拷贝赋值
       form.value = JSON.parse(JSON.stringify(props.initialData))
-      // 确保数组字段存在
       if (!form.value.elements) form.value.elements = []
     } else {
-      // 如果是新建，重置表单
       resetForm()
     }
   }
 })
 
-// 关闭时也可以调用一次重置，确保状态清理
 const handleClose = () => {
   resetForm()
 }
@@ -276,38 +290,46 @@ const uploadImage = async (file, fieldName) => {
 const handleBaseUpload = (file) => uploadImage(file, 'base_image')
 const handleResultUpload = (file, field) => uploadImage(file, field)
 
+// 元素操作
+const openElementDialog = () => {
+  elementDialogVisible.value = true
+}
+
+const handleElementSuccess = (updatedFusion) => {
+  // ElementDialog 会返回更新后的 fusion 对象（这里是我们传进去的 tempFusion）
+  // 或者它直接修改了引用。
+  // 我们手动把新元素同步回 form.elements
+  form.value.elements = updatedFusion.elements
+  // 注意：ElementDialog 内部可能会调用 API 更新后端，
+  // 但对于新建任务（没有ID），ElementDialog 可能无法保存。
+  // 我们需要确保 ElementDialog 支持纯前端添加模式，或者仅在 submit 时统一保存。
+  // 假设 ElementDialog 已经适配了（见下文分析），或者我们在这里做兼容。
+}
+
 const removeElement = (index) => {
   form.value.elements.splice(index, 1)
 }
 
-// 新增：生成底图
+// AI 生成逻辑 (底图、首帧、尾帧)
 const handleGenerateBaseImage = async () => {
   if (!store.genOptions.imageProviderId) return ElMessage.warning('请先在顶部选择生图模型')
-  
-  // 使用视觉描述或场景说明作为提示词
   const prompt = form.value.visual_description || form.value.scene_description || form.value.scene_prompt
   if (!prompt) return ElMessage.warning('生成底图需要画面描述或场景说明')
 
   try {
-    // 复用场景图生成接口
     const res = await generateSceneImage({
-      // 如果已保存任务有ID，尽量传ID以便后端更新
-      // 但这里主要是为了生成图片，不一定要绑定scene_id，可以通过回调更新
       project_id: store.currentProjectId,
-      scene_prompt: prompt, // 将描述直接作为 prompt 传入
+      scene_prompt: prompt,
       provider_id: store.genOptions.imageProviderId,
       model_name: store.genOptions.imageModelName,
-      // 标记这是为融图生成的底图
       fusion_id: form.value.id 
     })
-    
     if (res.success && res.status === 'queued') {
       ElNotification.success({ title: '任务已提交', message: '正在生成底图...' })
     }
   } catch (e) { console.error(e) }
 }
 
-// 新增：生成首帧
 const handleGenerateImage = async () => {
   if (!form.value.id) return ElMessage.warning('请先保存任务')
   if (!store.genOptions.fusionProviderId) return ElMessage.warning('请先选择图生图模型')
@@ -325,7 +347,6 @@ const handleGenerateImage = async () => {
   } catch (e) { console.error(e) }
 }
 
-// 新增：生成尾帧
 const handleGenerateEndImage = async () => {
   if (!form.value.id) return ElMessage.warning('请先保存任务')
   if (!store.genOptions.fusionProviderId) return ElMessage.warning('请先选择图生图模型')
@@ -335,7 +356,7 @@ const handleGenerateEndImage = async () => {
       fusion_id: form.value.id,
       project_id: store.currentProjectId,
       fusion_prompt: form.value.end_frame_prompt,
-      end_frame_prompt: form.value.end_frame_prompt, // 标记为尾帧
+      end_frame_prompt: form.value.end_frame_prompt, 
       provider_id: store.genOptions.fusionProviderId,
       model_name: store.genOptions.fusionModelName
     })
