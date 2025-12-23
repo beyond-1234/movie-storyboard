@@ -29,10 +29,10 @@
       </div>
     </div>
 
-    <!-- 自定义表头 (调整最后一列宽度为 640px) -->
+    <!-- 自定义表头 -->
     <div class="grid grid-cols-[60px_1fr_640px] gap-4 px-6 py-2 bg-gray-100/80 text-xs font-medium text-gray-500 border-b border-gray-200 shrink-0 select-none">
       <div class="text-center pl-4">场次</div>
-      <div class="pl-2">分镜描述 & 融合素材</div>
+      <div class="pl-2">任务详情 (描述、提示词、素材)</div>
       <div class="text-left pl-2">生成结果 (首帧/尾帧/视频)</div>
     </div>
 
@@ -66,15 +66,42 @@
 
         <!-- 2. 内容详情区块 -->
         <div class="content-section">
-          <!-- 描述信息 -->
-          <div class="mb-3 space-y-1">
-            <div class="flex items-start gap-2">
-              <el-icon class="mt-1 text-gray-400 text-xs shrink-0"><Document /></el-icon>
-              <span class="text-sm text-gray-800 line-clamp-3">{{ item.visual_description || '暂无画面描述' }}</span>
+          <!-- 文本信息区 -->
+          <div class="text-info-area space-y-2 mb-3">
+            <!-- 场景说明 -->
+            <div v-if="item.scene_description" class="flex items-start gap-2 text-xs text-gray-500">
+              <el-icon class="mt-0.5 shrink-0"><Collection /></el-icon>
+              <span>{{ item.scene_description }}</span>
             </div>
-            <div v-if="item.dialogue" class="flex items-start gap-2">
-              <el-icon class="mt-1 text-blue-400 text-xs shrink-0"><Microphone /></el-icon>
-              <span class="text-xs text-blue-600 line-clamp-2">{{ item.dialogue }}</span>
+
+            <!-- 画面描述 -->
+            <div class="flex items-start gap-2">
+              <el-icon class="mt-1 text-gray-700 text-xs shrink-0"><Document /></el-icon>
+              <span class="text-sm text-gray-800 font-medium leading-snug">{{ item.visual_description || '暂无画面描述' }}</span>
+            </div>
+
+            <!-- 对白与声音 -->
+            <div v-if="item.dialogue || item.audio_description" class="flex items-start gap-2 bg-blue-50/50 p-2 rounded border border-blue-100/50">
+              <el-icon class="mt-1 text-blue-500 text-xs shrink-0"><Microphone /></el-icon>
+              <div class="flex flex-col gap-1">
+                <span v-if="item.dialogue" class="text-xs text-blue-700 font-medium">“{{ item.dialogue }}”</span>
+                <span v-if="item.audio_description" class="text-[10px] text-gray-500 italic">({{ item.audio_description }})</span>
+              </div>
+            </div>
+
+            <!-- 提示词展示区 (修改：支持换行显示) -->
+            <div class="prompts-area space-y-1 mt-2">
+              <!-- 首帧提示词 -->
+              <div v-if="item.fusion_prompt" class="text-[11px] text-gray-600 bg-gray-100 p-2 rounded border border-gray-200 font-mono break-all whitespace-pre-wrap relative group/prompt leading-relaxed">
+                <span class="text-blue-600 font-bold mr-1 select-none block mb-1">首帧 Prompt:</span>
+                <span class="block">{{ item.fusion_prompt }}</span>
+              </div>
+              
+              <!-- 尾帧提示词 -->
+              <div v-if="item.end_frame_prompt" class="text-[11px] text-gray-600 bg-gray-100 p-2 rounded border border-gray-200 font-mono break-all whitespace-pre-wrap relative group/prompt leading-relaxed">
+                <span class="text-purple-600 font-bold mr-1 select-none block mb-1">尾帧 Prompt:</span>
+                <span class="block">{{ item.end_frame_prompt }}</span>
+              </div>
             </div>
           </div>
 
@@ -185,6 +212,10 @@
                 <div class="absolute inset-0 flex items-center justify-center">
                   <el-icon class="text-white text-4xl drop-shadow-md opacity-80 group-hover/video:opacity-100 transition-opacity"><VideoPlay /></el-icon>
                 </div>
+                <!-- 视频删除按钮 -->
+                <div class="absolute top-2 right-2 hidden group-hover/video:block" @click.stop="handleDeleteVideo(item)">
+                   <el-button type="danger" circle size="small" :icon="Delete" />
+                </div>
               </div>
               <div 
                 v-else 
@@ -266,7 +297,7 @@ import {
 import { ElMessage, ElMessageBox, ElNotification } from 'element-plus'
 import { 
   Delete, CopyDocument, Plus, VideoPlay, VideoCamera, 
-  Document, Microphone, Edit, MagicStick, Picture, PictureFilled 
+  Document, Microphone, Edit, MagicStick, Picture, PictureFilled, Collection
 } from '@element-plus/icons-vue'
 
 const store = useProjectStore()
@@ -484,6 +515,13 @@ const handleDeleteEndFrameImage = async (row) => {
   row.end_frame_image = ''
 }
 
+const handleDeleteVideo = async (row) => {
+  await ElMessageBox.confirm('确定删除视频?')
+  await updateFusion(store.currentProjectId, row.id, { video_url: '' })
+  row.video_url = ''
+  ElMessage.success('视频已删除')
+}
+
 const triggerBaseUpload = (row) => {
   uploadTargetRow.value = row
   fileInput.value.click()
@@ -617,7 +655,7 @@ const playVideo = (url) => {
   padding: 0;
   transition: all 0.2s ease;
   position: relative;
-  min-height: 220px; /* 增加最小高度以适应大图 */
+  min-height: 240px; /* 增加最小高度以适应内容 */
 }
 
 .fusion-card:hover {
@@ -671,7 +709,7 @@ const playVideo = (url) => {
   padding: 16px 0;
   display: flex;
   flex-direction: column;
-  justify-content: center;
+  /* justify-content: center; */ /* 允许内容自然撑开 */
 }
 
 /* 3. 结果区 */
