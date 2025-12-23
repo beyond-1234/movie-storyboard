@@ -2,7 +2,7 @@
   <el-dialog 
     v-model="visible" 
     :title="form.id ? '编辑融图任务' : '新建融图任务'" 
-    width="900px"
+    width="1600px"
     @close="handleClose"
     top="5vh"
   >
