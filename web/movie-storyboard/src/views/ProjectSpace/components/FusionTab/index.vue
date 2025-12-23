@@ -146,8 +146,11 @@
                 height="200px"
                 fit="cover"
                 placeholder="首帧"
-                :enable-delete="false"
+                :enable-delete="!!item.result_image"
+                :enable-upload="true"
                 @generate="generateImage(item)"
+                @upload="(file) => handleResultUpload(item, file)"
+                @delete="handleDeleteResultImage(item)"
               >
                 <template #info>Start Frame</template>
               </UnifiedImageCard>
@@ -161,8 +164,11 @@
                 height="200px"
                 fit="cover"
                 placeholder="尾帧"
-                :enable-delete="false"
+                :enable-delete="!!item.end_frame_image"
+                :enable-upload="true"
                 @generate="generateEndImage(item)"
+                @upload="(file) => handleEndFrameUpload(item, file)"
+                @delete="handleDeleteEndFrameImage(item)"
               >
                 <template #info>End Frame</template>
               </UnifiedImageCard>
@@ -423,6 +429,61 @@ const handleDeleteBaseImage = async (row) => {
   row.base_image = ''
 }
 
+// 首帧上传
+const handleResultUpload = async (row, file) => {
+  loadingStore.start('上传中', '正在上传首帧...')
+  const fd = new FormData()
+  fd.append('file', file)
+  fd.append('fusion_id', row.id)
+
+  try {
+    // 复用上传接口
+    const res = await uploadBaseImage(fd)
+    if (res.success) {
+      await updateFusion(store.currentProjectId, row.id, { result_image: res.url })
+      row.result_image = res.url
+      ElMessage.success('首帧上传成功')
+    }
+  } catch (err) {
+    console.error(err)
+    ElMessage.error('上传失败')
+  } finally {
+    loadingStore.stop()
+  }
+}
+
+const handleDeleteResultImage = async (row) => {
+  await updateFusion(store.currentProjectId, row.id, { result_image: '' })
+  row.result_image = ''
+}
+
+// 尾帧上传
+const handleEndFrameUpload = async (row, file) => {
+  loadingStore.start('上传中', '正在上传尾帧...')
+  const fd = new FormData()
+  fd.append('file', file)
+  fd.append('fusion_id', row.id)
+
+  try {
+    const res = await uploadBaseImage(fd)
+    if (res.success) {
+      await updateFusion(store.currentProjectId, row.id, { end_frame_image: res.url })
+      row.end_frame_image = res.url
+      ElMessage.success('尾帧上传成功')
+    }
+  } catch (err) {
+    console.error(err)
+    ElMessage.error('上传失败')
+  } finally {
+    loadingStore.stop()
+  }
+}
+
+const handleDeleteEndFrameImage = async (row) => {
+  await updateFusion(store.currentProjectId, row.id, { end_frame_image: '' })
+  row.end_frame_image = ''
+}
+
 const triggerBaseUpload = (row) => {
   uploadTargetRow.value = row
   fileInput.value.click()
@@ -622,7 +683,6 @@ const playVideo = (url) => {
   border-bottom-right-radius: 8px;
   display: flex;
   align-items: center;
-  width: 600px;
 }
 
 .hidden { display: none; }
