@@ -29,9 +29,9 @@
           </template>
         </el-dropdown>
 
-        <el-button type="danger" plain size="small" :icon="Delete" :disabled="selectedRows.length === 0" @click="handleBatchDelete">批量删除</el-button>
-        <el-button type="danger" plain size="small" :icon="DeleteFilled" @click="handleClearAll">清空全部</el-button>
-        <el-button type="primary" size="small" :icon="Plus" @click="openCreateDialog">添加场景</el-button>
+        <!-- <el-button type="danger" plain size="small" :icon="Delete" :disabled="selectedRows.length === 0" @click="handleBatchDelete">批量删除</el-button> -->
+        <!-- <el-button type="danger" plain size="small" :icon="DeleteFilled" @click="handleClearAll">清空全部</el-button> -->
+        <!-- <el-button type="primary" size="small" :icon="Plus" @click="openCreateDialog">添加场景</el-button> -->
       </div>
     </div>
 
@@ -133,12 +133,12 @@
              />
            </el-tooltip>
 
-           <el-tooltip content="向下插入" placement="top">
+           <!-- <el-tooltip content="向下插入" placement="top">
              <el-button type="success" circle size="small" :icon="Plus" @click.stop="insertScene(index)" />
            </el-tooltip>
            <el-tooltip content="删除" placement="top">
              <el-button type="danger" circle size="small" :icon="Delete" @click.stop="handleDelete(item)" />
-           </el-tooltip>
+           </el-tooltip> -->
         </div>
       </div>
 
