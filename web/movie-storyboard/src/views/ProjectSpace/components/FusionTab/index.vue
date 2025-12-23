@@ -1,8 +1,8 @@
 <template>
-  <div class="fusion-tab h-full flex flex-col">
+  <div class="fusion-tab h-full flex flex-col bg-gray-50">
     <!-- 顶部配置栏 -->
-    <div class="bg-white p-3 rounded shadow-sm mb-4">
-      <div class="flex flex-wrap gap-4 items-center border-b pb-3 mb-3">
+    <div class="bg-white px-6 py-3 border-b border-gray-200 flex justify-between items-center shadow-sm z-10 shrink-0">
+      <div class="flex flex-wrap gap-4 items-center">
         <ModelSelector type="text" label="文本模型" v-model:provider="store.genOptions.textProviderId" v-model:model="store.genOptions.textModelName" />
         <div class="w-px h-6 bg-gray-200 hidden md:block"></div>
         <ModelSelector type="image_fusion" label="图生图模型" v-model:provider="store.genOptions.fusionProviderId" v-model:model="store.genOptions.fusionModelName" />
@@ -10,135 +10,230 @@
         <ModelSelector type="video" label="视频模型" v-model:provider="store.genOptions.videoProviderId" v-model:model="store.genOptions.videoModelName" />
       </div>
 
-      <div class="flex justify-between items-center">
-        <div class="flex gap-2">
-          <el-button type="danger" plain size="small" icon="Delete" :disabled="selectedRows.length === 0" @click="handleBatchDelete">批量删除</el-button>
-          <el-button type="warning" plain size="small" icon="CopyDocument" @click="handleCopyFromScenes">从场景列表复制</el-button>
-        </div>
+      <div class="flex gap-2">
+        <el-dropdown split-button type="success" size="small" @click="openBatchDialog('image')" @command="openBatchDialog">
+          批量生成
+          <template #dropdown>
+            <el-dropdown-menu>
+              <el-dropdown-item command="prompt">批量生成提示词</el-dropdown-item>
+              <el-dropdown-item command="image">批量生成首帧</el-dropdown-item>
+              <el-dropdown-item command="end_image">批量生成尾帧</el-dropdown-item>
+              <el-dropdown-item command="video" divided>批量生成视频</el-dropdown-item>
+            </el-dropdown-menu>
+          </template>
+        </el-dropdown>
         
-        <div class="flex gap-2">
-          <el-dropdown split-button type="success" size="small" @click="openBatchDialog('image')" @command="openBatchDialog">
-            批量生成融合图
-            <template #dropdown>
-              <el-dropdown-menu>
-                <el-dropdown-item command="prompt">批量生成提示词</el-dropdown-item>
-                <el-dropdown-item command="image">批量生成首帧</el-dropdown-item>
-                <el-dropdown-item command="end_image">批量生成尾帧</el-dropdown-item>
-                <el-dropdown-item command="video" divided>批量生成视频</el-dropdown-item>
-              </el-dropdown-menu>
-            </template>
-          </el-dropdown>
-          <el-button type="primary" size="small" icon="Plus" @click="openCreateDialog">添加任务</el-button>
-        </div>
+        <el-button type="danger" plain size="small" :icon="Delete" :disabled="selectedIds.length === 0" @click="handleBatchDelete">批量删除</el-button>
+        <el-button type="warning" plain size="small" :icon="CopyDocument" @click="handleCopyFromScenes">从场景复制</el-button>
+        <el-button type="primary" size="small" :icon="Plus" @click="openCreateDialog">添加任务</el-button>
       </div>
     </div>
 
-    <!-- 融图任务列表 -->
-    <el-table 
-      :data="store.fusionList" 
-      v-loading="store.loading.fusions" 
-      border 
-      stripe 
-      row-key="id"
-      class="flex-1"
-      height="100%"
-      @selection-change="handleSelectionChange"
-    >
-      <el-table-column type="selection" width="45" />
-      <el-table-column label="场号" width="70">
-        <template #default="{ row }">
-          <div class="text-center font-bold">{{ row.scene }}-{{ row.shot_number }}</div>
-        </template>
-      </el-table-column>
-      
-      <!-- 描述信息 -->
-      <el-table-column label="描述信息" min-width="200" show-overflow-tooltip>
-        <template #default="{ row }">
-          <div class="text-xs">
-            <div v-if="row.visual_description"><span class="font-bold text-gray-500">画面:</span> {{ row.visual_description }}</div>
-            <div v-if="row.dialogue" class="mt-1 text-blue-600"><span class="font-bold text-gray-500">台词:</span> {{ row.dialogue }}</div>
-          </div>
-        </template>
-      </el-table-column>
+    <!-- 自定义表头 (调整最后一列宽度为 640px) -->
+    <div class="grid grid-cols-[60px_1fr_640px] gap-4 px-6 py-2 bg-gray-100/80 text-xs font-medium text-gray-500 border-b border-gray-200 shrink-0 select-none">
+      <div class="text-center pl-4">场次</div>
+      <div class="pl-2">分镜描述 & 融合素材</div>
+      <div class="text-left pl-2">生成结果 (首帧/尾帧/视频)</div>
+    </div>
 
-      <!-- 底图与元素 -->
-      <el-table-column label="底图 & 元素" width="220">
-        <template #default="{ row }">
-          <div class="flex items-start gap-2 overflow-x-auto pb-1">
+    <!-- 融图任务列表 (卡片式) -->
+    <div class="flex-1 overflow-y-auto p-4 space-y-3 custom-scrollbar">
+      <div 
+        v-for="(item, index) in store.fusionList" 
+        :key="item.id" 
+        class="fusion-card group relative transition-all duration-200"
+        :class="{ 'ring-2 ring-blue-400 bg-blue-50/30': selectedIds.includes(item.id) }"
+        @click="toggleSelection(item.id)"
+      >
+        <!-- 1. 索引区块 -->
+        <div class="index-section" @click.stop>
+          <div class="mb-2" @click.stop>
+             <el-checkbox 
+               :model-value="selectedIds.includes(item.id)" 
+               @change="toggleSelection(item.id)" 
+             />
+          </div>
+          <div class="scene-badge">
+            <span class="label">场</span>
+            <span class="value">{{ item.scene }}</span>
+          </div>
+          <div class="divider-vertical"></div>
+          <div class="shot-badge">
+            <span class="label">镜</span>
+            <span class="value">{{ item.shot_number }}</span>
+          </div>
+        </div>
+
+        <!-- 2. 内容详情区块 -->
+        <div class="content-section">
+          <!-- 描述信息 -->
+          <div class="mb-3 space-y-1">
+            <div class="flex items-start gap-2">
+              <el-icon class="mt-1 text-gray-400 text-xs shrink-0"><Document /></el-icon>
+              <span class="text-sm text-gray-800 line-clamp-3">{{ item.visual_description || '暂无画面描述' }}</span>
+            </div>
+            <div v-if="item.dialogue" class="flex items-start gap-2">
+              <el-icon class="mt-1 text-blue-400 text-xs shrink-0"><Microphone /></el-icon>
+              <span class="text-xs text-blue-600 line-clamp-2">{{ item.dialogue }}</span>
+            </div>
+          </div>
+
+          <!-- 素材区域 (底图 + 元素) -->
+          <div class="flex flex-wrap gap-2 items-end">
             <!-- 底图 -->
-            <div class="shrink-0 relative w-16 h-12 bg-gray-100 border rounded flex items-center justify-center">
-              <el-image v-if="row.base_image" :src="row.base_image" class="w-full h-full" fit="cover" :preview-src-list="[row.base_image]" />
-              <span v-else class="text-[10px] text-gray-400">底图</span>
+            <div class="relative group/asset">
+              <UnifiedImageCard
+                :src="item.base_image"
+                width="200px"
+                height="200px"
+                fit="cover"
+                placeholder="底图"
+                :show-empty-actions="false"
+                :enable-delete="!!item.base_image"
+                custom-class="border-dashed"
+                @upload="(file) => handleBaseUpload(item, file)"
+                @delete="handleDeleteBaseImage(item)"
+                @click-empty="triggerBaseUpload(item)"
+              />
+              <span class="absolute -bottom-4 left-0 w-full text-center text-[9px] text-gray-400 scale-90">底图</span>
             </div>
-            
+
+            <!-- 加号 -->
+            <div class="text-gray-300 pb-4">
+              <el-icon><Plus /></el-icon>
+            </div>
+
             <!-- 元素列表 -->
-            <div v-for="el in row.elements" :key="el.id" class="shrink-0 relative w-12 h-12 border rounded group">
-              <el-image :src="el.image_url" class="w-full h-full" fit="cover" :preview-src-list="[el.image_url]" />
-              <div class="absolute -top-1 -right-1 cursor-pointer hidden group-hover:block z-10" @click.stop="removeElement(row, el)">
-                <el-icon class="text-red-500 bg-white rounded-full text-xs border"><CircleClose /></el-icon>
-              </div>
-              <div class="absolute bottom-0 inset-x-0 bg-black/50 text-white text-[9px] truncate px-1">{{ el.name }}</div>
-            </div>
-            
-            <!-- 添加元素按钮 -->
-            <el-button size="small" circle icon="Plus" class="shrink-0" @click="openElementDialog(row)" />
-          </div>
-        </template>
-      </el-table-column>
-
-      <!-- 生成结果 -->
-      <el-table-column label="生成结果 (首帧/尾帧/视频)" width="260">
-        <template #default="{ row }">
-          <div class="flex gap-2 items-center">
-            <!-- 首帧 -->
-            <div class="relative w-20 h-14 bg-gray-50 border rounded flex items-center justify-center">
-              <el-image v-if="row.result_image" :src="row.result_image" class="w-full h-full" fit="cover" :preview-src-list="[row.result_image]" />
-              <div v-else class="text-xs text-gray-300">首帧</div>
-              <div class="absolute bottom-0 right-0 bg-black/50 text-white text-[9px] px-1">Start</div>
-            </div>
-            <!-- 尾帧 -->
-            <div class="relative w-20 h-14 bg-gray-50 border rounded flex items-center justify-center">
-              <el-image v-if="row.end_frame_image" :src="row.end_frame_image" class="w-full h-full" fit="cover" :preview-src-list="[row.end_frame_image]" />
-              <div v-else class="text-xs text-gray-300">尾帧</div>
-              <div class="absolute bottom-0 right-0 bg-black/50 text-white text-[9px] px-1">End</div>
-            </div>
-            <!-- 视频播放 -->
-             <div 
-              v-if="row.video_url"
-              class="relative w-20 h-14 bg-black rounded cursor-pointer flex items-center justify-center hover:scale-105 transition-transform"
-              @click="playVideo(row.video_url)"
+            <div 
+              v-for="el in item.elements" 
+              :key="el.id" 
+              class="relative group/asset"
             >
-              <video :src="row.video_url" class="w-full h-full object-cover opacity-60"></video>
-              <el-icon class="absolute text-white text-xl"><VideoPlay /></el-icon>
+              <UnifiedImageCard
+                :src="el.image_url"
+                width="200px"
+                height="200px"
+                fit="cover"
+                placeholder="元素"
+                :enable-generate="false"
+                :enable-upload="false"
+                :enable-delete="true"
+                @delete="removeElement(item, el)"
+              />
+              <span class="absolute -bottom-4 left-0 w-full text-center text-[9px] text-gray-400 truncate scale-90">{{ el.name }}</span>
             </div>
-          </div>
-        </template>
-      </el-table-column>
 
-      <!-- 操作区 -->
-      <el-table-column label="操作" width="160" fixed="right">
-        <template #default="{ row, $index }">
-          <div class="flex flex-wrap gap-1">
-            <el-tooltip content="编辑" placement="top"><el-button size="small" icon="Edit" circle @click="openEditDialog(row)" /></el-tooltip>
-            <el-tooltip content="生成提示词" placement="top"><el-button size="small" type="warning" plain icon="MagicStick" circle @click="generatePrompt(row)" /></el-tooltip>
-            <el-tooltip content="生成图片" placement="top"><el-button size="small" type="success" plain icon="Picture" circle @click="generateImage(row)" /></el-tooltip>
-            <el-tooltip content="生成视频" placement="top"><el-button size="small" type="primary" plain icon="VideoCamera" circle :disabled="!row.result_image" @click="generateVideo(row)" /></el-tooltip>
-            <el-tooltip content="删除" placement="top"><el-button size="small" type="danger" plain icon="Delete" circle @click="handleDelete(row)" /></el-tooltip>
-             <el-tooltip content="向下插入" placement="top"><el-button size="small" icon="Plus" circle @click="insertFusion($index)" /></el-tooltip>
+            <!-- 添加元素按钮 -->
+            <el-button 
+              circle 
+              size="small" 
+              class="mb-3 ml-1 !w-8 !h-8" 
+              :icon="Plus" 
+              @click.stop="openElementDialog(item)" 
+            />
           </div>
-        </template>
-      </el-table-column>
-    </el-table>
+        </div>
+
+        <!-- 3. 生成结果区块 (宽度加宽，图片尺寸增大) -->
+        <div class="result-section">
+          <div class="grid grid-cols-3 gap-4 w-full h-full items-center justify-items-center">
+            
+            <!-- 首帧 -->
+            <div class="result-item w-[200px]">
+              <UnifiedImageCard
+                :src="item.result_image"
+                width="200px"
+                height="200px"
+                fit="cover"
+                placeholder="首帧"
+                :enable-delete="false"
+                @generate="generateImage(item)"
+              >
+                <template #info>Start Frame</template>
+              </UnifiedImageCard>
+            </div>
+
+            <!-- 尾帧 -->
+            <div class="result-item w-[200px]">
+              <UnifiedImageCard
+                :src="item.end_frame_image"
+                width="200px"
+                height="200px"
+                fit="cover"
+                placeholder="尾帧"
+                :enable-delete="false"
+                @generate="generateEndImage(item)"
+              >
+                <template #info>End Frame</template>
+              </UnifiedImageCard>
+            </div>
+
+            <!-- 视频 -->
+            <div class="result-item w-[200px] relative group/video">
+              <div 
+                v-if="item.video_url" 
+                class="w-[200px] h-[200px] bg-black rounded border border-gray-800 overflow-hidden cursor-pointer relative shadow-sm"
+                @click.stop="playVideo(item.video_url)"
+              >
+                <video :src="item.video_url" class="w-full h-full object-cover opacity-80 group-hover/video:opacity-100 transition-opacity"></video>
+                <div class="absolute inset-0 flex items-center justify-center">
+                  <el-icon class="text-white text-4xl drop-shadow-md opacity-80 group-hover/video:opacity-100 transition-opacity"><VideoPlay /></el-icon>
+                </div>
+              </div>
+              <div 
+                v-else 
+                class="w-[200px] h-[200px] bg-gray-50 border border-dashed rounded flex flex-col items-center justify-center text-gray-300 cursor-pointer hover:bg-gray-100 hover:text-blue-400 transition-colors"
+                @click.stop="generateVideo(item)"
+              >
+                <el-icon :size="32"><VideoCamera /></el-icon>
+                <span class="text-xs mt-2 font-medium">生成视频</span>
+              </div>
+            </div>
+
+          </div>
+        </div>
+
+        <!-- 悬浮操作栏 -->
+        <div class="absolute right-2 top-2 opacity-0 group-hover:opacity-100 transition-opacity flex gap-2 bg-white/90 p-1 rounded shadow-sm border border-gray-100 backdrop-blur-sm z-10" @click.stop>
+           <el-tooltip content="编辑" placement="top">
+             <el-button type="primary" circle size="small" :icon="Edit" @click.stop="openEditDialog(item)" />
+           </el-tooltip>
+           <el-tooltip content="生成提示词" placement="top">
+             <el-button type="warning" circle size="small" :icon="MagicStick" @click.stop="generatePrompt(item)" />
+           </el-tooltip>
+           <el-tooltip content="生成首帧" placement="top">
+             <el-button type="success" circle size="small" :icon="Picture" @click.stop="generateImage(item)" />
+           </el-tooltip>
+           <el-tooltip content="生成尾帧" placement="top">
+             <el-button type="success" plain circle size="small" :icon="PictureFilled" @click.stop="generateEndImage(item)" />
+           </el-tooltip>
+           <el-tooltip content="生成视频" placement="top">
+             <el-button type="primary" plain circle size="small" :icon="VideoCamera" :disabled="!item.result_image" @click.stop="generateVideo(item)" />
+           </el-tooltip>
+           <el-tooltip content="向下插入" placement="top">
+             <el-button type="info" circle size="small" :icon="Plus" @click.stop="insertFusion(index)" />
+           </el-tooltip>
+           <el-tooltip content="删除" placement="top">
+             <el-button type="danger" circle size="small" :icon="Delete" @click.stop="handleDelete(item)" />
+           </el-tooltip>
+        </div>
+      </div>
+
+      <el-empty v-if="store.fusionList.length === 0" description="暂无融图任务，请从场景复制或添加" />
+    </div>
 
     <!-- 弹窗组件 -->
     <FusionEditDialog v-model="editDialogVisible" :initial-data="currentEditingRow" @success="refreshList" />
     <ElementDialog v-model="elementDialogVisible" :fusion="currentElementFusion" @success="handleElementSuccess" />
-    <BatchDialog v-model="batchDialogVisible" :type="batchType" :selection="selectedRows" @confirm="handleBatchConfirm" />
+    <BatchDialog v-model="batchDialogVisible" :type="batchType" :selection="getSelectedItems()" @confirm="handleBatchConfirm" />
     
     <!-- 视频预览 -->
     <el-dialog v-model="videoPreviewVisible" title="视频预览" width="60%" destroy-on-close align-center>
       <video v-if="currentVideoUrl" :src="currentVideoUrl" controls autoplay class="w-full max-h-[70vh]"></video>
     </el-dialog>
+
+    <!-- 隐藏的上传 input (用于 UnifiedImageCard click-empty 的 fallback) -->
+    <input type="file" ref="fileInput" class="hidden" accept="image/*" @change="handleFileSelected" />
   </div>
 </template>
 
@@ -150,25 +245,29 @@ import ModelSelector from '@/components/ModelSelector.vue'
 import FusionEditDialog from './FusionEditDialog.vue'
 import ElementDialog from './ElementDialog.vue'
 import BatchDialog from './BatchDialog.vue'
+import UnifiedImageCard from '@/components/UnifiedImageCard.vue'
 
-// === 关键修复：正确的导入路径 ===
 import { 
-  getFusions, deleteFusion, createFusion, updateFusion
+  getFusions, deleteFusion, createFusion, updateFusion, batchDeleteShots // 注意：融图批量删除如果还没API，暂时循环删
 } from '@/api/project' 
 import { 
-  generateFusionPrompt as apiGenPrompt, // 使用别名以区分本地方法
+  generateFusionPrompt as apiGenPrompt, 
   generateFusionImage as apiGenImage, 
-  generateFusionVideo as apiGenVideo 
+  generateFusionVideo as apiGenVideo,
+  uploadBaseImage
 } from '@/api/generation'
-// =============================
 
 import { ElMessage, ElMessageBox, ElNotification } from 'element-plus'
+import { 
+  Delete, CopyDocument, Plus, VideoPlay, VideoCamera, 
+  Document, Microphone, Edit, MagicStick, Picture, PictureFilled 
+} from '@element-plus/icons-vue'
 
 const store = useProjectStore()
 const loadingStore = useLoadingStore()
 
 // State
-const selectedRows = ref([])
+const selectedIds = ref([])
 const editDialogVisible = ref(false)
 const elementDialogVisible = ref(false)
 const batchDialogVisible = ref(false)
@@ -178,6 +277,9 @@ const currentEditingRow = ref(null)
 const currentElementFusion = ref(null)
 const batchType = ref('image')
 
+const fileInput = ref(null)
+const uploadTargetRow = ref(null)
+
 // Initialization
 onMounted(() => {
   refreshList()
@@ -185,21 +287,29 @@ onMounted(() => {
 
 const refreshList = async () => {
   if (!store.currentProjectId) return
-  // 确保 store.loading.fusions 存在（即便 store 未更新也能运行）
   if (store.loading) store.loading.fusions = true
   try {
     const res = await getFusions(store.currentProjectId)
     store.fusionList = res || []
+    selectedIds.value = []
   } finally {
     if (store.loading) store.loading.fusions = false
   }
 }
 
-// Actions
-const handleSelectionChange = (val) => {
-  selectedRows.value = val
+// Helpers
+const getSelectedItems = () => {
+  return store.fusionList.filter(item => selectedIds.value.includes(item.id))
 }
 
+// Selection
+const toggleSelection = (id) => {
+  const idx = selectedIds.value.indexOf(id)
+  if (idx > -1) selectedIds.value.splice(idx, 1)
+  else selectedIds.value.push(id)
+}
+
+// Actions
 const openCreateDialog = () => {
   currentEditingRow.value = null
   editDialogVisible.value = true
@@ -222,12 +332,13 @@ const handleDelete = async (row) => {
 }
 
 const handleBatchDelete = async () => {
-  await ElMessageBox.confirm(`确定删除选中的 ${selectedRows.value.length} 个任务?`)
-  for (const row of selectedRows.value) {
-    await deleteFusion(store.currentProjectId, row.id)
+  await ElMessageBox.confirm(`确定删除选中的 ${selectedIds.value.length} 个任务?`)
+  // 暂时循环删除，后端如有批量接口可替换
+  for (const id of selectedIds.value) {
+    await deleteFusion(store.currentProjectId, id)
   }
   refreshList()
-  selectedRows.value = []
+  selectedIds.value = []
 }
 
 // 复制场景
@@ -286,6 +397,46 @@ const removeElement = async (row, element) => {
   await updateFusion(store.currentProjectId, row.id, { elements: newElements })
 }
 
+// 底图上传
+const handleBaseUpload = async (row, file) => {
+  loadingStore.start('上传中', '正在上传底图...')
+  const fd = new FormData()
+  fd.append('file', file)
+  fd.append('fusion_id', row.id)
+
+  try {
+    const res = await uploadBaseImage(fd)
+    if (res.success) {
+      await updateFusion(store.currentProjectId, row.id, { base_image: res.url })
+      row.base_image = res.url
+      ElMessage.success('上传成功')
+    }
+  } catch (err) {
+    console.error(err)
+  } finally {
+    loadingStore.stop()
+  }
+}
+
+const handleDeleteBaseImage = async (row) => {
+  await updateFusion(store.currentProjectId, row.id, { base_image: '' })
+  row.base_image = ''
+}
+
+const triggerBaseUpload = (row) => {
+  uploadTargetRow.value = row
+  fileInput.value.click()
+}
+
+const handleFileSelected = async (e) => {
+  const file = e.target.files[0]
+  if (!file) return
+  if (uploadTargetRow.value) {
+    await handleBaseUpload(uploadTargetRow.value, file)
+  }
+  e.target.value = ''
+}
+
 // 批量操作
 const openBatchDialog = (type) => {
   batchType.value = type
@@ -295,7 +446,7 @@ const openBatchDialog = (type) => {
 const handleBatchConfirm = async ({ scope, target }) => {
   let tasks = []
   if (scope === 'all') tasks = store.fusionList
-  else if (scope === 'selected') tasks = selectedRows.value
+  else if (scope === 'selected') tasks = getSelectedItems()
   else if (scope === 'missing') {
     if (target === 'prompt') tasks = store.fusionList.filter(f => !f.fusion_prompt)
     else if (target === 'image') tasks = store.fusionList.filter(f => !f.result_image)
@@ -319,7 +470,7 @@ const handleBatchConfirm = async ({ scope, target }) => {
   }
 }
 
-// 单个生成操作 (调用 aliased API)
+// 生成操作
 const generatePrompt = async (row, silent = false) => {
   if (!store.genOptions.textProviderId) return !silent && ElMessage.warning('请选择文本模型')
   
@@ -336,7 +487,7 @@ const generatePrompt = async (row, silent = false) => {
       provider_id: store.genOptions.textProviderId,
       model_name: store.genOptions.textModelName
     })
-    if (!silent) ElMessage.success('提示词生成任务已提交')
+    if (!silent) ElMessage.success('提示词任务已提交')
   } catch (e) { console.error(e) }
 }
 
@@ -352,7 +503,7 @@ const generateImage = async (row, silent = false) => {
       provider_id: store.genOptions.fusionProviderId,
       model_name: store.genOptions.fusionModelName
     })
-    if (!silent) ElMessage.success('首帧生成任务已提交')
+    if (!silent) ElMessage.success('首帧任务已提交')
   } catch (e) { console.error(e) }
 }
 
@@ -368,7 +519,7 @@ const generateEndImage = async (row, silent = false) => {
       provider_id: store.genOptions.fusionProviderId,
       model_name: store.genOptions.fusionModelName
     })
-    if (!silent) ElMessage.success('尾帧生成任务已提交')
+    if (!silent) ElMessage.success('尾帧任务已提交')
   } catch (e) { console.error(e) }
 }
 
@@ -383,7 +534,7 @@ const generateVideo = async (row, silent = false) => {
       provider_id: store.genOptions.videoProviderId,
       model_name: store.genOptions.videoModelName
     })
-    if (!silent) ElMessage.success('视频生成任务已提交')
+    if (!silent) ElMessage.success('视频任务已提交')
   } catch (e) { console.error(e) }
 }
 
@@ -392,3 +543,101 @@ const playVideo = (url) => {
   videoPreviewVisible.value = true
 }
 </script>
+
+<style scoped>
+/* 卡片样式 */
+.fusion-card {
+  background: white;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  display: grid;
+  grid-template-columns: 60px 1fr 640px; /* 调整后的列宽 */
+  gap: 16px;
+  padding: 0;
+  transition: all 0.2s ease;
+  position: relative;
+  min-height: 220px; /* 增加最小高度以适应大图 */
+}
+
+.fusion-card:hover {
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+  border-color: #d1d5db;
+  transform: translateY(-1px);
+}
+
+/* 1. 索引区 */
+.index-section {
+  background-color: #f9fafb;
+  border-right: 1px solid #f3f4f6;
+  border-top-left-radius: 8px;
+  border-bottom-left-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 12px 0;
+  cursor: pointer;
+}
+
+.scene-badge, .shot-badge {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.label {
+  font-size: 10px;
+  color: #9ca3af;
+  text-transform: uppercase;
+}
+
+.value {
+  font-size: 18px;
+  font-weight: 800;
+  color: #374151;
+  line-height: 1.2;
+}
+
+.divider-vertical {
+  width: 20px;
+  height: 1px;
+  background-color: #e5e7eb;
+  margin: 6px 0;
+}
+
+/* 2. 内容区 */
+.content-section {
+  padding: 16px 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+
+/* 3. 结果区 */
+.result-section {
+  padding: 12px;
+  border-left: 1px dashed #f3f4f6;
+  background-color: #fcfcfc;
+  border-top-right-radius: 8px;
+  border-bottom-right-radius: 8px;
+  display: flex;
+  align-items: center;
+  width: 600px;
+}
+
+.hidden { display: none; }
+
+.custom-scrollbar::-webkit-scrollbar {
+  width: 6px;
+}
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background-color: #e5e7eb;
+  border-radius: 3px;
+}
+.custom-scrollbar:hover::-webkit-scrollbar-thumb {
+  background-color: #d1d5db;
+}
+</style>
