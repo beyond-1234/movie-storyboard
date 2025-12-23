@@ -13,7 +13,7 @@ export const useProjectStore = defineStore('project', {
     // 列表数据
     characterList: [],
     shotList: [],
-    fusionList: [],
+    fusionList: [], 
     // 全局生成配置
     genOptions: {
       imageProviderId: '',
@@ -34,22 +34,22 @@ export const useProjectStore = defineStore('project', {
   }),
 
   actions: {
-    // 初始化项目 (获取详情 + 角色 + 融图)
+    // 初始化项目 (获取详情 + 分镜 + 角色 + 融图)
     async initProject(projectId) {
       this.currentProjectId = projectId
       this.loading.project = true
       try {
-        // 并行加载基础信息
-        const [projectData, charData, fusionData] = await Promise.all([
+        const [projectData, charData, fusionData, shotData] = await Promise.all([
           getProjectDetail(projectId),
           getCharacters(projectId),
-          getFusions(projectId) // 初始加载融图
+          getFusions(projectId),
+          getShots(projectId) // 新增：预加载分镜列表
         ])
         this.currentProject = projectData
         this.characterList = charData || []
         this.fusionList = fusionData || []
+        this.shotList = shotData || [] // 赋值
         
-        // 恢复配置
         const savedOptions = localStorage.getItem('media_gen_options')
         if (savedOptions) {
           this.genOptions = { ...this.genOptions, ...JSON.parse(savedOptions) }
@@ -75,7 +75,8 @@ export const useProjectStore = defineStore('project', {
       if (!this.currentProjectId) return
       this.loading.shots = true
       try {
-        this.shotList = await getShots(this.currentProjectId)
+        const res = await getShots(this.currentProjectId)
+        this.shotList = res || []
       } finally {
         this.loading.shots = false
       }
@@ -97,15 +98,11 @@ export const useProjectStore = defineStore('project', {
       localStorage.setItem('media_gen_options', JSON.stringify(this.genOptions))
     },
 
-    refreshCurrentTab(activeTabName = null) {
+    // 用于 WebSocket 回调刷新
+    refreshCurrentTab() {
       if (!this.currentProjectId) return
-
-      // 如果传入了具体 Tab 名则刷新该 Tab，否则尝试全部刷新或智能刷新
-      // 这里为了简单稳健，我们刷新所有可能受影响的列表，或者你可以配合 Router/UI 状态来传参
-      
-      console.log('Auto refreshing data for project:', this.currentProjectId)
-      
-      // 并行刷新，互不阻塞
+      console.log('Auto refreshing all data for project:', this.currentProjectId)
+      // 保持数据一致性，建议全部刷新
       this.fetchCharacters()
       this.fetchShots()
       this.fetchFusions()
