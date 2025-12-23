@@ -115,6 +115,7 @@
                 height="200px"
                 fit="cover"
                 placeholder="底图"
+                :enable-generate="false"
                 :show-empty-actions="false"
                 :enable-delete="!!item.base_image"
                 custom-class="border-dashed"
