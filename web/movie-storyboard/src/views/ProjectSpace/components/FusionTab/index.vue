@@ -1,8 +1,18 @@
 <template>
   <div class="fusion-tab h-full flex flex-col bg-gray-50">
-    <!-- 顶部配置栏 -->
     <div class="bg-white px-6 py-3 border-b border-gray-200 flex justify-between items-center shadow-sm z-10 shrink-0">
       <div class="flex flex-wrap gap-4 items-center">
+        <el-checkbox 
+          v-model="isAllSelected" 
+          :indeterminate="isIndeterminate" 
+          @change="handleSelectAllChange"
+          class="mr-1"
+        >
+          全选
+        </el-checkbox>
+
+        <div class="w-px h-6 bg-gray-200 hidden md:block"></div>
+
         <ModelSelector type="text" label="文本模型" v-model:provider="store.genOptions.textProviderId" v-model:model="store.genOptions.textModelName" />
         <div class="w-px h-6 bg-gray-200 hidden md:block"></div>
         <ModelSelector type="image_fusion" label="图生图模型" v-model:provider="store.genOptions.fusionProviderId" v-model:model="store.genOptions.fusionModelName" />
@@ -29,14 +39,12 @@
       </div>
     </div>
 
-    <!-- 自定义表头 -->
     <div class="grid grid-cols-[60px_1fr_640px] gap-4 px-6 py-2 bg-gray-100/80 text-xs font-medium text-gray-500 border-b border-gray-200 shrink-0 select-none">
       <div class="text-center pl-4">场次</div>
       <div class="pl-2">任务详情 (描述、提示词、素材)</div>
       <div class="text-left pl-2">生成结果 (首帧/尾帧/视频)</div>
     </div>
 
-    <!-- 融图任务列表 (卡片式) -->
     <div class="flex-1 overflow-y-auto p-4 space-y-3 custom-scrollbar">
       <div 
         v-for="(item, index) in store.fusionList" 
@@ -45,7 +53,6 @@
         :class="{ 'ring-2 ring-blue-400 bg-blue-50/30': selectedIds.includes(item.id) }"
         @click="toggleSelection(item.id)"
       >
-        <!-- 1. 索引区块 -->
         <div class="index-section" @click.stop>
           <div class="mb-2" @click.stop>
              <el-checkbox 
@@ -64,23 +71,18 @@
           </div>
         </div>
 
-        <!-- 2. 内容详情区块 -->
         <div class="content-section">
-          <!-- 文本信息区 -->
           <div class="text-info-area space-y-2 mb-3">
-            <!-- 场景说明 -->
             <div v-if="item.scene_description" class="flex items-start gap-2 text-xs text-gray-500">
               <el-icon class="mt-0.5 shrink-0"><Collection /></el-icon>
               <span>{{ item.scene_description }}</span>
             </div>
 
-            <!-- 画面描述 -->
             <div class="flex items-start gap-2">
               <el-icon class="mt-1 text-gray-700 text-xs shrink-0"><Document /></el-icon>
               <span class="text-sm text-gray-800 font-medium leading-snug">{{ item.visual_description || '暂无画面描述' }}</span>
             </div>
 
-            <!-- 对白与声音 -->
             <div v-if="item.dialogue || item.audio_description" class="flex items-start gap-2 bg-blue-50/50 p-2 rounded border border-blue-100/50">
               <el-icon class="mt-1 text-blue-500 text-xs shrink-0"><Microphone /></el-icon>
               <div class="flex flex-col gap-1">
@@ -89,15 +91,12 @@
               </div>
             </div>
 
-            <!-- 提示词展示区 (修改：支持换行显示) -->
             <div class="prompts-area space-y-1 mt-2">
-              <!-- 首帧提示词 -->
               <div v-if="item.fusion_prompt" class="text-[11px] text-gray-600 bg-gray-100 p-2 rounded border border-gray-200 font-mono break-all whitespace-pre-wrap relative group/prompt leading-relaxed">
                 <span class="text-blue-600 font-bold mr-1 select-none block mb-1">首帧 Prompt:</span>
                 <span class="block">{{ item.fusion_prompt }}</span>
               </div>
               
-              <!-- 尾帧提示词 -->
               <div v-if="item.end_frame_prompt" class="text-[11px] text-gray-600 bg-gray-100 p-2 rounded border border-gray-200 font-mono break-all whitespace-pre-wrap relative group/prompt leading-relaxed">
                 <span class="text-purple-600 font-bold mr-1 select-none block mb-1">尾帧 Prompt:</span>
                 <span class="block">{{ item.end_frame_prompt }}</span>
@@ -105,9 +104,7 @@
             </div>
           </div>
 
-          <!-- 素材区域 (底图 + 元素) -->
           <div class="flex flex-wrap gap-2 items-end">
-            <!-- 底图 -->
             <div class="relative group/asset">
               <UnifiedImageCard
                 :src="item.base_image"
@@ -126,12 +123,10 @@
               <span class="absolute -bottom-4 left-0 w-full text-center text-[9px] text-gray-400 scale-90">底图</span>
             </div>
 
-            <!-- 加号 -->
             <div class="text-gray-300 pb-4">
               <el-icon><Plus /></el-icon>
             </div>
 
-            <!-- 元素列表 -->
             <div 
               v-for="el in item.elements" 
               :key="el.id" 
@@ -151,7 +146,6 @@
               <span class="absolute -bottom-4 left-0 w-full text-center text-[9px] text-gray-400 truncate scale-90">{{ el.name }}</span>
             </div>
 
-            <!-- 添加元素按钮 -->
             <el-button 
               circle 
               size="small" 
@@ -162,11 +156,9 @@
           </div>
         </div>
 
-        <!-- 3. 生成结果区块 (宽度加宽，图片尺寸增大) -->
         <div class="result-section">
           <div class="grid grid-cols-3 gap-4 w-full h-full items-center justify-items-center">
             
-            <!-- 首帧 -->
             <div class="result-item w-[200px]">
               <UnifiedImageCard
                 :src="item.result_image"
@@ -184,7 +176,6 @@
               </UnifiedImageCard>
             </div>
 
-            <!-- 尾帧 -->
             <div class="result-item w-[200px]">
               <UnifiedImageCard
                 :src="item.end_frame_image"
@@ -202,7 +193,6 @@
               </UnifiedImageCard>
             </div>
 
-            <!-- 视频 -->
             <div class="result-item w-[200px] relative group/video">
               <div 
                 v-if="item.video_url" 
@@ -213,7 +203,6 @@
                 <div class="absolute inset-0 flex items-center justify-center">
                   <el-icon class="text-white text-4xl drop-shadow-md opacity-80 group-hover/video:opacity-100 transition-opacity"><VideoPlay /></el-icon>
                 </div>
-                <!-- 视频删除按钮 -->
                 <div class="absolute top-2 right-2 hidden group-hover/video:block" @click.stop="handleDeleteVideo(item)">
                    <el-button type="danger" circle size="small" :icon="Delete" />
                 </div>
@@ -231,7 +220,6 @@
           </div>
         </div>
 
-        <!-- 悬浮操作栏 -->
         <div class="absolute right-2 top-2 opacity-0 group-hover:opacity-100 transition-opacity flex gap-2 bg-white/90 p-1 rounded shadow-sm border border-gray-100 backdrop-blur-sm z-10" @click.stop>
            <el-tooltip content="编辑" placement="top">
              <el-button type="primary" circle size="small" :icon="Edit" @click.stop="openEditDialog(item)" />
@@ -260,17 +248,14 @@
       <el-empty v-if="store.fusionList.length === 0" description="暂无融图任务，请从场景复制或添加" />
     </div>
 
-    <!-- 弹窗组件 -->
     <FusionEditDialog v-model="editDialogVisible" :initial-data="currentEditingRow" @success="refreshList" />
     <ElementDialog v-model="elementDialogVisible" :fusion="currentElementFusion" @success="handleElementSuccess" />
     <BatchDialog v-model="batchDialogVisible" :type="batchType" :selection="getSelectedItems()" @confirm="handleBatchConfirm" />
     
-    <!-- 视频预览 -->
     <el-dialog v-model="videoPreviewVisible" title="视频预览" width="60%" destroy-on-close align-center>
       <video v-if="currentVideoUrl" :src="currentVideoUrl" controls autoplay class="w-full max-h-[70vh]"></video>
     </el-dialog>
 
-    <!-- 隐藏的上传 input (用于 UnifiedImageCard click-empty 的 fallback) -->
     <input type="file" ref="fileInput" class="hidden" accept="image/*" @change="handleFileSelected" />
   </div>
 </template>
@@ -286,7 +271,7 @@ import BatchDialog from './BatchDialog.vue'
 import UnifiedImageCard from '@/components/UnifiedImageCard.vue'
 
 import { 
-  getFusions, deleteFusion, createFusion, updateFusion, batchDeleteShots // 注意：融图批量删除如果还没API，暂时循环删
+  getFusions, deleteFusion, createFusion, updateFusion 
 } from '@/api/project' 
 import { 
   generateFusionPrompt as apiGenPrompt, 
@@ -340,14 +325,27 @@ const getSelectedItems = () => {
   return store.fusionList.filter(item => selectedIds.value.includes(item.id))
 }
 
-// Selection
+// 2. Computed: 新增全选逻辑
+const isAllSelected = computed(() => 
+  store.fusionList.length > 0 && selectedIds.value.length === store.fusionList.length
+)
+
+const isIndeterminate = computed(() => 
+  selectedIds.value.length > 0 && selectedIds.value.length < store.fusionList.length
+)
+
+// Actions
+// 3. Action: 处理全选变化
+const handleSelectAllChange = (val) => {
+  selectedIds.value = val ? store.fusionList.map(i => i.id) : []
+}
+
 const toggleSelection = (id) => {
   const idx = selectedIds.value.indexOf(id)
   if (idx > -1) selectedIds.value.splice(idx, 1)
   else selectedIds.value.push(id)
 }
 
-// Actions
 const openCreateDialog = () => {
   currentEditingRow.value = null
   editDialogVisible.value = true
