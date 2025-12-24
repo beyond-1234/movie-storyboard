@@ -206,7 +206,7 @@
     </div>
 
     <!-- 弹窗部分 -->
-    <el-dialog v-model="dialogVisible" :title="editingId ? '编辑分镜' : '新建分镜'" width="650px" destroy-on-close>
+    <el-dialog v-model="dialogVisible" :title="editingId ? '编辑分镜' : '新建分镜'" width="1600px" destroy-on-close>
         <el-form :model="form" label-width="90px">
           <div class="flex gap-4">
             <el-form-item label="场次" required class="flex-1"><el-input v-model="form.scene" placeholder="例如: 1" /></el-form-item>
