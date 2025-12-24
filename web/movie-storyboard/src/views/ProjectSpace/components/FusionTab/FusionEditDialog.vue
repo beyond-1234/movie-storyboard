@@ -8,13 +8,15 @@
   >
     <el-form :model="form" label-width="100px" size="default">
       
-      <!-- 第一行：索引信息 -->
-      <div class="grid grid-cols-3 gap-4">
+      <div class="grid grid-cols-4 gap-4">
         <el-form-item label="场次">
           <el-input v-model="form.scene" placeholder="例如: 1" />
         </el-form-item>
         <el-form-item label="镜号">
           <el-input v-model="form.shot_number" placeholder="例如: 1" />
+        </el-form-item>
+        <el-form-item label="景别">
+          <el-input v-model="form.shot_size" placeholder="例如: 特写/全景" />
         </el-form-item>
         <el-form-item label="关联分镜">
           <el-select v-model="form.shot_id" placeholder="选择关联分镜" @change="handleShotChange" class="w-full" clearable filterable>
@@ -28,7 +30,6 @@
         </el-form-item>
       </div>
 
-      <!-- 第二行：文本描述 -->
       <el-divider content-position="left">分镜描述</el-divider>
       
       <el-form-item label="场景说明">
@@ -48,7 +49,6 @@
         </el-form-item>
       </div>
 
-      <!-- 第三行：素材附件 -->
       <el-divider content-position="left">素材附件</el-divider>
 
       <el-form-item label="底图" required>
@@ -90,7 +90,6 @@
             <template #info>{{ el.name }}</template>
           </UnifiedImageCard>
           
-          <!-- 添加元素按钮 -->
           <div 
             class="w-20 h-20 border border-dashed border-gray-300 rounded flex flex-col items-center justify-center text-gray-400 bg-gray-50 hover:border-blue-400 hover:text-blue-500 cursor-pointer transition-colors"
             @click="openElementDialog"
@@ -101,11 +100,9 @@
         </div>
       </el-form-item>
 
-      <!-- 第四行：生成结果 -->
       <el-divider content-position="left">生成结果</el-divider>
 
       <div class="grid grid-cols-2 gap-6">
-        <!-- 首帧部分 -->
         <div class="bg-gray-50 p-3 rounded border border-gray-100">
           <div class="font-bold text-gray-700 mb-2 text-sm">首帧 (Start Frame)</div>
           <el-form-item label-width="0">
@@ -131,7 +128,6 @@
           </el-form-item>
         </div>
 
-        <!-- 尾帧部分 -->
         <div class="bg-gray-50 p-3 rounded border border-gray-100">
           <div class="font-bold text-gray-700 mb-2 text-sm">尾帧 (End Frame)</div>
           <el-form-item label-width="0">
@@ -182,8 +178,6 @@
       <el-button type="primary" @click="submit">保存</el-button>
     </template>
 
-    <!-- 嵌套的元素添加弹窗 -->
-    <!-- 注意：为了避免 form 引用混乱，这里传入一个临时的 fusion 对象 -->
     <ElementDialog 
       v-model="elementDialogVisible" 
       :fusion="tempFusionForElement" 
@@ -199,7 +193,7 @@ import { useLoadingStore } from '@/stores/loadingStore'
 import { uploadBaseImage as uploadBaseImageApi, generateFusionImage, generateSceneImage } from '@/api/generation' 
 import { createFusion, updateFusion } from '@/api/project' 
 import UnifiedImageCard from '@/components/UnifiedImageCard.vue'
-import ElementDialog from './ElementDialog.vue' // 引入 ElementDialog
+import ElementDialog from './ElementDialog.vue' 
 import { ElMessage, ElNotification } from 'element-plus'
 import { Delete, VideoCamera, Plus } from '@element-plus/icons-vue' 
 
@@ -209,8 +203,9 @@ const emit = defineEmits(['update:modelValue', 'success'])
 const store = useProjectStore()
 const loadingStore = useLoadingStore()
 
+// 修改：state 中增加 shot_size
 const form = ref({
-  scene: '', shot_number: '', shot_id: '',
+  scene: '', shot_number: '', shot_id: '', shot_size: '',
   scene_description: '', visual_description: '', dialogue: '', audio_description: '',
   base_image: '', elements: [], 
   fusion_prompt: '', result_image: '', 
@@ -219,8 +214,6 @@ const form = ref({
 })
 
 const elementDialogVisible = ref(false)
-// 创建一个临时对象传给 ElementDialog，用于接收新元素
-// ElementDialog 会尝试修改 fusion.elements，所以我们需要传递一个包含 elements 数组的对象
 const tempFusionForElement = computed(() => ({
   elements: form.value.elements
 }))
@@ -230,9 +223,10 @@ const visible = computed({
   set: (val) => emit('update:modelValue', val)
 })
 
+// 修改：reset 中增加 shot_size
 const resetForm = () => {
   form.value = { 
-    scene: '', shot_number: '', shot_id: '', 
+    scene: '', shot_number: '', shot_id: '', shot_size: '',
     scene_description: '', visual_description: '', dialogue: '', audio_description: '',
     base_image: '', elements: [], 
     fusion_prompt: '', result_image: '', 
@@ -261,6 +255,7 @@ const handleShotChange = (shotId) => {
   if (shot) {
     form.value.scene = shot.scene
     form.value.shot_number = shot.shot_number
+    form.value.shot_size = shot.shot_size || '' // 修改：同步景别
     form.value.scene_description = shot.scene_description
     form.value.visual_description = shot.visual_description
     form.value.dialogue = shot.dialogue
@@ -296,21 +291,14 @@ const openElementDialog = () => {
 }
 
 const handleElementSuccess = (updatedFusion) => {
-  // ElementDialog 会返回更新后的 fusion 对象（这里是我们传进去的 tempFusion）
-  // 或者它直接修改了引用。
-  // 我们手动把新元素同步回 form.elements
   form.value.elements = updatedFusion.elements
-  // 注意：ElementDialog 内部可能会调用 API 更新后端，
-  // 但对于新建任务（没有ID），ElementDialog 可能无法保存。
-  // 我们需要确保 ElementDialog 支持纯前端添加模式，或者仅在 submit 时统一保存。
-  // 假设 ElementDialog 已经适配了（见下文分析），或者我们在这里做兼容。
 }
 
 const removeElement = (index) => {
   form.value.elements.splice(index, 1)
 }
 
-// AI 生成逻辑 (底图、首帧、尾帧)
+// AI 生成逻辑
 const handleGenerateBaseImage = async () => {
   if (!store.genOptions.imageProviderId) return ElMessage.warning('请先在顶部选择生图模型')
   const prompt = form.value.visual_description || form.value.scene_description || form.value.scene_prompt

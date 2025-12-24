@@ -396,9 +396,9 @@ def analyze_script():
         characters_info = f"\n\n已有角色列表：\n{characters_info}"
     
     sys = f"""
-    你是一个专业的电影分镜设计师。请根据剧本内容，生成详细的分镜列表，每个分镜包含场景说明和角色信息。
+    你是一个专业的电影分镜设计师。请根据剧本内容，生成详细的分镜列表，每个分镜包含景别(shot_size)、场景说明和角色信息。
     **输出要求**：1. 返回一个纯 JSON 数组。2. **必须使用中文**填写所有描述性字段。3. 不要包含 Markdown 标记。
-     **JSON对象结构**：scene, shot_number, visual_description, scene_description, characters, dialogue, audio_description, special_technique, duration
+     **JSON对象结构**：scene, shot_number, visual_description, scene_description, characters, dialogue, audio_description, shot_size, special_technique, duration
     """
     user_prompt = f"""
         剧本内容：{data.get('content', '')}

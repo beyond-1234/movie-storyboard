@@ -80,7 +80,18 @@
 
             <div class="flex items-start gap-2">
               <el-icon class="mt-1 text-gray-700 text-xs shrink-0"><Document /></el-icon>
-              <span class="text-sm text-gray-800 font-medium leading-snug">{{ item.visual_description || '暂无画面描述' }}</span>
+              <div class="flex-1 leading-snug">
+                <el-tag 
+                  v-if="item.shot_size" 
+                  size="small" 
+                  type="info" 
+                  effect="plain" 
+                  class="mr-2 h-5 px-1.5 border-gray-300 text-gray-600"
+                >
+                  {{ item.shot_size }}
+                </el-tag>
+                <span class="text-sm text-gray-800 font-medium">{{ item.visual_description || '暂无画面描述' }}</span>
+              </div>
             </div>
 
             <div v-if="item.dialogue || item.audio_description" class="flex items-start gap-2 bg-blue-50/50 p-2 rounded border border-blue-100/50">
@@ -325,7 +336,7 @@ const getSelectedItems = () => {
   return store.fusionList.filter(item => selectedIds.value.includes(item.id))
 }
 
-// 2. Computed: 新增全选逻辑
+// Computed: Selection
 const isAllSelected = computed(() => 
   store.fusionList.length > 0 && selectedIds.value.length === store.fusionList.length
 )
@@ -335,7 +346,6 @@ const isIndeterminate = computed(() =>
 )
 
 // Actions
-// 3. Action: 处理全选变化
 const handleSelectAllChange = (val) => {
   selectedIds.value = val ? store.fusionList.map(i => i.id) : []
 }
@@ -369,7 +379,6 @@ const handleDelete = async (row) => {
 
 const handleBatchDelete = async () => {
   await ElMessageBox.confirm(`确定删除选中的 ${selectedIds.value.length} 个任务?`)
-  // 暂时循环删除，后端如有批量接口可替换
   for (const id of selectedIds.value) {
     await deleteFusion(store.currentProjectId, id)
   }
@@ -402,7 +411,8 @@ const handleCopyFromScenes = async () => {
          elements: elements,
          scene_description: shot.scene_description || '',
          visual_description: shot.visual_description || '',
-         dialogue: shot.dialogue || ''
+         dialogue: shot.dialogue || '',
+         shot_size: shot.shot_size || '' // 修改点 2: 复制景别
        }
        const res = await createFusion(store.currentProjectId, payload)
        newFusions.push(res)
@@ -467,7 +477,6 @@ const handleResultUpload = async (row, file) => {
   fd.append('fusion_id', row.id)
 
   try {
-    // 复用上传接口
     const res = await uploadBaseImage(fd)
     if (res.success) {
       await updateFusion(store.currentProjectId, row.id, { result_image: res.url })
@@ -649,12 +658,12 @@ const playVideo = (url) => {
   border: 1px solid #e5e7eb;
   border-radius: 8px;
   display: grid;
-  grid-template-columns: 60px 1fr 640px; /* 调整后的列宽 */
+  grid-template-columns: 60px 1fr 640px; 
   gap: 16px;
   padding: 0;
   transition: all 0.2s ease;
   position: relative;
-  min-height: 240px; /* 增加最小高度以适应内容 */
+  min-height: 240px; 
 }
 
 .fusion-card:hover {
@@ -708,7 +717,6 @@ const playVideo = (url) => {
   padding: 16px 0;
   display: flex;
   flex-direction: column;
-  /* justify-content: center; */ /* 允许内容自然撑开 */
 }
 
 /* 3. 结果区 */

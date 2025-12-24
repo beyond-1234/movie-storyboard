@@ -72,6 +72,7 @@ class StoryboardShot:
     audio_url: str = "" 
     start_frame_prompt: str = ""
     end_frame_prompt: str = ""
+    shot_size: str = ""
     images: List[str] = field(default_factory=list) 
     created_time: str = field(default_factory=lambda: datetime.now().isoformat())
     updated_time: str = field(default_factory=lambda: datetime.now().isoformat())
@@ -98,6 +99,7 @@ class FusionTask:
     visual_description: str = "" # 画面描述
     dialogue: str = ""           # 对白
     audio_description: str = ""  # 声音描述
+    shot_size: str = ""
     created_time: str = field(default_factory=lambda: datetime.now().isoformat())
     updated_time: str = field(default_factory=lambda: datetime.now().isoformat())
     
