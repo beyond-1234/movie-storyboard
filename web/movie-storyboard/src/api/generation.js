@@ -12,6 +12,12 @@ export const getProviders = () => {
 // AI 分析 (Analysis)
 // ==========================================
 
+// 新增：分析剧本以生成剧集设定
+export const analyzeSeriesScript = (data) => {
+  // data: { content, provider_id, model_name }
+  return request.post('/generate/analyze_series', data)
+}
+
 // 风格分析 (上传图片进行分析)
 export const analyzeImage = (file) => {
   const formData = new FormData()

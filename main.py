@@ -380,6 +380,61 @@ def generate_script_continuation():
     result = ai_service.run_text_generation(msgs, config)
     return jsonify(result) if result.get('success') else (jsonify(result), 500)
 
+@app.route('/api/generate/analyze_series', methods=['POST'])
+def analyze_series():
+    """
+    智能分析剧本片段，生成剧集立项设定
+    """
+    data = request.json
+    # 获取 AI 配置
+    config = db.get_provider_config(data.get('provider_id'))
+    if data.get('model_name'): config['model_name'] = data.get('model_name')
+    
+    content = data.get('content', '')
+    if not content:
+        return jsonify({"error": "Content is empty"}), 400
+        
+    # 构建 Prompt
+    sys_prompt = """
+    你是一位资深的影视策划人与视觉总监。请阅读用户提供的剧本片段或小说内容，提取关键信息并进行艺术加工，生成一份高质量的剧集立项方案。
+    
+    请严格返回一个纯 JSON 对象（不要包含 Markdown 代码块标记），每个字段都是纯文本内容，不要有嵌套结构，包含以下字段：
+    1. name: 剧集名称（简短有力，具有商业吸引力）
+    2. description: 剧集简介（100字以内，概括主要剧情和看点）
+    3. script_core_conflict: 核心冲突（一句话概括全剧的主线矛盾）
+    4. script_emotional_keywords: 情感关键词（3-5个，如：悬疑、复仇、赛博朋克）
+    5. basic_info: 基础信息（世界观设定、时代背景、核心人物小传）
+    6. visual_color_system: 视觉色彩体系建议（如：黑金冷色调、高饱和度霓虹色）
+    7. visual_consistency_prompt: 人物/视觉一致性提示词（用于AI绘图的固定描述，包含主角外貌特征、服装风格等）
+    """
+    
+    user_prompt = f"剧本/小说内容如下：\n\n{content}"
+    
+    msgs = [{'role': 'system', 'content': sys_prompt}, {'role': 'user', 'content': user_prompt}]
+    
+    # 调用 AI 服务
+    result = ai_service.run_text_generation(msgs, config)
+    
+    if result.get('success'):
+        try:
+            # 清理 Markdown 标记 (例如 ```json ... ```)
+            raw_content = result['content'].strip()
+            cleaned = re.sub(r'^```json\s*|\s*```$', '', raw_content, flags=re.MULTILINE | re.DOTALL)
+            
+            # 解析 JSON
+            parsed_data = json.loads(cleaned)
+            return jsonify(parsed_data)
+        except Exception as e:
+            print(f"JSON Parse Error: {e}\nRaw Content: {result['content']}")
+            # 如果解析失败，尝试返回部分可用信息，避免前端报错
+            return jsonify({
+                "description": result['content'], 
+                "error": "Failed to parse JSON, returning raw text"
+            })
+            
+    return jsonify(result), 500
+
+
 @app.route('/api/generate/analyze_script', methods=['POST'])
 def analyze_script():
     data = request.json
