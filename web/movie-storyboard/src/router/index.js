@@ -16,6 +16,11 @@ const routes = [
     name: 'ProjectSpace',
     component: () => import('@/views/ProjectSpace/index.vue'),
     props: true // 允许组件通过 props 接收路由参数 id
+  },
+  {
+    path: '/v2/project/:id',
+    name: 'project-space-v2',
+    component:  () => import('@/views/ProjectSpaceV2/index.vue'),
   }
 ]
 
