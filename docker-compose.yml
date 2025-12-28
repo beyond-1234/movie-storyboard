@@ -1,26 +1,39 @@
 version: '3.8'
 
 services:
-  storyboard-ai:
-    build: .
-    container_name: storyboard-ai
+  # === 后端服务 ===
+  backend:
+    # 构建上下文是当前根目录 (.)
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: python_backend
     restart: always
     ports:
       - "5000:5000"
     volumes:
-      # 1. 映射日志目录
-      # 宿主机 ./logs -> 容器 /app/logs
+      # 挂载日志
       - ./logs:/app/logs
-
-      # 2. 映射静态资源目录 (生成的图片/视频)
-      # 宿主机 ./static -> 容器 /app/static
-      - ./static:/app/static
-
-      # 3. 映射数据目录 (剧集、项目数据)
-      # 宿主机 ./data -> 容器 /app/data
-      # 注意：你需要修改 DataManager 代码，让它把 json 文件存在 /app/data 下
+      # 挂载数据 (你的代码中会生成 data 目录)
       - ./data:/app/data
-
+      # 挂载静态资源 (图片等)
+      - ./static:/app/static
+      # 挂载导出目录 (截图里有 exports 文件夹)
+      - ./exports:/app/exports
     environment:
-      - TZ=Asia/Shanghai  # 设置时区，保证日志时间正确
-      - PYTHONUNBUFFERED=1 # 保证日志实时输出
+      - TZ=Asia/Shanghai
+
+  # === 前端服务 (Nginx) ===
+  frontend:
+    # 构建上下文指向 web/movie-storyboard 目录
+    build:
+      context: ./web/movie-storyboard
+      dockerfile: Dockerfile
+    container_name: vue_frontend
+    restart: always
+    ports:
+      - "5090:80"  # 访问端口
+    depends_on:
+      - backend
+    environment:
+      - TZ=Asia/Shanghai

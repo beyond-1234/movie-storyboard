@@ -1,11 +1,8 @@
-# .dockerignore
-__pycache__
-*.pyc
-*.pyo
-*.pyd
-.Python
-env/
-venv/
+# .dockerignore (放在项目根目录)
+web/
+node_modules/
+dist/
 .git/
-.gitignore
-Dockerfile
+.vscode/
+__pycache__/
+*.pyc

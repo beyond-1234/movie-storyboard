@@ -7,7 +7,6 @@ WORKDIR /app
 # 安装依赖 (建议先复制 requirements.txt 利用缓存)
 COPY requirements.txt .
 # 安装系统依赖 (opencv等可能需要)
-RUN apt-get update && apt-get install -y libgl1-mesa-glx && rm -rf /var/lib/apt/lists/*
 RUN pip install --no-cache-dir -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple
 
 # 复制项目代码
