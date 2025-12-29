@@ -6,34 +6,17 @@
           <el-icon class="text-gray-500"><SetUp /></el-icon>
           <span class="text-sm font-bold text-gray-700">AI 模型配置</span>
         </div>
-        
         <div class="w-px h-5 bg-gray-200"></div>
-
         <div class="flex flex-col">
           <span class="text-[10px] text-gray-400 mb-0.5">剧本分析 / 拆解</span>
-          <ModelSelector 
-            type="text" 
-            size="small"
-            class="w-56"
-            v-model:provider="store.genOptions.textProviderId" 
-            v-model:model="store.genOptions.textModelName" 
-          />
+          <ModelSelector type="text" size="small" class="w-56" v-model:provider="store.genOptions.textProviderId" v-model:model="store.genOptions.textModelName" />
         </div>
-
         <div class="w-px h-5 bg-gray-200"></div>
-
         <div class="flex flex-col">
           <span class="text-[10px] text-gray-400 mb-0.5">角色形象生成</span>
-          <ModelSelector 
-            type="image" 
-            size="small" 
-            class="w-56"
-            v-model:provider="store.genOptions.imageProviderId" 
-            v-model:model="store.genOptions.imageModelName" 
-          />
+          <ModelSelector type="image" size="small" class="w-56" v-model:provider="store.genOptions.imageProviderId" v-model:model="store.genOptions.imageModelName" />
         </div>
       </div>
-
       <div>
          <el-button type="primary" plain size="default" @click="$emit('next')">
             下一步: 细化分镜 <el-icon class="ml-1"><ArrowRight /></el-icon>
@@ -48,13 +31,7 @@
           <span class="text-gray-800 text-lg font-bold flex items-center gap-2">
             <el-icon><Document /></el-icon> 原始剧本
           </span>
-          <el-button 
-            type="primary" 
-            :loading="analyzing" 
-            @click="handleAnalyzeScript"
-            :disabled="!scriptContent.trim()"
-            size="default"
-          >
+          <el-button type="primary" :loading="analyzing" @click="handleAnalyzeScript" :disabled="!scriptContent.trim()" size="default">
             <el-icon class="mr-1"><MagicStick /></el-icon>
             {{ analyzing ? 'AI 分析中...' : '一键拆解分镜' }}
           </el-button>
@@ -77,10 +54,23 @@
         
         <div class="flex-none h-[48%] border-b border-gray-200 flex flex-col bg-gray-50">
           <div class="px-4 py-2 border-b border-gray-200 bg-white flex justify-between items-center shadow-sm z-10">
-            <div class="flex items-center gap-2 text-sm font-bold text-gray-700">
-               <span class="w-1 h-4 bg-blue-500 rounded-full"></span>
-               角色列表 ({{ store.characterList.length }})
-               <span class="text-xs text-gray-400 font-normal ml-2">AI 将自动提取角色，也可手动添加</span>
+            <div class="flex items-center gap-4">
+              <div class="flex items-center gap-2 text-sm font-bold text-gray-700">
+                 <span class="w-1 h-4 bg-blue-500 rounded-full"></span>
+                 角色列表 ({{ store.characterList.length }})
+              </div>
+              <div class="flex items-center gap-2 ml-4">
+                <el-checkbox v-model="isAllCharsSelected" :indeterminate="isCharIndeterminate" @change="handleSelectAllChars">全选</el-checkbox>
+                <el-button type="danger" link :disabled="selectedCharIds.length === 0" @click="handleBatchDeleteCharacters">
+                   删除选中 ({{ selectedCharIds.length }})
+                </el-button>
+                <div class="w-px h-3 bg-gray-300 mx-1"></div>
+                <el-popconfirm title="确定清空所有角色吗？" @confirm="handleClearAllCharacters">
+                  <template #reference>
+                    <el-button type="danger" link :disabled="store.characterList.length === 0">清空全部</el-button>
+                  </template>
+                </el-popconfirm>
+              </div>
             </div>
             <el-button size="small" :icon="Plus" @click="handleAddCharacter">手动添加</el-button>
           </div>
@@ -90,8 +80,14 @@
               <div 
                 v-for="char in store.characterList" 
                 :key="char.id" 
-                class="bg-white rounded-lg border border-gray-200 shadow-sm hover:shadow-md transition-all group overflow-hidden flex flex-col"
+                class="bg-white rounded-lg border transition-all group overflow-hidden flex flex-col relative cursor-pointer"
+                :class="selectedCharIds.includes(char.id) ? 'ring-2 ring-blue-500 border-blue-500' : 'border-gray-200 hover:shadow-md'"
+                @click="toggleCharSelection(char.id)"
               >
+                 <div class="absolute top-2 left-2 z-20" @click.stop>
+                   <el-checkbox :model-value="selectedCharIds.includes(char.id)" @change="toggleCharSelection(char.id)" />
+                 </div>
+
                  <div class="h-32 bg-gray-100 relative shrink-0">
                    <UnifiedImageCard
                       :src="char.image_url"
@@ -107,12 +103,9 @@
                       @upload="(file) => handleCharUpload(char, file)"
                       @delete="handleCharImageDelete(char)"
                    />
-                   <div class="absolute top-1 right-1 opacity-0 group-hover:opacity-100 transition-opacity z-10">
-                      <el-button type="danger" circle size="small" :icon="Close" @click="handleDeleteCharacter(char)" />
-                   </div>
                  </div>
                  
-                 <div class="p-2 flex flex-col gap-2 flex-1 min-h-0">
+                 <div class="p-2 flex flex-col gap-2 flex-1 min-h-0" @click.stop>
                    <input 
                      v-model="char.name" 
                      class="font-bold text-gray-800 border-b border-transparent focus:border-blue-500 outline-none px-1 py-0.5 bg-transparent w-full text-sm"
@@ -141,25 +134,48 @@
 
         <div class="flex-1 flex flex-col overflow-hidden bg-white">
           <div class="px-4 py-2 border-b border-gray-200 bg-white flex justify-between items-center shadow-sm z-10">
-            <div class="flex items-center gap-2 text-sm font-bold text-gray-700">
-              <span class="w-1 h-4 bg-green-500 rounded-full"></span>
-              <span>分镜列表 ({{ store.shotList.length }})</span>
-              <span class="text-xs text-gray-400 font-normal ml-2">分析结果将展示在此处</span>
+            <div class="flex items-center gap-4">
+              <div class="flex items-center gap-2 text-sm font-bold text-gray-700">
+                <span class="w-1 h-4 bg-green-500 rounded-full"></span>
+                <span>分镜列表 ({{ store.shotList.length }})</span>
+              </div>
+              <div class="flex items-center gap-2 ml-4">
+                <el-checkbox v-model="isAllShotsSelected" :indeterminate="isShotIndeterminate" @change="handleSelectAllShots">全选</el-checkbox>
+                <el-button type="danger" link :disabled="selectedShotIds.length === 0" @click="handleBatchDeleteShots">
+                   删除选中 ({{ selectedShotIds.length }})
+                </el-button>
+                <div class="w-px h-3 bg-gray-300 mx-1"></div>
+                <el-popconfirm title="确定清空所有分镜吗？" @confirm="handleClearAllShots">
+                   <template #reference>
+                     <el-button type="danger" link :disabled="store.shotList.length === 0">清空全部</el-button>
+                   </template>
+                </el-popconfirm>
+              </div>
             </div>
-            <el-button link type="primary" size="small" :icon="Refresh" @click="refreshShots">刷新</el-button>
+            
+            <div class="flex gap-2">
+               <el-button link type="primary" size="small" :icon="Refresh" @click="refreshShots">刷新</el-button>
+               <el-button size="small" :icon="Plus" @click="handleAddShot">添加分镜</el-button>
+            </div>
           </div>
 
           <div class="flex-1 overflow-y-auto p-4 space-y-3 custom-scrollbar bg-gray-50">
             <div 
               v-for="(shot, index) in store.shotList" 
               :key="shot.id" 
-              class="bg-white p-3 rounded-lg border border-gray-200 flex gap-4 shadow-sm hover:border-blue-400 transition-all group items-start"
+              class="bg-white p-3 rounded-lg border flex gap-3 shadow-sm hover:border-blue-400 transition-all group items-start relative cursor-pointer"
+              :class="selectedShotIds.includes(shot.id) ? 'border-blue-400 bg-blue-50/20' : 'border-gray-200'"
+              @click="toggleShotSelection(shot.id)"
             >
+              <div class="pt-2" @click.stop>
+                <el-checkbox :model-value="selectedShotIds.includes(shot.id)" @change="toggleShotSelection(shot.id)" />
+              </div>
+
               <div class="flex-none w-8 h-8 bg-gray-100 rounded-full flex items-center justify-center font-bold text-gray-500 text-sm mt-1">
                 {{ shot.shot_number || index + 1 }}
               </div>
 
-              <div class="flex-1 space-y-2">
+              <div class="flex-1 space-y-2" @click.stop>
                 <div class="flex items-start gap-2">
                    <span class="text-xs font-bold text-gray-400 bg-gray-100 px-1.5 rounded pt-0.5 whitespace-nowrap">场 {{ shot.scene }}</span>
                    <el-input 
@@ -219,7 +235,7 @@
                 link 
                 :icon="Close" 
                 class="self-start opacity-0 group-hover:opacity-100 transition-opacity"
-                @click="handleRemoveShot(shot)" 
+                @click.stop="handleRemoveShot(shot)" 
               />
             </div>
 
@@ -238,7 +254,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, watch } from 'vue'
+import { ref, onMounted, watch, computed } from 'vue'
 import { useProjectStore } from '@/stores/projectStore'
 import { useLoadingStore } from '@/stores/loadingStore'
 import UnifiedImageCard from '@/components/UnifiedImageCard.vue'
@@ -247,8 +263,8 @@ import ModelSelector from '@/components/ModelSelector.vue'
 // API Imports
 import { 
   getScript, saveScript, 
-  createCharacter, updateCharacter, deleteCharacter,
-  getShots, createShot, updateShot, deleteShot 
+  createCharacter, updateCharacter, deleteCharacter, batchDeleteCharacters,
+  getShots, createShot, updateShot, deleteShot, batchDeleteShots
 } from '@/api/project'
 import { 
   analyzeScript, 
@@ -259,7 +275,7 @@ import {
 import { ElMessage, ElMessageBox, ElNotification } from 'element-plus'
 import { Plus, Close, MagicStick, Timer, ArrowRight, Document, Refresh, SetUp } from '@element-plus/icons-vue'
 
-const props = defineProps(['projectId']) // 确保父组件传了 :project-id
+const props = defineProps(['projectId'])
 const emit = defineEmits(['next', 'prev'])
 
 const store = useProjectStore()
@@ -269,48 +285,51 @@ const loadingStore = useLoadingStore()
 const scriptContent = ref('')
 const analyzing = ref(false)
 const scriptSections = ref([]) 
+const selectedCharIds = ref([])
+const selectedShotIds = ref([])
 
-// --- Initialization Logic (Fixing null ID) ---
+// --- Initialization ---
 
 const initData = async (id) => {
   if (!id) return
-  
-  // 确保 store 中的 ID 已更新，防止 API 调用错乱
-  if (store.currentProjectId !== id) {
-     await store.initProject(id)
-  }
-
-  // 并行加载本页面所需数据
+  if (store.currentProjectId !== id) await store.initProject(id)
   await Promise.all([
     fetchScript(),
-    // 角色和分镜数据如果 store.initProject 已经加载过，这里就不需要重复全量加载
-    // 但为了保险起见，或者如果是从别的页面切过来，可以检查列表是否为空
     store.characterList.length === 0 ? store.fetchCharacters() : Promise.resolve(),
     store.shotList.length === 0 ? store.fetchShots() : Promise.resolve()
   ])
+  selectedCharIds.value = []
+  selectedShotIds.value = []
 }
 
-// 1. 组件挂载时检查
 onMounted(() => {
   const targetId = props.projectId || store.currentProjectId
-  if (targetId) {
-    initData(targetId)
-  }
+  if (targetId) initData(targetId)
 })
 
-// 2. 监听 Props 变化 (解决父组件异步获取 ID 的情况)
 watch(() => props.projectId, (newId) => {
-  if (newId) {
-    initData(newId)
-  }
+  if (newId) initData(newId)
 })
 
-// 3. 监听 Store 变化 (解决 Store 延迟初始化的情况)
 watch(() => store.currentProjectId, (newId) => {
-  if (newId && !scriptContent.value) { // 只有当内容为空时才尝试加载，避免覆盖
-    initData(newId)
-  }
+  if (newId && !scriptContent.value) initData(newId)
 })
+
+// --- Computed Properties for Selection ---
+
+// Character Selection Logic
+const isAllCharsSelected = computed({
+  get: () => store.characterList.length > 0 && selectedCharIds.value.length === store.characterList.length,
+  set: (val) => handleSelectAllChars(val)
+})
+const isCharIndeterminate = computed(() => selectedCharIds.value.length > 0 && selectedCharIds.value.length < store.characterList.length)
+
+// Shot Selection Logic
+const isAllShotsSelected = computed({
+  get: () => store.shotList.length > 0 && selectedShotIds.value.length === store.shotList.length,
+  set: (val) => handleSelectAllShots(val)
+})
+const isShotIndeterminate = computed(() => selectedShotIds.value.length > 0 && selectedShotIds.value.length < store.shotList.length)
 
 // --- Script Logic ---
 const fetchScript = async () => {
@@ -319,9 +338,7 @@ const fetchScript = async () => {
     const res = await getScript(store.currentProjectId)
     scriptSections.value = res || []
     scriptContent.value = scriptSections.value.map(s => s.content).join('\n\n')
-  } catch (e) {
-    console.error(e)
-  }
+  } catch (e) { console.error(e) }
 }
 
 const handleSaveScript = async () => {
@@ -329,13 +346,10 @@ const handleSaveScript = async () => {
   const newSections = scriptSections.value.length > 0 
     ? [{ ...scriptSections.value[0], content: scriptContent.value }]
     : [{ content: scriptContent.value }]
-    
   try {
     await saveScript(store.currentProjectId, newSections)
     scriptSections.value = newSections
-  } catch (e) {
-    console.error('Script save failed', e)
-  }
+  } catch (e) { console.error(e) }
 }
 
 const handleAnalyzeScript = async () => {
@@ -353,7 +367,6 @@ const handleAnalyzeScript = async () => {
       provider_id: store.genOptions.textProviderId,
       model_name: store.genOptions.textModelName
     })
-
     if (res.shots && res.shots.length > 0) {
       let count = 0
       for (const shotData of res.shots) {
@@ -368,47 +381,65 @@ const handleAnalyzeScript = async () => {
         })
         count++
       }
-      
       await store.fetchShots()
       ElNotification.success({ title: '拆解完成', message: `成功生成 ${count} 个分镜` })
     } else {
-      ElMessage.warning('AI 未能识别出有效内容，请检查剧本格式')
+      ElMessage.warning('AI 未能识别出有效内容')
     }
   } catch (e) {
     console.error(e)
-    ElMessage.error('分析失败: ' + (e.message || '未知错误'))
+    ElMessage.error('分析失败')
   } finally {
     analyzing.value = false
     loadingStore.stop()
   }
 }
 
-// --- Character Logic ---
+// --- Character Logic (CRUD + Batch) ---
+
+const handleSelectAllChars = (val) => {
+  selectedCharIds.value = val ? store.characterList.map(c => c.id) : []
+}
+
+const toggleCharSelection = (id) => {
+  const idx = selectedCharIds.value.indexOf(id)
+  if (idx > -1) selectedCharIds.value.splice(idx, 1)
+  else selectedCharIds.value.push(id)
+}
+
+const handleBatchDeleteCharacters = async () => {
+  try {
+    await ElMessageBox.confirm(`确定删除选中的 ${selectedCharIds.value.length} 个角色吗？`, '批量删除')
+    await batchDeleteCharacters(store.currentProjectId, selectedCharIds.value)
+    store.characterList = store.characterList.filter(c => !selectedCharIds.value.includes(c.id))
+    selectedCharIds.value = []
+    ElMessage.success('批量删除成功')
+  } catch (e) { if(e !== 'cancel') console.error(e) }
+}
+
+const handleClearAllCharacters = async () => {
+  try {
+    const allIds = store.characterList.map(c => c.id)
+    await batchDeleteCharacters(store.currentProjectId, allIds)
+    store.characterList = []
+    selectedCharIds.value = []
+    ElMessage.success('已清空所有角色')
+  } catch (e) { console.error(e) }
+}
+
+// (Existing Character methods...)
 const handleAddCharacter = async () => {
   try {
     const newChar = await createCharacter(store.currentProjectId, { name: '新角色', description: '' })
     store.characterList.push(newChar)
   } catch (e) { console.error(e) }
 }
-
 const handleUpdateCharacter = async (char) => {
-  try {
-    await updateCharacter(store.currentProjectId, char.id, { name: char.name, description: char.description })
-  } catch (e) { console.error(e) }
+  try { await updateCharacter(store.currentProjectId, char.id, { name: char.name, description: char.description }) } catch (e) {}
 }
-
-const handleDeleteCharacter = async (char) => {
-  try {
-    await ElMessageBox.confirm(`删除角色 ${char.name}?`)
-    await deleteCharacter(store.currentProjectId, char.id)
-    store.characterList = store.characterList.filter(c => c.id !== char.id)
-  } catch (e) {}
-}
-
 const handleGenerateCharImage = async (char) => {
-  if (!store.genOptions.imageProviderId) return ElMessage.warning('请先在顶部选择生图模型')
-  if (!char.description && !char.name) return ElMessage.warning('请填写角色描述')
-  
+  if (!store.genOptions.imageProviderId) return ElMessage.warning('请选择生图模型')
+  if (!char.description && !char.name) return ElMessage.warning('请填写描述')
   try {
     const res = await generateCharacterViews({
       character_id: char.id,
@@ -417,10 +448,9 @@ const handleGenerateCharImage = async (char) => {
       provider_id: store.genOptions.imageProviderId,
       model_name: store.genOptions.imageModelName
     })
-    if(res.success) ElMessage.success('任务已提交，请稍候')
-  } catch(e) { console.error(e) }
+    if(res.success) ElMessage.success('任务已提交')
+  } catch(e) {}
 }
-
 const handleCharUpload = async (char, file) => {
   loadingStore.start('上传中', '正在上传图片...')
   const fd = new FormData()
@@ -433,22 +463,50 @@ const handleCharUpload = async (char, file) => {
       char.image_url = res.url
       ElMessage.success('上传成功')
     }
-  } catch(e) { console.error(e) } finally { loadingStore.stop() }
+  } catch(e) {} finally { loadingStore.stop() }
 }
-
 const handleCharImageDelete = async (char) => {
   await updateCharacter(store.currentProjectId, char.id, { image_url: '' })
   char.image_url = ''
 }
 
-// --- Shot Logic ---
-const refreshShots = () => store.fetchShots()
+// --- Shot Logic (CRUD + Batch) ---
 
+const handleSelectAllShots = (val) => {
+  selectedShotIds.value = val ? store.shotList.map(s => s.id) : []
+}
+
+const toggleShotSelection = (id) => {
+  const idx = selectedShotIds.value.indexOf(id)
+  if (idx > -1) selectedShotIds.value.splice(idx, 1)
+  else selectedShotIds.value.push(id)
+}
+
+const handleBatchDeleteShots = async () => {
+  try {
+    await ElMessageBox.confirm(`确定删除选中的 ${selectedShotIds.value.length} 个分镜吗？`, '批量删除')
+    await batchDeleteShots(store.currentProjectId, selectedShotIds.value)
+    store.shotList = store.shotList.filter(s => !selectedShotIds.value.includes(s.id))
+    selectedShotIds.value = []
+    ElMessage.success('批量删除成功')
+  } catch (e) { if(e !== 'cancel') console.error(e) }
+}
+
+const handleClearAllShots = async () => {
+  try {
+    const allIds = store.shotList.map(s => s.id)
+    await batchDeleteShots(store.currentProjectId, allIds)
+    store.shotList = []
+    selectedShotIds.value = []
+    ElMessage.success('已清空所有分镜')
+  } catch (e) { console.error(e) }
+}
+
+// (Existing Shot methods...)
+const refreshShots = () => store.fetchShots()
 const handleAddShot = async () => {
   let scene = '1'
-  if (store.shotList.length > 0) {
-    scene = store.shotList[store.shotList.length - 1].scene
-  }
+  if (store.shotList.length > 0) scene = store.shotList[store.shotList.length - 1].scene
   try {
     const newShot = await createShot(store.currentProjectId, {
       movie_id: store.currentProjectId,
@@ -458,24 +516,19 @@ const handleAddShot = async () => {
       duration: 3
     })
     store.shotList.push(newShot)
-  } catch(e) { console.error(e) }
+  } catch(e) {}
 }
-
 const handleUpdateShot = async (shot) => {
-  try {
-    await updateShot(store.currentProjectId, shot.id, {
-      visual_description: shot.visual_description,
-      shot_size: shot.shot_size,
-      duration: shot.duration
-    })
-  } catch(e) { console.error(e) }
+  try { await updateShot(store.currentProjectId, shot.id, { visual_description: shot.visual_description, shot_size: shot.shot_size, duration: shot.duration }) } catch(e) {}
 }
-
 const handleRemoveShot = async (shot) => {
   try {
     await deleteShot(store.currentProjectId, shot.id)
     store.shotList = store.shotList.filter(s => s.id !== shot.id)
-  } catch(e) { console.error(e) }
+    // 移除选中状态
+    const idx = selectedShotIds.value.indexOf(shot.id)
+    if(idx > -1) selectedShotIds.value.splice(idx, 1)
+  } catch(e) {}
 }
 
 // Helpers
@@ -505,7 +558,6 @@ const getCharImg = (idOrObj) => {
 .script-input :deep(.el-textarea__inner:focus) {
   background-color: white;
 }
-
 .custom-scrollbar::-webkit-scrollbar {
   width: 6px;
 }
