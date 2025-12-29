@@ -3,29 +3,35 @@
     <div class="bg-white border-b border-gray-200 px-6 py-3 flex justify-between items-center shrink-0 shadow-sm z-20">
       <div class="flex items-center gap-6">
         <div class="flex items-center gap-2">
-          <el-icon class="text-gray-400"><SetUp /></el-icon>
-          <span class="text-sm font-bold text-gray-600">全局模型配置</span>
+          <el-icon class="text-gray-500"><SetUp /></el-icon>
+          <span class="text-sm font-bold text-gray-700">AI 模型配置</span>
         </div>
         
-        <div class="w-px h-6 bg-gray-200"></div>
+        <div class="w-px h-5 bg-gray-200"></div>
 
-        <ModelSelector 
-          type="text" 
-          label="剧本分析模型" 
-          class="w-64"
-          v-model:provider="store.genOptions.textProviderId" 
-          v-model:model="store.genOptions.textModelName" 
-        />
+        <div class="flex flex-col">
+          <span class="text-[10px] text-gray-400 mb-0.5">剧本分析 / 拆解</span>
+          <ModelSelector 
+            type="text" 
+            size="small"
+            class="w-56"
+            v-model:provider="store.genOptions.textProviderId" 
+            v-model:model="store.genOptions.textModelName" 
+          />
+        </div>
 
-        <div class="w-px h-6 bg-gray-200"></div>
+        <div class="w-px h-5 bg-gray-200"></div>
 
-        <ModelSelector 
-          type="image" 
-          label="角色生图模型" 
-          class="w-64"
-          v-model:provider="store.genOptions.imageProviderId" 
-          v-model:model="store.genOptions.imageModelName" 
-        />
+        <div class="flex flex-col">
+          <span class="text-[10px] text-gray-400 mb-0.5">角色形象生成</span>
+          <ModelSelector 
+            type="image" 
+            size="small" 
+            class="w-56"
+            v-model:provider="store.genOptions.imageProviderId" 
+            v-model:model="store.genOptions.imageModelName" 
+          />
+        </div>
       </div>
 
       <div>
@@ -58,7 +64,7 @@
           <el-input
             v-model="scriptContent"
             type="textarea"
-            rows="24"
+            :rows=24
             class="h-full w-full absolute inset-0 script-input"
             resize="none"
             placeholder="在此处粘贴你的电影剧本... (支持 Markdown 格式)"
@@ -232,7 +238,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, watch } from 'vue'
 import { useProjectStore } from '@/stores/projectStore'
 import { useLoadingStore } from '@/stores/loadingStore'
 import UnifiedImageCard from '@/components/UnifiedImageCard.vue'
@@ -253,7 +259,7 @@ import {
 import { ElMessage, ElMessageBox, ElNotification } from 'element-plus'
 import { Plus, Close, MagicStick, Timer, ArrowRight, Document, Refresh, SetUp } from '@element-plus/icons-vue'
 
-const props = defineProps(['projectId'])
+const props = defineProps(['projectId']) // 确保父组件传了 :project-id
 const emit = defineEmits(['next', 'prev'])
 
 const store = useProjectStore()
@@ -264,19 +270,51 @@ const scriptContent = ref('')
 const analyzing = ref(false)
 const scriptSections = ref([]) 
 
-// --- Initialization ---
-onMounted(async () => {
-  if (store.currentProjectId) {
-    await Promise.all([
-      fetchScript(),
-      store.fetchCharacters(),
-      store.fetchShots()
-    ])
+// --- Initialization Logic (Fixing null ID) ---
+
+const initData = async (id) => {
+  if (!id) return
+  
+  // 确保 store 中的 ID 已更新，防止 API 调用错乱
+  if (store.currentProjectId !== id) {
+     await store.initProject(id)
+  }
+
+  // 并行加载本页面所需数据
+  await Promise.all([
+    fetchScript(),
+    // 角色和分镜数据如果 store.initProject 已经加载过，这里就不需要重复全量加载
+    // 但为了保险起见，或者如果是从别的页面切过来，可以检查列表是否为空
+    store.characterList.length === 0 ? store.fetchCharacters() : Promise.resolve(),
+    store.shotList.length === 0 ? store.fetchShots() : Promise.resolve()
+  ])
+}
+
+// 1. 组件挂载时检查
+onMounted(() => {
+  const targetId = props.projectId || store.currentProjectId
+  if (targetId) {
+    initData(targetId)
+  }
+})
+
+// 2. 监听 Props 变化 (解决父组件异步获取 ID 的情况)
+watch(() => props.projectId, (newId) => {
+  if (newId) {
+    initData(newId)
+  }
+})
+
+// 3. 监听 Store 变化 (解决 Store 延迟初始化的情况)
+watch(() => store.currentProjectId, (newId) => {
+  if (newId && !scriptContent.value) { // 只有当内容为空时才尝试加载，避免覆盖
+    initData(newId)
   }
 })
 
 // --- Script Logic ---
 const fetchScript = async () => {
+  if (!store.currentProjectId) return
   try {
     const res = await getScript(store.currentProjectId)
     scriptSections.value = res || []
