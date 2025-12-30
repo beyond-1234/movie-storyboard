@@ -1036,6 +1036,66 @@ def generate_grid_prompt():
     
     return jsonify({'success': True, 'prompt': result['content']}) if result.get('success') else (jsonify({'success': False}), 500)
 
+@app.route('/api/async/generate/grid_prompt', methods=['POST'])
+def async_grid_prompt():
+    """异步生成九宫格动作提示词"""
+    data = request.json
+    pid = data.get('project_id')
+    sid = data.get('shot_id')
+
+    def save_logic(result):
+        if result.get('prompt'):
+            db.update_shot(pid, sid, {'grid_prompt': result['prompt']})
+            print(f"📝 [后台] 已更新分镜 {sid} 的九宫格提示词")
+
+    queue.submit(
+        context_runner, app, generate_grid_prompt, data, save_logic,
+        desc=f"九宫格提示词 ({sid})"
+    )
+    return jsonify({"success": True, "status": "queued"})
+
+
+@app.route('/api/async/generate/shot_video', methods=['POST'])
+def async_shot_video():
+    """异步生成分镜视频 (Step 2.3 核心功能)"""
+    data = request.json
+    pid = data.get('project_id')
+    sid = data.get('shot_id')
+
+    # 复用 fusion_video 的生成逻辑，但 save_logic 指向 update_shot
+    def save_logic(result):
+        if result.get('url'):
+            db.update_shot(pid, sid, {'video_url': result['url']})
+            print(f"🎬 [后台] 已更新分镜 {sid} 的视频文件")
+
+    # 构造 generate_fusion_video 所需的数据结构
+    # 因为 generate_fusion_video 内部会通过 db.get_fusion 获取数据，
+    # 这里我们可能需要一个新的逻辑函数或对 existing 逻辑做简单适配。
+    # 为了保持代码简洁，我们直接提交一个特定的执行任务
+    
+    def task_wrapper(params):
+        # 内部构造调用逻辑，适配 shot 对象
+        shot = db.get_shot(pid, sid)
+        if not shot: return {'success': False, 'error': 'Shot not found'}
+        
+        s_url = shot.get('grid_image') or shot.get('scene_image')
+        if not s_url: return {'success': False, 'error': 'No reference image'}
+        
+        s_path = media_mgr.get_absolute_path(s_url)
+        config = db.get_provider_config(params.get('provider_id'))
+        if params.get('model_name'): config['model_name'] = params.get('model_name')
+        
+        prompt_text = shot.get('video_prompt') or "high quality cinematic video"
+        
+        return ai_service.run_video_generation(
+            prompt_text, s_path, None, config, media_mgr, entity_id=sid
+        )
+
+    queue.submit(
+        task_wrapper, data, save_logic,
+        desc=f"分镜视频生成 ({sid})"
+    )
+    return jsonify({"success": True, "status": "queued"})
 
 @app.route('/api/generate/grid_image', methods=['POST'])
 def generate_grid_image():
@@ -1133,6 +1193,25 @@ def generate_video_prompt():
     )
     
     return jsonify({'success': True, 'prompt': result['content']}) if result.get('success') else (jsonify({'success': False}), 500)
+
+@app.route('/api/async/generate/video_prompt', methods=['POST'])
+def async_video_prompt():
+    """异步生成视频动态提示词"""
+    data = request.json
+    pid = data.get('project_id')
+    sid = data.get('shot_id')
+
+    def save_logic(result):
+        if result.get('prompt'):
+            db.update_shot(pid, sid, {'video_prompt': result['prompt']})
+            print(f"📝 [后台] 已更新分镜 {sid} 的视频提示词")
+
+    queue.submit(
+        context_runner, app, generate_video_prompt, data, save_logic,
+        desc=f"视频提示词 ({sid})"
+    )
+    return jsonify({"success": True, "status": "queued"})
+
 
 @app.route('/api/tasks', methods=['GET'])
 def get_tasks():

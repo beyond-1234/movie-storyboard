@@ -106,7 +106,7 @@ export const generateElementImage = (data) => {
 // 生成九宫格提示词
 export const generateGridPrompt = (data) => {
   // data: { scene_description, shot_description, character_names, provider_id, model_name }
-  return request.post('/generate/grid_prompt', data)
+  return request.post('/async/generate/grid_prompt', data)
 }
 
 // 生成九宫格图片 (异步)
@@ -122,7 +122,7 @@ export const generateGridImage = (data) => {
 // 生成视频提示词 (Video Prompt)
 export const generateVideoPrompt = (data) => {
   // data: { shot_id, scene_description, shot_description, provider_id, model_name }
-  return request.post('/generate/video_prompt', data)
+  return request.post('/async/generate/video_prompt', data)
 }
 
 // ==========================================
