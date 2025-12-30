@@ -17,10 +17,10 @@
       </div>
     </div>
 
-        <div class="h-14 border-b border-gray-200 flex items-center px-6 justify-between bg-white shadow-sm z-10 shrink-0">
+    <div class="h-14 border-b border-gray-200 flex items-center px-6 justify-between bg-white shadow-sm z-10 shrink-0">
       
       <div class="flex items-center gap-6">
-                <div class="flex items-center gap-2">
+        <div class="flex items-center gap-2">
           <el-icon class="text-gray-500"><SetUp /></el-icon>
           <span class="text-sm font-bold text-gray-700">AI 模型配置</span>
         </div>
@@ -63,7 +63,12 @@
                 <p class="text-gray-800 font-bold text-lg line-clamp-1" :title="shot.visual_description">{{ shot.visual_description || '暂无画面描述' }}</p>
                 <div class="flex gap-2 mt-1">
                    <span class="text-xs text-gray-400">镜号: {{ shot.shot_number }}</span>
-                   <span class="text-xs text-blue-500" v-if="shot.dialogue">“{{ shot.dialogue }}”</span>
+                </div>
+                <div class="flex gap-2 mt-1">
+                   <span class="text-xs text-blue-500" v-if="shot.dialogue">台词：“{{ shot.dialogue }}”</span>
+                </div>
+                <div class="flex gap-2 mt-1">
+                   <span class="text-xs text-blue-500" v-if="shot.audio_description">音效：“{{ shot.audio_description }}”</span>
                 </div>
              </div>
           </div>
