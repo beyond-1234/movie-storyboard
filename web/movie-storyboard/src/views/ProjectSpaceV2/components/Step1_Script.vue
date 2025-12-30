@@ -36,7 +36,6 @@
             {{ analyzing ? 'AI 分析中...' : '一键拆解分镜' }}
           </el-button>
         </div>
-        
         <div class="flex-1 relative bg-gray-50/50">
           <el-input
             v-model="scriptContent"
@@ -59,17 +58,31 @@
                  <span class="w-1 h-4 bg-blue-500 rounded-full"></span>
                  角色列表 ({{ store.characterList.length }})
               </div>
-              <div class="flex items-center gap-2 ml-4">
-                <el-checkbox v-model="isAllCharsSelected" :indeterminate="isCharIndeterminate" @change="handleSelectAllChars">全选</el-checkbox>
-                <el-button type="danger" link :disabled="selectedCharIds.length === 0" @click="handleBatchDeleteCharacters">
-                   删除选中 ({{ selectedCharIds.length }})
-                </el-button>
-                <div class="w-px h-3 bg-gray-300 mx-1"></div>
-                <el-popconfirm title="确定清空所有角色吗？" @confirm="handleClearAllCharacters">
-                  <template #reference>
-                    <el-button type="danger" link :disabled="store.characterList.length === 0">清空全部</el-button>
-                  </template>
-                </el-popconfirm>
+              
+              <div class="flex items-center gap-2 pl-4 border-l border-gray-200 h-6">
+                 <el-checkbox 
+                   v-model="isAllCharsSelected" 
+                   :indeterminate="isCharIndeterminate" 
+                   @change="handleSelectAllChars"
+                 >
+                   全选
+                 </el-checkbox>
+                 
+                 <el-popconfirm 
+                   :title="`确定删除选中的 ${selectedCharIds.length} 个角色吗？`" 
+                   @confirm="handleBatchDeleteCharacters"
+                   :disabled="selectedCharIds.length === 0"
+                 >
+                    <template #reference>
+                      <el-button type="danger" link :disabled="selectedCharIds.length === 0">删除选中</el-button>
+                    </template>
+                 </el-popconfirm>
+
+                 <el-popconfirm title="确定清空所有角色吗？此操作不可恢复。" @confirm="handleClearAllCharacters">
+                    <template #reference>
+                       <el-button type="danger" link :disabled="store.characterList.length === 0">清空全部</el-button>
+                    </template>
+                 </el-popconfirm>
               </div>
             </div>
             <el-button size="small" :icon="Plus" @click="handleAddCharacter">手动添加</el-button>
@@ -80,8 +93,8 @@
               <div 
                 v-for="char in store.characterList" 
                 :key="char.id" 
-                class="bg-white rounded-lg border transition-all group overflow-hidden flex flex-col relative cursor-pointer"
-                :class="selectedCharIds.includes(char.id) ? 'ring-2 ring-blue-500 border-blue-500' : 'border-gray-200 hover:shadow-md'"
+                class="bg-white rounded-lg border transition-all group overflow-hidden flex flex-col relative cursor-pointer hover:shadow-md"
+                :class="selectedCharIds.includes(char.id) ? 'ring-2 ring-blue-500 border-blue-500' : 'border-gray-200'"
                 @click="toggleCharSelection(char.id)"
               >
                  <div class="absolute top-2 left-2 z-20" @click.stop>
@@ -139,17 +152,31 @@
                 <span class="w-1 h-4 bg-green-500 rounded-full"></span>
                 <span>分镜列表 ({{ store.shotList.length }})</span>
               </div>
-              <div class="flex items-center gap-2 ml-4">
-                <el-checkbox v-model="isAllShotsSelected" :indeterminate="isShotIndeterminate" @change="handleSelectAllShots">全选</el-checkbox>
-                <el-button type="danger" link :disabled="selectedShotIds.length === 0" @click="handleBatchDeleteShots">
-                   删除选中 ({{ selectedShotIds.length }})
-                </el-button>
-                <div class="w-px h-3 bg-gray-300 mx-1"></div>
-                <el-popconfirm title="确定清空所有分镜吗？" @confirm="handleClearAllShots">
-                   <template #reference>
-                     <el-button type="danger" link :disabled="store.shotList.length === 0">清空全部</el-button>
-                   </template>
-                </el-popconfirm>
+
+              <div class="flex items-center gap-2 pl-4 border-l border-gray-200 h-6">
+                 <el-checkbox 
+                   v-model="isAllShotsSelected" 
+                   :indeterminate="isShotIndeterminate" 
+                   @change="handleSelectAllShots"
+                 >
+                   全选
+                 </el-checkbox>
+
+                 <el-popconfirm 
+                   :title="`确定删除选中的 ${selectedShotIds.length} 个分镜吗？`" 
+                   @confirm="handleBatchDeleteShots"
+                   :disabled="selectedShotIds.length === 0"
+                 >
+                    <template #reference>
+                       <el-button type="danger" link :disabled="selectedShotIds.length === 0">删除选中</el-button>
+                    </template>
+                 </el-popconfirm>
+
+                 <el-popconfirm title="确定清空所有分镜吗？" @confirm="handleClearAllShots">
+                    <template #reference>
+                       <el-button type="danger" link :disabled="store.shotList.length === 0">清空全部</el-button>
+                    </template>
+                 </el-popconfirm>
               </div>
             </div>
             
@@ -189,13 +216,7 @@
                 </div>
                 
                 <div class="flex flex-wrap gap-3 items-center">
-                   <el-select 
-                     v-model="shot.shot_size" 
-                     size="small" 
-                     class="w-28" 
-                     placeholder="景别" 
-                     @change="handleUpdateShot(shot)"
-                   >
+                   <el-select v-model="shot.shot_size" size="small" class="w-28" placeholder="景别" @change="handleUpdateShot(shot)">
                       <el-option value="Extremely Long Shot" label="大远景" />
                       <el-option value="Long Shot" label="远景" />
                       <el-option value="Full Shot" label="全景" />
@@ -206,17 +227,11 @@
 
                    <div class="flex items-center gap-1 bg-gray-50 border border-gray-200 rounded px-2 h-6">
                       <el-icon class="text-gray-400 text-xs"><Timer /></el-icon>
-                      <input 
-                        v-model="shot.duration" 
-                        type="number" 
-                        class="bg-transparent text-xs text-gray-700 w-8 outline-none text-center" 
-                        placeholder="s" 
-                        @change="handleUpdateShot(shot)"
-                      />
+                      <input v-model="shot.duration" type="number" class="bg-transparent text-xs text-gray-700 w-8 outline-none text-center" placeholder="s" @change="handleUpdateShot(shot)" />
                       <span class="text-xs text-gray-400">s</span>
                    </div>
 
-                   <div class="flex -space-x-1 overflow-hidden" v-if="shot.characters && shot.characters.length">
+                   <div class="flex -space-x-1 overflow-hidden ml-2" v-if="shot.characters && shot.characters.length">
                       <div 
                         v-for="cid in shot.characters" 
                         :key="cid" 
@@ -317,14 +332,12 @@ watch(() => store.currentProjectId, (newId) => {
 
 // --- Computed Properties for Selection ---
 
-// Character Selection Logic
 const isAllCharsSelected = computed({
   get: () => store.characterList.length > 0 && selectedCharIds.value.length === store.characterList.length,
   set: (val) => handleSelectAllChars(val)
 })
 const isCharIndeterminate = computed(() => selectedCharIds.value.length > 0 && selectedCharIds.value.length < store.characterList.length)
 
-// Shot Selection Logic
 const isAllShotsSelected = computed({
   get: () => store.shotList.length > 0 && selectedShotIds.value.length === store.shotList.length,
   set: (val) => handleSelectAllShots(val)
@@ -361,15 +374,29 @@ const handleAnalyzeScript = async () => {
   
   try {
     await handleSaveScript()
+    
+    // 1. 调用 AI 分析
     const res = await analyzeScript({
       content: scriptContent.value,
       project_id: store.currentProjectId,
       provider_id: store.genOptions.textProviderId,
       model_name: store.genOptions.textModelName
     })
+
+    // [BUG FIX 1] 刷新角色列表，因为 analyzeScript 可能在后台创建了新角色
+    await store.fetchCharacters()
+
     if (res.shots && res.shots.length > 0) {
       let count = 0
       for (const shotData of res.shots) {
+        
+        // [BUG FIX 2] 提取角色 ID
+        // 后端返回的 shotData.characters 是对象数组 [{id:..., name:...}]
+        // createShot 接口需要的是 ID 数组 ['id1', 'id2']
+        const charIds = shotData.characters && Array.isArray(shotData.characters) 
+            ? shotData.characters.map(c => c.id) 
+            : []
+
         await createShot(store.currentProjectId, {
           movie_id: store.currentProjectId,
           scene: shotData.scene || '1',
@@ -377,10 +404,12 @@ const handleAnalyzeScript = async () => {
           visual_description: shotData.visual_description || shotData.content,
           dialogue: shotData.dialogue || '',
           shot_size: shotData.shot_size || 'Medium Shot',
-          duration: shotData.duration || 3
+          duration: shotData.duration || 3,
+          characters: charIds // 将正确的 ID 数组传回
         })
         count++
       }
+      
       await store.fetchShots()
       ElNotification.success({ title: '拆解完成', message: `成功生成 ${count} 个分镜` })
     } else {
@@ -525,7 +554,6 @@ const handleRemoveShot = async (shot) => {
   try {
     await deleteShot(store.currentProjectId, shot.id)
     store.shotList = store.shotList.filter(s => s.id !== shot.id)
-    // 移除选中状态
     const idx = selectedShotIds.value.indexOf(shot.id)
     if(idx > -1) selectedShotIds.value.splice(idx, 1)
   } catch(e) {}
