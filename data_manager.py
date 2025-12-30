@@ -67,6 +67,7 @@ class StoryboardShot:
     notes: str = ""
     start_frame: str = ""
     end_frame: str = ""
+    video_prompt: str = "" 
     video_url: str = "" 
     dialogue: str = "" 
     audio_url: str = "" 

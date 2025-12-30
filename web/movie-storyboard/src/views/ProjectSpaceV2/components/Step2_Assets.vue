@@ -67,7 +67,15 @@
                  生成Prompt
               </el-button>
             </div>
-            <el-input type="textarea" class="w-full text-sm" :rows="8" resize="none" v-model="shot.scene_prompt" placeholder="场景提示词..." />
+            <el-input 
+              type="textarea" 
+              class="w-full text-sm" 
+              :rows="8" 
+              resize="none" 
+              v-model="shot.scene_prompt" 
+              placeholder="场景提示词..." 
+              @change="handleUpdateScenePrompt(shot)"
+            />
             <div class="flex-1 min-h-[200px]">
                <UnifiedImageCard
                  :src="shot.scene_image"
@@ -92,7 +100,15 @@
                  生成Prompt
               </el-button>
             </div>
-            <el-input type="textarea" class="w-full text-sm" :rows="8" resize="none" v-model="shot.grid_prompt" placeholder="九宫格提示词..." />
+            <el-input 
+              type="textarea" 
+              class="w-full text-sm" 
+              :rows="8" 
+              resize="none" 
+              v-model="shot.grid_prompt" 
+              placeholder="九宫格提示词..." 
+              @change="handleUpdateGridPrompt(shot)"
+            />
             <div class="flex-1 min-h-[200px]">
                <UnifiedImageCard
                  :src="shot.grid_image"
@@ -117,7 +133,15 @@
                  生成Prompt
               </el-button>
             </div>
-            <el-input type="textarea" class="w-full text-sm" :rows="8" resize="none" v-model="shot.video_prompt" placeholder="视频提示词..." />
+            <el-input 
+              type="textarea" 
+              class="w-full text-sm" 
+              :rows="8" 
+              resize="none" 
+              v-model="shot.video_prompt" 
+              placeholder="视频提示词..." 
+              @change="handleUpdateVideoPrompt(shot)"
+            />
             <div class="flex-1 min-h-[200px] bg-gray-100 rounded-lg border border-gray-200 relative overflow-hidden flex items-center justify-center">
                <video v-if="shot.video_url" :src="shot.video_url" controls class="w-full h-full object-cover"></video>
                <div v-else class="text-gray-400 text-xs flex flex-col items-center gap-2">
@@ -219,10 +243,25 @@ const handleGenScenePrompt = async (shot) => {
       provider_id: store.genOptions.textProviderId,
       model_name: store.genOptions.textModelName
     })
-    if (res.success) {
+    
+    // 兼容性处理：如果 API 同步返回了结果，则赋值并保存
+    if (res.success && res.prompt) {
+      shot.scene_prompt = res.prompt
+      await updateShot(store.currentProjectId, shot.id, { scene_prompt: res.prompt })
+      ElMessage.success('场景提示词已生成并保存')
+    } else if (res.success) {
       ElNotification.success({ title: '任务提交成功', message: '场景提示词正在后台生成中...' })
     }
   } finally { shot._loadingScenePrompt = false }
+}
+
+const handleUpdateScenePrompt = async (shot) => {
+  try {
+    await updateShot(store.currentProjectId, shot.id, { scene_prompt: shot.scene_prompt })
+    console.log(`Saved Scene Prompt for Shot ${shot.id}`)
+  } catch (e) {
+    console.error(e)
+  }
 }
 
 const handleGenSceneImage = async (shot) => {
@@ -267,7 +306,6 @@ const handleGenGridPrompt = async (shot) => {
   if (!store.genOptions.textProviderId) return ElMessage.warning('请配置文本模型')
   shot._loadingGridPrompt = true
   try {
-    // 修复点：添加 project_id 和 shot_id
     const res = await generateGridPrompt({
       shot_id: shot.id,
       project_id: store.currentProjectId,
@@ -277,10 +315,25 @@ const handleGenGridPrompt = async (shot) => {
       provider_id: store.genOptions.textProviderId,
       model_name: store.genOptions.textModelName
     })
-    if (res.success) {
+
+    // 兼容处理：同步返回则保存
+    if (res.success && res.prompt) {
+      shot.grid_prompt = res.prompt
+      await updateShot(store.currentProjectId, shot.id, { grid_prompt: res.prompt })
+      ElMessage.success('九宫格提示词已生成并保存')
+    } else if (res.success) {
       ElNotification.success({ title: '任务提交成功', message: '九宫格提示词正在后台生成中...' })
     }
   } finally { shot._loadingGridPrompt = false }
+}
+
+const handleUpdateGridPrompt = async (shot) => {
+  try {
+    await updateShot(store.currentProjectId, shot.id, { grid_prompt: shot.grid_prompt })
+    console.log(`Saved Grid Prompt for Shot ${shot.id}`)
+  } catch (e) {
+    console.error(e)
+  }
 }
 
 const handleGenGridImage = async (shot) => {
@@ -327,7 +380,6 @@ const handleGenVideoPrompt = async (shot) => {
   if (!store.genOptions.textProviderId) return ElMessage.warning('请配置文本模型')
   shot._loadingVideoPrompt = true
   try {
-    // 修复点：添加 project_id 
     const res = await generateVideoPrompt({
       shot_id: shot.id,
       project_id: store.currentProjectId,
@@ -336,10 +388,23 @@ const handleGenVideoPrompt = async (shot) => {
       provider_id: store.genOptions.textProviderId,
       model_name: store.genOptions.textModelName
     })
-    if (res.success) {
+
+    // 修复点：如果 API 同步返回了提示词，必须在这里显式保存
+    if (res.success && res.prompt) {
+      shot.video_prompt = res.prompt
+      await updateShot(store.currentProjectId, shot.id, { video_prompt: res.prompt })
+      ElMessage.success('视频提示词已生成并保存')
+    } else if (res.success) {
       ElNotification.success({ title: '任务提交成功', message: '视频动态提示词正在后台生成中...' })
     }
   } finally { shot._loadingVideoPrompt = false }
+}
+
+const handleUpdateVideoPrompt = async (shot) => {
+  try {
+    await updateShot(store.currentProjectId, shot.id, { video_prompt: shot.video_prompt })
+    console.log(`Saved Video Prompt for Shot ${shot.id}`)
+  } catch (e) { console.error(e) }
 }
 
 const handleGenVideo = async (shot) => {
