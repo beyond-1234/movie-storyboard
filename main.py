@@ -1103,6 +1103,37 @@ def async_grid_image():
     )
     return jsonify({"success": True, "status": "queued"})
 
+@app.route('/api/generate/video_prompt', methods=['POST'])
+def generate_video_prompt():
+    data = request.json
+    config = db.get_provider_config(data.get('provider_id'))
+    if data.get('model_name'): config['model_name'] = data.get('model_name')
+    
+    scene_desc = data.get('scene_description', '')
+    shot_desc = data.get('shot_description', '')
+    
+    # todo 提示词还需要修改适配9宫格
+    sys_prompt = """
+    你是一位专业的视频生成提示词专家。请根据场景和画面描述，生成一段用于 AI 视频生成的中文 Prompt。
+    
+    【要求】
+    1. 必须是中文。
+    2. 重点描述 **动态 (Motion)**：包括运镜 (Camera Movement)、角色动作 (Subject Action)、环境动态 (Environmental Motion like wind, rain, light changes)。
+    3. 格式建议: "[Subject & Action]. [Environment & Atmosphere]. [Camera Movement]. [Style]"
+    """
+    
+    user_prompt = f"""
+    场景描述：{scene_desc}
+    分镜画面：{shot_desc}
+    """
+    
+    result = ai_service.run_text_generation(
+        [{'role': 'system', 'content': sys_prompt}, {'role': 'user', 'content': user_prompt}], 
+        config
+    )
+    
+    return jsonify({'success': True, 'prompt': result['content']}) if result.get('success') else (jsonify({'success': False}), 500)
+
 @app.route('/api/tasks', methods=['GET'])
 def get_tasks():
     return jsonify(queue.get_list())
