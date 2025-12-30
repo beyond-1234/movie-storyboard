@@ -1,23 +1,53 @@
 <template>
   <div class="h-full flex flex-col bg-gray-50">
     <div class="h-14 border-b border-gray-200 flex items-center px-6 justify-between bg-white shadow-sm z-10 shrink-0">
-      <div class="text-sm text-gray-500 font-medium flex items-center gap-4">
-        <div>
-          <span class="bg-blue-50 text-blue-600 px-2 py-1 rounded text-xs mr-2 font-bold">ASSETS</span>
-          <span>共 {{ store.shotList.length }} 个分镜待处理</span>
+      
+      <div class="flex items-center gap-6">
+        <div class="text-sm text-gray-500 font-medium flex items-center">
+          <span class="bg-blue-50 text-blue-600 px-2 py-1 rounded text-xs mr-2 font-bold">分镜</span>
+          <span>共 {{ store.shotList.length }} 镜</span>
         </div>
         
-        <div class="flex items-center gap-2 text-xs bg-gray-100 px-3 py-1 rounded-full">
-           <span class="text-gray-400">当前模型:</span>
-           <span class="font-bold text-gray-700">{{ store.genOptions.imageModelName || '未选择' }}</span>
-        </div>
       </div>
       
-      <div class="space-x-3">
+      <div class="space-x-3 flex items-center">
         <el-button @click="$emit('prev')" class="text-gray-500 hover:text-gray-800 text-sm px-3 font-medium">上一步</el-button>
         <el-button type="primary" plain @click="refreshData" :icon="Refresh">刷新数据</el-button>
         <el-button @click="$emit('next')" class="bg-green-600 hover:bg-green-700 text-white text-sm px-4 py-1.5 rounded shadow-sm transition-colors">下一步 (剪辑)</el-button>
       </div>
+    </div>
+
+        <div class="h-14 border-b border-gray-200 flex items-center px-6 justify-between bg-white shadow-sm z-10 shrink-0">
+      
+      <div class="flex items-center gap-6">
+                <div class="flex items-center gap-2">
+          <el-icon class="text-gray-500"><SetUp /></el-icon>
+          <span class="text-sm font-bold text-gray-700">AI 模型配置</span>
+        </div>
+        <div class="w-px h-5 bg-gray-200"></div>
+
+        <div class="flex items-center gap-3">
+          <ModelSelector 
+            type="text" 
+            label="文本" 
+            v-model:provider="store.genOptions.textProviderId" 
+            v-model:model="store.genOptions.textModelName" 
+          />
+          <ModelSelector 
+            type="image" 
+            label="绘图" 
+            v-model:provider="store.genOptions.imageProviderId" 
+            v-model:model="store.genOptions.imageModelName" 
+          />
+          <ModelSelector 
+            type="video" 
+            label="视频" 
+            v-model:provider="store.genOptions.videoProviderId" 
+            v-model:model="store.genOptions.videoModelName" 
+          />
+        </div>
+      </div>
+      
     </div>
 
     <div class="flex-1 overflow-y-auto p-8 space-y-8 custom-scrollbar">
@@ -73,6 +103,8 @@
                  :enable-generate="true"
                  :enable-upload="true"
                  :enable-delete="!!shot.scene_image"
+                 :loading="shot._sceneUploading" 
+                 loading-text="上传中..."
                  @generate="handleGenSceneImage(shot)"
                  @upload="(file) => handleSceneUpload(shot, file)"
                  @delete="handleDeleteSceneImage(shot)"
@@ -114,6 +146,8 @@
                  :enable-generate="true"
                  :enable-upload="true"
                  :enable-delete="!!shot.grid_image"
+                 :loading="shot._gridUploading"
+                 loading-text="上传中..."
                  @generate="handleGenGridImage(shot)"
                  @upload="(file) => handleGridUpload(shot, file)"
                  @delete="handleDeleteGridImage(shot)"
@@ -192,14 +226,14 @@
 
 <script setup>
 import { ref, onMounted } from 'vue'
-// 移除 import request from '@/api'
 import { useProjectStore } from '@/stores/projectStore'
 import { useLoadingStore } from '@/stores/loadingStore'
 import UnifiedImageCard from '@/components/UnifiedImageCard.vue'
+import ModelSelector from '@/components/ModelSelector.vue' // 新增引入
 import { Refresh } from '@element-plus/icons-vue'
 import { ElMessage, ElNotification } from 'element-plus'
 
-// API Imports (新增 generateGridPrompt, generateGridImage)
+// API Imports
 import { 
   generateScenePrompt, 
   generateSceneImage, 
@@ -285,7 +319,6 @@ const handleGenSceneImage = async (shot) => {
   if (!shot.scene_prompt) return ElMessage.warning('请先生成提示词')
   
   try {
-    // 替换 request.post 为 generateSceneImage
     const res = await generateSceneImage({
       scene_id: shot.id,
       project_id: store.currentProjectId,
@@ -304,7 +337,8 @@ const handleSceneUpload = async (shot, file) => {
   const fd = new FormData()
   fd.append('file', file)
   fd.append('scene_id', shot.id)
-  loadingStore.start('上传中')
+  
+  shot._sceneUploading = true
   try {
     const res = await uploadSceneImage(fd)
     if (res.success) {
@@ -312,7 +346,9 @@ const handleSceneUpload = async (shot, file) => {
       await updateShot(store.currentProjectId, shot.id, { scene_image: res.url })
       ElMessage.success('上传成功')
     }
-  } finally { loadingStore.stop() }
+  } finally { 
+    shot._sceneUploading = false 
+  }
 }
 
 const handleDeleteSceneImage = async (shot) => {
@@ -320,13 +356,12 @@ const handleDeleteSceneImage = async (shot) => {
   await updateShot(store.currentProjectId, shot.id, { scene_image: '' })
 }
 
-// --- Step 2.2: 9-Grid Logic (New) ---
+// --- Step 2.2: 9-Grid Logic ---
 
 const handleGenGridPrompt = async (shot) => {
   if (!store.genOptions.textProviderId) return ElMessage.warning('请配置文本模型')
   
   try {
-    // 替换 request.post 为 generateGridPrompt
     const res = await generateGridPrompt({
       scene_description: shot.scene_description || shot.visual_description,
       shot_description: shot.visual_description,
@@ -348,13 +383,12 @@ const handleGenGridImage = async (shot) => {
   if (!shot.grid_prompt) return ElMessage.warning('请先生成提示词')
   
   try {
-    // 替换 request.post 为 generateGridImage
     const res = await generateGridImage({
       shot_id: shot.id,
       project_id: store.currentProjectId,
       grid_prompt: shot.grid_prompt,
-      base_image_url: shot.scene_image, // 传入底图
-      character_images: getShotCharImages(shot), // 传入角色图列表
+      base_image_url: shot.scene_image,
+      character_images: getShotCharImages(shot),
       provider_id: store.genOptions.imageProviderId,
       model_name: store.genOptions.imageModelName
     })
@@ -369,7 +403,8 @@ const handleGridUpload = async (shot, file) => {
   const fd = new FormData()
   fd.append('file', file)
   fd.append('shot_id', shot.id)
-  loadingStore.start('上传中')
+  
+  shot._gridUploading = true
   try {
     const res = await uploadGridImage(fd)
     if (res.success) {
@@ -377,13 +412,17 @@ const handleGridUpload = async (shot, file) => {
       await updateShot(store.currentProjectId, shot.id, { grid_image: res.url })
       ElMessage.success('上传成功')
     }
-  } finally { loadingStore.stop() }
+  } finally { 
+    shot._gridUploading = false 
+  }
 }
 
 const handleDeleteGridImage = async (shot) => {
   shot.grid_image = ''
   await updateShot(store.currentProjectId, shot.id, { grid_image: '' })
 }
+
+// --- Step 2.3: Video Logic ---
 
 const handleGenVideoPrompt = async (shot) => {
   if (!store.genOptions.textProviderId) return ElMessage.warning('请配置文本模型')
@@ -412,7 +451,6 @@ const handleGenVideoPrompt = async (shot) => {
 }
 
 const handleUpdateVideoPrompt = async (shot) => {
-  // 手动修改输入框内容后自动保存
   try {
     await updateShot(store.currentProjectId, shot.id, { video_prompt: shot.video_prompt })
   } catch (e) { console.error(e) }
