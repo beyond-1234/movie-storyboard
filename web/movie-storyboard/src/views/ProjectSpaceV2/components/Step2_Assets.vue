@@ -57,7 +57,7 @@
             <el-input 
               type="textarea" 
               class="w-full text-sm" 
-              :rows="3"
+              :rows="10"
               resize="none"
               v-model="shot.scene_prompt" 
               placeholder="场景提示词 (Scene Prompt)..."
@@ -98,7 +98,7 @@
             <el-input 
               type="textarea" 
               class="w-full text-sm" 
-              :rows="3"
+              :rows="10"
               resize="none"
               v-model="shot.grid_prompt" 
               placeholder="九宫格提示词 (9-Grid Prompt)..."
@@ -175,17 +175,21 @@
 
 <script setup>
 import { ref, onMounted } from 'vue'
-import request from '@/api'  // 假设有个通用 axios 封装，或直接用 fetch
+// 移除 import request from '@/api'
 import { useProjectStore } from '@/stores/projectStore'
 import { useLoadingStore } from '@/stores/loadingStore'
 import UnifiedImageCard from '@/components/UnifiedImageCard.vue'
-import { Refresh, RefreshRight, Connection } from '@element-plus/icons-vue'
+import { Refresh } from '@element-plus/icons-vue'
 import { ElMessage, ElNotification } from 'element-plus'
 
-// API Imports (保留部分原有，新增 Grid 相关)
+// API Imports (新增 generateGridPrompt, generateGridImage)
 import { 
-  generateScenePrompt, generateSceneImage, uploadSceneImage, uploadGridImage,
-  uploadBaseImage // 复用上传接口
+  generateScenePrompt, 
+  generateSceneImage, 
+  generateGridPrompt, // 新增
+  generateGridImage,  // 新增
+  uploadSceneImage, 
+  uploadGridImage
 } from '@/api/generation'
 import { updateShot } from '@/api/project'
 
@@ -217,7 +221,6 @@ const refreshData = async () => {
 
 const getShotCharNames = (shot) => {
   if (!shot.characters) return []
-  // 处理 characters 可能是 ID 数组或对象数组的情况
   return shot.characters.map(c => {
     const id = typeof c === 'object' ? c.id : c
     const charObj = store.characterList.find(x => x.id === id)
@@ -250,7 +253,6 @@ const handleGenScenePrompt = async (shot) => {
     })
     if (res.success && res.prompt) {
       shot.scene_prompt = res.prompt
-      // 触发保存
       await updateShot(store.currentProjectId, shot.id, { scene_prompt: res.prompt })
     }
   } catch (e) {
@@ -265,8 +267,8 @@ const handleGenSceneImage = async (shot) => {
   if (!shot.scene_prompt) return ElMessage.warning('请先生成提示词')
   
   try {
-    // 调用异步接口
-    const res = await request.post('/api/async/generate/scene_image', {
+    // 替换 request.post 为 generateSceneImage
+    const res = await generateSceneImage({
       scene_id: shot.id,
       project_id: store.currentProjectId,
       scene_prompt: shot.scene_prompt,
@@ -306,7 +308,8 @@ const handleGenGridPrompt = async (shot) => {
   if (!store.genOptions.textProviderId) return ElMessage.warning('请配置文本模型')
   
   try {
-    const res = await request.post('/api/generate/grid_prompt', {
+    // 替换 request.post 为 generateGridPrompt
+    const res = await generateGridPrompt({
       scene_description: shot.scene_description || shot.visual_description,
       shot_description: shot.visual_description,
       character_names: getShotCharNames(shot),
@@ -327,8 +330,8 @@ const handleGenGridImage = async (shot) => {
   if (!shot.grid_prompt) return ElMessage.warning('请先生成提示词')
   
   try {
-    // 调用异步 Grid 生成接口
-    const res = await request.post('/api/async/generate/grid_image', {
+    // 替换 request.post 为 generateGridImage
+    const res = await generateGridImage({
       shot_id: shot.id,
       project_id: store.currentProjectId,
       grid_prompt: shot.grid_prompt,
@@ -352,7 +355,7 @@ const handleGridUpload = async (shot, file) => {
   try {
     const res = await uploadGridImage(fd)
     if (res.success) {
-      shot.scene_image = res.url
+      shot.grid_image = res.url 
       await updateShot(store.currentProjectId, shot.id, { grid_image: res.url })
       ElMessage.success('上传成功')
     }
@@ -363,7 +366,6 @@ const handleDeleteGridImage = async (shot) => {
   shot.grid_image = ''
   await updateShot(store.currentProjectId, shot.id, { grid_image: '' })
 }
-
 </script>
 
 <style scoped>

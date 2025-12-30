@@ -100,6 +100,22 @@ export const generateElementImage = (data) => {
 }
 
 // ==========================================
+// 九宫格生成 (Grid Gen) [新增]
+// ==========================================
+
+// 生成九宫格提示词
+export const generateGridPrompt = (data) => {
+  // data: { scene_description, shot_description, character_names, provider_id, model_name }
+  return request.post('/generate/grid_prompt', data)
+}
+
+// 生成九宫格图片 (异步)
+export const generateGridImage = (data) => {
+  // data: { shot_id, project_id, grid_prompt, base_image_url, character_images, provider_id, model_name }
+  return request.post('/async/generate/grid_image', data)
+}
+
+// ==========================================
 // 文件上传 (Uploads)
 // ==========================================
 

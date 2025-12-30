@@ -216,14 +216,14 @@
                 </div>
                 
                 <div class="flex flex-wrap gap-3 items-center">
-                   <!-- <el-select v-model="shot.shot_size" size="small" class="w-28" placeholder="景别" @change="handleUpdateShot(shot)">
+                   <el-select v-model="shot.shot_size" size="small" class="w-28" placeholder="景别" @change="handleUpdateShot(shot)">
                       <el-option value="Extremely Long Shot" label="大远景" />
                       <el-option value="Long Shot" label="远景" />
                       <el-option value="Full Shot" label="全景" />
                       <el-option value="Medium Shot" label="中景" />
                       <el-option value="Close Up" label="特写" />
                       <el-option value="Extreme Close Up" label="大特写" />
-                   </el-select> -->
+                   </el-select>
 
                    <div class="flex items-center gap-1 bg-gray-50 border border-gray-200 rounded px-2 h-6">
                       <el-icon class="text-gray-400 text-xs"><Timer /></el-icon>
