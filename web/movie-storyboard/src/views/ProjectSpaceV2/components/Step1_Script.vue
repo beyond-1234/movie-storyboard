@@ -40,7 +40,7 @@
           <el-input
             v-model="scriptContent"
             type="textarea"
-            :rows=24
+            :rows=18
             class="h-full w-full absolute inset-0 script-input"
             resize="none"
             placeholder="在此处粘贴你的电影剧本... (支持 Markdown 格式)"
@@ -216,14 +216,14 @@
                 </div>
                 
                 <div class="flex flex-wrap gap-3 items-center">
-                   <el-select v-model="shot.shot_size" size="small" class="w-28" placeholder="景别" @change="handleUpdateShot(shot)">
+                   <!-- <el-select v-model="shot.shot_size" size="small" class="w-28" placeholder="景别" @change="handleUpdateShot(shot)">
                       <el-option value="Extremely Long Shot" label="大远景" />
                       <el-option value="Long Shot" label="远景" />
                       <el-option value="Full Shot" label="全景" />
                       <el-option value="Medium Shot" label="中景" />
                       <el-option value="Close Up" label="特写" />
                       <el-option value="Extreme Close Up" label="大特写" />
-                   </el-select>
+                   </el-select> -->
 
                    <div class="flex items-center gap-1 bg-gray-50 border border-gray-200 rounded px-2 h-6">
                       <el-icon class="text-gray-400 text-xs"><Timer /></el-icon>
@@ -231,17 +231,22 @@
                       <span class="text-xs text-gray-400">s</span>
                    </div>
 
-                   <div class="flex -space-x-1 overflow-hidden ml-2" v-if="shot.characters && shot.characters.length">
-                      <div 
-                        v-for="cid in shot.characters" 
-                        :key="cid" 
-                        class="w-6 h-6 rounded-full border border-white bg-gray-200 flex items-center justify-center text-[8px] overflow-hidden"
-                        :title="getCharName(cid)"
-                      >
-                         <img v-if="getCharImg(cid)" :src="getCharImg(cid)" class="w-full h-full object-cover" />
-                         <span v-else>{{ getCharName(cid).charAt(0) }}</span>
-                      </div>
-                   </div>
+                   <el-select 
+                     v-model="shot.characters"
+                     multiple
+                     collapse-tags-tooltip
+                     placeholder="选择角色"
+                     size="small"
+                     class="w-64"
+                     @change="handleUpdateShot(shot)"
+                   >
+                     <el-option 
+                       v-for="char in store.characterList" 
+                       :key="char.id" 
+                       :label="char.name" 
+                       :value="char.id" 
+                     />
+                   </el-select>
                 </div>
               </div>
 
@@ -391,8 +396,6 @@ const handleAnalyzeScript = async () => {
       for (const shotData of res.shots) {
         
         // [BUG FIX 2] 提取角色 ID
-        // 后端返回的 shotData.characters 是对象数组 [{id:..., name:...}]
-        // createShot 接口需要的是 ID 数组 ['id1', 'id2']
         const charIds = shotData.characters && Array.isArray(shotData.characters) 
             ? shotData.characters.map(c => c.id) 
             : []
@@ -405,7 +408,7 @@ const handleAnalyzeScript = async () => {
           dialogue: shotData.dialogue || '',
           shot_size: shotData.shot_size || 'Medium Shot',
           duration: shotData.duration || 3,
-          characters: charIds // 将正确的 ID 数组传回
+          characters: charIds 
         })
         count++
       }
@@ -456,7 +459,6 @@ const handleClearAllCharacters = async () => {
   } catch (e) { console.error(e) }
 }
 
-// (Existing Character methods...)
 const handleAddCharacter = async () => {
   try {
     const newChar = await createCharacter(store.currentProjectId, { name: '新角色', description: '' })
@@ -531,7 +533,6 @@ const handleClearAllShots = async () => {
   } catch (e) { console.error(e) }
 }
 
-// (Existing Shot methods...)
 const refreshShots = () => store.fetchShots()
 const handleAddShot = async () => {
   let scene = '1'
@@ -548,7 +549,12 @@ const handleAddShot = async () => {
   } catch(e) {}
 }
 const handleUpdateShot = async (shot) => {
-  try { await updateShot(store.currentProjectId, shot.id, { visual_description: shot.visual_description, shot_size: shot.shot_size, duration: shot.duration }) } catch(e) {}
+  try { await updateShot(store.currentProjectId, shot.id, { 
+    visual_description: shot.visual_description, 
+    shot_size: shot.shot_size, 
+    duration: shot.duration,
+    characters: shot.characters // 这里确保将角色列表提交到后端
+  }) } catch(e) {}
 }
 const handleRemoveShot = async (shot) => {
   try {
