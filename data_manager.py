@@ -74,6 +74,9 @@ class StoryboardShot:
     end_frame_prompt: str = ""
     shot_size: str = ""
     images: List[str] = field(default_factory=list) 
+    # --- 9宫格相关字段 ---
+    grid_prompt: str = ""
+    grid_image: str = ""
     created_time: str = field(default_factory=lambda: datetime.now().isoformat())
     updated_time: str = field(default_factory=lambda: datetime.now().isoformat())
     

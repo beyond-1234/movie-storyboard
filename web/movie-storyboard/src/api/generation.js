@@ -129,3 +129,10 @@ export const uploadElementImage = (formData) => {
     headers: { 'Content-Type': 'multipart/form-data' }
   })
 }
+
+export const uploadGridImage = (formData) => {
+  // formData 需要包含 element_id 和 file
+  return request.post('/upload/grid_image', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' }
+  })
+}

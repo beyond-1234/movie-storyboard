@@ -622,6 +622,14 @@ def upload_scene_image():
     if err: return jsonify({'success': False, 'error': err}), 400
     return jsonify({'success': True, 'url': url})
 
+@app.route('/api/upload/grid_image', methods=['POST'])
+def upload_grid_image():
+    if 'file' not in request.files: return jsonify({'success': False, 'error': 'No file'}), 400
+    sid = request.form.get('shot_id') or 'scene'
+    url, err = media_mgr.save_uploaded_file(request.files['file'], media_type='image', entity_id=sid)
+    if err: return jsonify({'success': False, 'error': err}), 400
+    return jsonify({'success': True, 'url': url})
+
 @app.route('/api/generate/scene_prompt', methods=['POST'])
 def generate_scene_prompt():
     data = request.json
@@ -979,6 +987,119 @@ def async_fusion_prompt():
     queue.submit(
         context_runner, app, generate_fusion_prompt, data, save_logic,
         desc=f"融图提示词 ({fid})"
+    )
+    return jsonify({"success": True, "status": "queued"})
+
+# ----------------------------------------------------
+# 9宫格 (Grid) 相关 Controller
+# ----------------------------------------------------
+
+@app.route('/api/generate/grid_prompt', methods=['POST'])
+def generate_grid_prompt():
+    """
+    生成用于 9宫格 角色动作分镜的 Prompt
+    """
+    data = request.json
+    config = db.get_provider_config(data.get('provider_id'))
+    if data.get('model_name'): config['model_name'] = data.get('model_name')
+    
+    # 构造 Prompt
+    # 核心是将 scene_description, visual_description, characters 结合
+    # 要求生成一个 3x3 grid 的描述
+    
+    scene_desc = data.get('scene_description', '')
+    shot_desc = data.get('shot_description', '')
+    char_names = data.get('character_names', []) # list of names
+    
+    sys_prompt = """
+    你是一位资深分镜师。请根据输入生成一段用于 AI 绘画的英文 Prompt。
+    
+    【目标】生成一张 **3x3 分镜九宫格 (9-panel storyboard grid)**，展示角色在特定场景中的连续动作或不同景别。
+    
+    【格式要求】
+    English Prompt Only. 
+    Structure: "A 3x3 storyboard grid layout. [Scene & Lighting]. [Character] in sequential action: [Action Description]. Keyframes showing [Details]."
+    
+    请确保 Prompt 强调 "9 panels", "consistent character", "sequential storytelling".
+    """
+    
+    user_prompt = f"""
+    场景：{scene_desc}
+    动作：{shot_desc}
+    角色：{', '.join(char_names)}
+    """
+    
+    result = ai_service.run_text_generation(
+        [{'role': 'system', 'content': sys_prompt}, {'role': 'user', 'content': user_prompt}], 
+        config
+    )
+    
+    return jsonify({'success': True, 'prompt': result['content']}) if result.get('success') else (jsonify({'success': False}), 500)
+
+
+@app.route('/api/generate/grid_image', methods=['POST'])
+def generate_grid_image():
+    """
+    生成 9宫格 图片
+    使用 run_fusion_generation (Image-to-Image) 或 run_simple_image_generation (Text-to-Image)
+    这里假设使用 Image-to-Image，将 Scene Image 作为 Base，或者 Text-to-Image 仅用 Prompt
+    根据用户需求 "将底图和人物列表作为融图的素材"，最好是 Image-to-Image (ControlNet or Ref)
+    但为了简化，我们复用 run_fusion_generation 的逻辑，将 Scene Image 设为 Base Image
+    """
+    data = request.json
+    config = db.get_provider_config(data.get('provider_id'))
+    if data.get('model_name'): config['model_name'] = data.get('model_name')
+    
+    shot_id = data.get('shot_id')
+    # 这里的 grid_prompt 应该是上面生成的 "A 3x3 storyboard grid..."
+    prompt = data.get('grid_prompt') 
+    
+    # 获取底图路径
+    base_image_url = data.get('base_image_url')
+    base_image_path = media_mgr.get_absolute_path(base_image_url) if base_image_url else None
+    
+    # 获取角色图路径列表
+    # character_images: list of urls
+    element_paths = []
+    for url in data.get('character_images', []):
+        if url:
+            element_paths.append(media_mgr.get_absolute_path(url))
+            
+    # 调用 AI Service
+    # 如果有 base_image, 倾向于使用 fusion 生成 (img2img / controlnet)
+    # 否则使用 simple generation (txt2img)
+    if base_image_path:
+        result = ai_service.run_fusion_generation(
+            base_image_path=base_image_path,
+            fusion_prompt=prompt,
+            config=config,
+            media_manager=media_mgr,
+            element_image_paths=element_paths,
+            entity_id=shot_id
+        )
+    else:
+        # Fallback to text-to-image if no scene image
+        result = ai_service.run_simple_image_generation(
+            prompt, config, media_mgr, entity_id=shot_id
+        )
+        
+    return jsonify({'success': True, 'url': result['url']}) if result.get('success') else (jsonify({'success': False, 'error': result.get('error_msg')}), 500)
+
+
+@app.route('/api/async/generate/grid_image', methods=['POST'])
+def async_grid_image():
+    data = request.json
+    pid = data.get('project_id')
+    sid = data.get('shot_id')
+    
+    def save_logic(result):
+        if result.get('url'):
+            db.update_shot(pid, sid, {'grid_image': result['url']})
+            print(f"💾 [后台] 已更新分镜 {sid} 的 9宫格图")
+
+    queue.submit(
+        context_runner, app, generate_grid_image, data, save_logic,
+        desc=f"九宫格生成 ({sid})"
     )
     return jsonify({"success": True, "status": "queued"})
 
