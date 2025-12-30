@@ -135,12 +135,25 @@
               <span class="text-xs font-bold text-green-600 uppercase tracking-wide flex items-center gap-1">
                 <span class="w-2 h-2 rounded-full bg-green-500"></span> Step 2.3: 动态视频
               </span>
+              <el-button 
+                link type="primary" size="small" 
+                @click="handleGenVideoPrompt(shot)"
+                :loading="shot._loadingVideoPrompt"
+              >
+                 {{ shot.video_prompt ? '重成Prompt' : '生成Prompt' }}
+              </el-button>
             </div>
             
-             <div class="h-[74px] bg-gray-50 border border-gray-200 rounded p-2 text-xs text-gray-500 flex items-center justify-center">
-                <span>视频生成将基于九宫格或底图</span>
-             </div>
-
+            <el-input 
+              type="textarea" 
+              class="w-full text-sm" 
+              :rows="10"
+              resize="none"
+              v-model="shot.video_prompt" 
+              placeholder="视频提示词 (Video Prompt)..."
+              @change="handleUpdateVideoPrompt(shot)"
+            />
+            
             <div class="flex-1 min-h-[220px] bg-gray-100 rounded-lg border border-gray-200 relative overflow-hidden flex items-center justify-center">
                <video 
                  v-if="shot.video_url" 
@@ -156,12 +169,16 @@
                <div class="absolute inset-0 bg-black/5 opacity-0 group-hover:opacity-100 transition-opacity flex items-end justify-end p-2 pointer-events-none">
                   <el-button 
                     class="bg-green-600 text-white text-xs px-3 py-1.5 rounded shadow-lg pointer-events-auto hover:bg-green-700 border-none"
-                    :disabled="!shot.grid_image && !shot.scene_image"
-                    @click="ElMessage.info('视频生成逻辑待对接 (建议使用 Grid 或 Scene)')"
+                    :disabled="!shot.video_prompt && !shot.grid_image && !shot.scene_image"
+                    @click="ElMessage.info('视频生成功能对接中...')"
                   >
                     {{ shot.video_url ? '重新生成' : '生成视频' }}
                   </el-button>
                </div>
+            </div>
+             <div class="text-[10px] text-gray-400 px-1">
+               <span v-if="shot.video_prompt">✅ Prompt已就绪</span>
+               <span v-else>⚠️ 需生成提示词</span>
             </div>
           </div>
 
@@ -186,8 +203,9 @@ import { ElMessage, ElNotification } from 'element-plus'
 import { 
   generateScenePrompt, 
   generateSceneImage, 
-  generateGridPrompt, // 新增
-  generateGridImage,  // 新增
+  generateGridPrompt,
+  generateGridImage,
+  generateVideoPrompt,
   uploadSceneImage, 
   uploadGridImage
 } from '@/api/generation'
@@ -365,6 +383,39 @@ const handleGridUpload = async (shot, file) => {
 const handleDeleteGridImage = async (shot) => {
   shot.grid_image = ''
   await updateShot(store.currentProjectId, shot.id, { grid_image: '' })
+}
+
+const handleGenVideoPrompt = async (shot) => {
+  if (!store.genOptions.textProviderId) return ElMessage.warning('请配置文本模型')
+  
+  shot._loadingVideoPrompt = true
+  try {
+    const res = await generateVideoPrompt({
+      shot_id: shot.id,
+      project_id: store.currentProjectId,
+      scene_description: shot.scene_description || shot.visual_description,
+      shot_description: shot.visual_description,
+      provider_id: store.genOptions.textProviderId,
+      model_name: store.genOptions.textModelName
+    })
+    
+    if (res.success && res.prompt) {
+      shot.video_prompt = res.prompt
+      await updateShot(store.currentProjectId, shot.id, { video_prompt: res.prompt })
+      ElMessage.success('视频提示词已生成')
+    }
+  } catch(e) { 
+    console.error(e) 
+  } finally {
+    shot._loadingVideoPrompt = false
+  }
+}
+
+const handleUpdateVideoPrompt = async (shot) => {
+  // 手动修改输入框内容后自动保存
+  try {
+    await updateShot(store.currentProjectId, shot.id, { video_prompt: shot.video_prompt })
+  } catch (e) { console.error(e) }
 }
 </script>
 

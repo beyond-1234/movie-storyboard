@@ -116,6 +116,16 @@ export const generateGridImage = (data) => {
 }
 
 // ==========================================
+// 视频生成 (Video Gen) [新增/补充]
+// ==========================================
+
+// 生成视频提示词 (Video Prompt)
+export const generateVideoPrompt = (data) => {
+  // data: { shot_id, scene_description, shot_description, provider_id, model_name }
+  return request.post('/generate/video_prompt', data)
+}
+
+// ==========================================
 // 文件上传 (Uploads)
 // ==========================================
 
