@@ -1017,10 +1017,10 @@ def generate_grid_prompt():
     【目标】生成一张 **3x3 分镜九宫格 (9-panel storyboard grid)**，展示角色在特定场景中的连续动作或不同景别。
     
     【格式要求】
-    English Prompt Only. 
-    Structure: "A 3x3 storyboard grid layout. [Scene & Lighting]. [Character] in sequential action: [Action Description]. Keyframes showing [Details]."
+    必须用中文回答. 
+    结果: "一种 3×3 的分镜网格布局。【场景与灯光】。【角色】的连续性动作：【动作描述】。呈现【细节】的关键帧画面"
     
-    请确保 Prompt 强调 "9 panels", "consistent character", "sequential storytelling".
+    请确保 Prompt 强调 "9 格画面", "形象连贯的角色", "顺序叙事逻辑".
     """
     
     user_prompt = f"""

@@ -60,15 +60,15 @@
                <span class="text-xl font-bold text-gray-700">{{ shot.scene }}</span>
              </div>
              <div>
-                <p class="text-gray-800 font-bold text-lg line-clamp-1" :title="shot.visual_description">{{ shot.visual_description || '暂无画面描述' }}</p>
+                <p class="text-gray-800 font-bold whitespace-pre-wrap break-words" :title="shot.visual_description">{{ shot.visual_description || '暂无画面描述' }}</p>
                 <div class="flex gap-2 mt-1">
                    <span class="text-xs text-gray-400">镜号: {{ shot.shot_number }}</span>
                 </div>
                 <div class="flex gap-2 mt-1">
-                   <span class="text-xs text-blue-500" v-if="shot.dialogue">台词：“{{ shot.dialogue }}”</span>
+                   <span class="text-xs text-blue-500 whitespace-pre-wrap break-words" v-if="shot.dialogue">台词：“{{ shot.dialogue }}”</span>
                 </div>
                 <div class="flex gap-2 mt-1">
-                   <span class="text-xs text-blue-500" v-if="shot.audio_description">音效：“{{ shot.audio_description }}”</span>
+                   <span class="text-xs text-blue-500 whitespace-pre-wrap break-words" v-if="shot.audio_description">音效：“{{ shot.audio_description }}”</span>
                 </div>
              </div>
           </div>
